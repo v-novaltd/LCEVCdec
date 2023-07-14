@@ -1,0 +1,26 @@
+# Minimised Doxygen config for LCEVC_DEC Sphinx documentation
+# Generated for Doxygen version 1.9.6
+
+PROJECT_NAME           = "LCEVC_DEC"
+OUTPUT_DIRECTORY       = "@DOXYGEN_OUTPUT_DIR@"
+INPUT                  = "@DOXYGEN_INPUT@"
+
+# Turn off ugly HTML and enable XML as required for Sphinx
+GENERATE_XML           = YES
+GENERATE_HTML          = NO
+
+# Forces correct documentation - might want to turn off for debugging
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+
+# Required for LCEVC_API definition
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = LCEVC_API=
+
+# Some safe defaults in case of running against more than just the API header
+EXTRACT_ALL            = YES
+FILE_PATTERNS          = *.h \
+                         *.cpp \
+                         *.c
+RECURSIVE              = YES
+EXCLUDE                = test/*

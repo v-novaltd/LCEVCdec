@@ -1,0 +1,27 @@
+# Gitlab pipeline to comment design doc links to an MR
+
+stages:
+  - comment
+
+comment:
+  stage: comment
+  image:
+    name: registry.gitlab.com/gitlab-org/cli:latest
+    entrypoint: ["/bin/bash", "-c"]
+  variables:
+    CI_DEBUG_TRACE: "true"
+    GITLAB_TOKEN: $CI_API_TOKEN
+    DOCS_PATH: docs/design
+  script:
+    - |-
+        echo "Running comment pipeline"
+        git fetch
+        glab auth login --token $CI_API_TOKEN
+        if [[ "$(git diff origin/$CI_DEFAULT_BRANCH origin/$CI_COMMIT_BRANCH | grep $DOCS_PATH)" != "" && "$(glab mr list | grep $CI_COMMIT_BRANCH)" != "" ]]; then
+            echo "Detected changes to the docs, commenting on MR"
+            export MSG=$'Please review updated documentation:\n'$(git diff origin/$CI_DEFAULT_BRANCH origin/$CI_COMMIT_BRANCH | grep "+++.*${DOCS_PATH}" | sed -e "s/+++.*${DOCS_PATH//\//\\\/}/- ${CI_PROJECT_URL//\//\\\/}\/-\/blob\/${CI_COMMIT_BRANCH//\//\\\/}\/${DOCS_PATH//\//\\\/}/")
+            glab mr note -m "${MSG}" $(glab mr list | grep $CI_COMMIT_BRANCH | sed -e "s/\t.*//")
+            echo "Commented on MR successfully"
+        else
+            echo "No changes to docs or no MR, exiting."
+        fi

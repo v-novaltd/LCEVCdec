@@ -1,0 +1,46 @@
+# LCEVC Decoder SDK
+
+Version: @GIT_VERSION@
+Hash: @GIT_HASH@
+
+System: @CMAKE_SYSTEM@
+Processor: @CMAKE_SYSTEM_PROCESSOR@
+
+Options:
+  BUILD_SHARED_LIBS: @BUILD_SHARED_LIBS@
+  VN_SDK_EXECUTABLES: @VN_SDK_EXECUTABLES@
+  VN_SDK_SAMPLE_SOURCE: @VN_SDK_SAMPLE_SOURCE@
+  VN_SDK_UTILITY: @VN_SDK_UTILITY@
+  VN_CORE_SIMD: @VN_CORE_SIMD@
+  VN_CORE_DECODER_PROFILER: @VN_CORE_DECODER_PROFILER@
+  VN_CORE_DEBUG_SYNTAX: @VN_CORE_DEBUG_SYNTAX@
+  VN_CORE_FORCE_OVERLAY: @VN_CORE_FORCE_OVERLAY@
+  VN_INTEGRATION_OPENGL: @VN_INTEGRATION_OPENGL@
+  VN_INTEGRATION_WEBM: @VN_INTEGRATION_WEBM@
+
+Words
+
+## Building sample code
+
+More words
+
+### Windows using CMake Visual Studio 2019
+
+    mkdir sample_build
+    cd sample_build
+    cmake -G "Visual Studio 2019" ..\sample
+    cmake --build .
+
+### Windows using CMake and Ninja
+
+    mkdir sample_build
+    cd sample_build
+    cmake -G Ninja ..\sample
+    cmake --build .
+
+### Linux using Ninja
+
+    mkdir sample_build
+    cd sample_build
+    cmake -G Ninja ../sample
+    cmake --build .

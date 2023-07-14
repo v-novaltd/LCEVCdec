@@ -1,0 +1,12 @@
+[requires]
+fmt/8.0.1
+cli11/2.3.2
+libav/12.3
+
+[generators]
+cmake_find_package_multi
+
+[imports]
+bin, *.dll -> ./bin
+lib, *.so* -> ./lib
+lib, *.dylib* -> ./lib

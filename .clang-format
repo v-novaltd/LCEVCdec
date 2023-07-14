@@ -1,0 +1,115 @@
+Standard: c++17
+
+ColumnLimit: 100
+PenaltyExcessCharacter: 2
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+UseCRLF: false
+
+# Comments
+ReflowComments: true
+
+# Braces
+BreakBeforeBraces: Custom
+BreakBeforeBinaryOperators: false
+BraceWrapping:
+    AfterCaseLabel: false
+    AfterClass: true
+    AfterControlStatement: false
+    AfterEnum: true
+    AfterExternBlock: true
+    AfterFunction: true
+    AfterNamespace: false
+    AfterStruct: true
+    AfterUnion: true
+    BeforeCatch: false
+    BeforeElse: false
+    BeforeLambdaBody: false
+    BeforeWhile: false
+    IndentBraces: false
+    SplitEmptyFunction: false
+    SplitEmptyRecord: false
+
+# InsertBraces: true
+LambdaBodyIndentation: Signature
+
+AllowAllParametersOfDeclarationOnNextLine: false
+BinPackParameters: true
+
+AllowAllArgumentsOnNextLine: false
+BinPackArguments: true
+
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Empty
+
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Switches
+AllowShortCaseLabelsOnASingleLine: true
+
+# Horizontal Whitespace
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceAroundPointerQualifiers: After
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCaseColon: false
+SpaceBeforeCpp11BracedList: false
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceBeforeSquareBrackets: false
+SpaceInEmptyBlock: false
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 1
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
+SpacesInConditionalStatement: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# Vertical Whitespace
+AlwaysBreakTemplateDeclarations: true
+MaxEmptyLinesToKeep: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
+
+# Switches
+IndentCaseLabels: true
+IndentCaseBlocks: false
+
+# Namespaces
+NamespaceIndentation: Inner
+CompactNamespaces: true
+FixNamespaceComments: true
+
+# Classes
+AccessModifierOffset: -4
+BreakConstructorInitializers: BeforeComma
+BreakInheritanceList: BeforeComma
+EmptyLineAfterAccessModifier: Never
+EmptyLineBeforeAccessModifier: Always
+IndentAccessModifiers: false
+
+# Macros
+AlignEscapedNewlines: Left
+
+# Externs
+IndentExternBlock: NoIndent
+
+# Includes
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex:           '<[[:alnum:|_]]+>'
+    Priority:        3
+  - Regex:           '<.*\.(h|hpp)>'
+    Priority:        2
+  - Regex:           '".*"'
+    Priority:        1
+    SortPriority:    0

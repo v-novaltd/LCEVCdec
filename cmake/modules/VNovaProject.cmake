@@ -1,0 +1,99 @@
+# Copyright 2022 - V-Nova Ltd.
+#
+# Target speciffic configuration - included automatically after project()
+#
+
+# Default install dir is <build>/install
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "install" CACHE PATH "Install directory" FORCE)
+endif()
+
+## Architecture
+#
+# Make a consistent description of target architecture
+#
+if(NOT DEFINED TARGET_ARCH)
+	if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+		set(TARGET_ARCH "wasm")
+	elseif(
+		CMAKE_SYSTEM_PROCESSOR STREQUAL "i686" OR
+		CMAKE_SYSTEM_PROCESSOR STREQUAL "i386" OR
+		CMAKE_SYSTEM_PROCESSOR STREQUAL "x86" OR
+		CMAKE_SYSTEM_PROCESSOR STREQUAL "X86")
+		set(TARGET_ARCH "x86")
+	elseif(
+		CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR
+		CMAKE_SYSTEM_PROCESSOR STREQUAL "AMD64")
+		set(TARGET_ARCH "x86_64")
+	elseif(
+		CMAKE_SYSTEM_PROCESSOR MATCHES "^armv7")
+		set(TARGET_ARCH "armv7")
+	elseif(
+		CMAKE_SYSTEM_PROCESSOR MATCHES "^armv8" OR
+		CMAKE_SYSTEM_PROCESSOR MATCHES "^aarch64" OR
+		CMAKE_SYSTEM_PROCESSOR MATCHES "^arm64")
+		set(TARGET_ARCH "armv8")
+	else()
+		message(FATAL_ERROR "Unknown target processor: [${CMAKE_SYSTEM_PROCESSOR}]")
+	endif()
+endif()
+
+## Platform
+#
+add_library(lcevc_dec::platform INTERFACE IMPORTED)
+
+if(NOT DEFINED TARGET_PLATFORM)
+	if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+		set(TARGET_PLATFORM "Emscripten")
+	elseif(WIN32)
+		set(TARGET_PLATFORM "Windows")
+	elseif(ANDROID)
+		set(TARGET_PLATFORM "Android")
+	elseif(IOS)
+		set(TARGET_PLATFORM "iOS")
+	elseif(TVOS)
+		set(TARGET_PLATFORM "tvOS")
+	elseif(APPLE)
+		set(TARGET_PLATFORM "macOS")
+	elseif(UNIX)
+		set(TARGET_PLATFORM "Linux")
+	else()
+		message(FATAL_ERROR "Unknown target platform")
+	endif()
+endif()
+
+## Compiler
+#
+add_library(lcevc_dec::compiler INTERFACE IMPORTED)
+
+target_include_directories(lcevc_dec::compiler  INTERFACE ${CMAKE_BINARY_DIR}/generated )
+target_include_directories(lcevc_dec::compiler  INTERFACE "${CMAKE_SOURCE_DIR}/include" )
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+if(NOT DEFINED TARGET_COMPILER)
+	if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+		set(TARGET_COMPILER "MSVC")
+	elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+		set(TARGET_COMPILER "GNU")
+	elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+		set(TARGET_COMPILER "Intel")
+	elseif (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+		set(TARGET_COMPILER "ClangApple")
+	elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+	  if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+		set(TARGET_COMPILER "ClangMSVC")
+	  elseif (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+		set(TARGET_COMPILER "ClangGNU")
+	  endif()
+	else()
+		message(FATAL_ERROR "Unknown target compiler: ${CMAKE_CXX_COMPILER_ID}  (${CMAKE_CXX_COMPILER_FRONTEND_VARIANT})")
+	endif()
+endif()
+
+message(STATUS "Target: Platform=${TARGET_PLATFORM} Arch=${TARGET_ARCH} Compiler=${TARGET_COMPILER}")
+
+#
+include("Arch/${TARGET_ARCH}")
+include("Platform/${TARGET_PLATFORM}")
+include("Compiler/${TARGET_COMPILER}")

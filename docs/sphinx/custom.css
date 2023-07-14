@@ -1,0 +1,9 @@
+/* Used to make the LCEVC header background the correct LCEVC color */
+
+.wy-side-nav-search, .wy-nav-top {
+    background: #d8442c;
+}
+
+.wy-side-nav-search input[type=text]{
+    border-color: #d8442c;
+}

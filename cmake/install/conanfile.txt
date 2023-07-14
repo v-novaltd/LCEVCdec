@@ -1,0 +1,14 @@
+[requires]
+rapidjson/fc7cda7
+tclap/1.2.1
+glad/0.1.33
+libav/12.3
+glfw/3.3.2
+
+[generators]
+cmake_find_package
+
+[imports]
+bin, *.dll -> ./bin
+lib, *.so* -> ./lib
+lib, *.dylib* -> ./lib
