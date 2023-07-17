@@ -13,15 +13,14 @@ option(VN_STRIP_RELEASE_BUILDS "Compile Release builds without debug symbols." O
 option(VN_SDK_EXECUTABLES "SDK: Include samples and test harness executables in SDK installations" ON)
 option(VN_SDK_SAMPLE_SOURCE "SDK: Include sample sources n SDK installations" ON)
 option(VN_SDK_UNIT_TESTS "SDK: Enable unit test executables" ON)
-option(VN_SDK_TESTS "SDK: Enable funcitonal tests" ON)
+option(VN_SDK_TESTS "SDK: Enable funcitonal tests" OFF)
 option(VN_SDK_UTILITY "SDK: Include 'utility' libraries in SDK installations" ON)
-option(VN_SDK_INTEGRATION_LAYER "SDK: Include 'integration' layer library in SDK installations" ON)
 option(VN_SDK_API_LAYER "SDK: Include API layer library in SDK installations" ON)
 option(VN_SDK_DOCS "Build Doxygen and Sphinx documentation" OFF)
 option(VN_SDK_USE_GHC_FILESYSTEM "Use ghc-filesystem instead of C++ standard <filesystem>" OFF)
 option(VN_SDK_USE_SPAN_LITE "Use span-lite instead of C++ standard <span>" ON)
 
-set(VN_SDK_FFMPEG_LIBS_PACKAGE "libav" CACHE STRING "SDK: Package to find for the 'libav...'' libraries used by samples and tests to decode base streams, or empty string for none")
+set(VN_SDK_FFMPEG_LIBS_PACKAGE "ffmpeg" CACHE STRING "SDK: Package to find for the 'libav...'' libraries used by samples and tests to decode base streams, or empty string for none")
 if(VN_SDK_FFMPEG_LIBS_PACKAGE)
 	set(VN_SDK_BASE_DECODER ON)
 else()
@@ -29,7 +28,7 @@ else()
 endif()
 
 # Core
-option(VN_CORE_TEST "Core: Build tests" ON)
+option(VN_CORE_TEST "Core: Build tests" OFF)
 option(VN_CORE_THREADING "Core: Enable multithreading" ON)
 option(VN_CORE_SIMD "Core: Enable SIMD for current architecture" ON)
 option(VN_CORE_SSE "Core: Enable SSE for current architecture" ON)
@@ -42,12 +41,6 @@ option(VN_CORE_TRACE_MEMORY "Core: Enable memory tracing" OFF)
 
 # This is a kludge to enable general builds whilst the benchmark package is broken.
 option(VN_CORE_BENCHMARK "Core: Build benchmark tool" OFF)
-
-# Integration
-option(VN_INTEGRATION_OPENGL "Integration: Enable OpenGL support" ON)
-option(VN_INTEGRATION_WEBM "Integration: Enable Webm" ON)
-option(VN_INTEGRATION_WORKAROUND_NO_GL_X11_LIBS "Integration: Workaround for missing GL and X11 libraries" OFF)
-
 
 # Local modules - searched last
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
@@ -96,19 +89,6 @@ endif()
 if(VN_CORE_TEST)
 	lcevc_add_subdirectory(src/core/test/harness)
 	lcevc_add_subdirectory(src/core/test/decoder_unit)
-endif()
-
-# Integration layer
-if(VN_SDK_INTEGRATION_LAYER)
-	lcevc_add_subdirectory(src/integration/decoder)
-	if(VN_SDK_BASE_DECODER)
-		lcevc_add_subdirectory(src/integration/sample)
-	endif()
-	lcevc_add_subdirectory(src/integration/test/harness)
-	lcevc_add_subdirectory(src/integration/utility)
-	if("${TARGET_PLATFORM}" STREQUAL "Linux" OR "${TARGET_PLATFORM}" STREQUAL "Android")
-		lcevc_add_subdirectory(src/integration/external_decode)
-	endif()
 endif()
 
 if(VN_SDK_TESTS)

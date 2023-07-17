@@ -3,7 +3,7 @@ fmt/8.0.1
 cli11/2.3.2
 rapidjson/1.1.0
 span-lite/0.10.3
-ffmpeg/5.1
+ffmpeg/6.0
 
 [generators]
 cmake_find_package_multi
