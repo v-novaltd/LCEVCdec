@@ -38,19 +38,13 @@ These will be needed when running `create_all_linux_conan_profiles.py`.
 
 ## Installing and Configuring Conan
 
-Conan is software that uses python to manage C/C++ packages. You will need to have Conan installed to get V-Nova's package recipes and prebuilt packages, which will then be fed into CMake to come up with build configurations. Most steps involving Conan will require access to the VPN, or an in-office ethernet connection.
+Conan is software that uses python to manage C/C++ packages.
 
-You should anticipate a mountain of failures in the 'create all profiles' step, because it will be unable to create most profiles. All you need is for *your* profiles to be created (that is, `gcc-11-Release` and/or `gcc-11-Debug`, if you're on gcc 11).
-
-Conan is installed and configured from the `lcevc_dec` repo, like so:
+Conan is installed and configured from the `LCEVCdec` repo, like so:
 
 ```shell
 pip install -r requirements.txt
 export PATH=$PATH:~/.local/bin # or add this to the bottom of your ~/.bashrc
-conan config install "https://gitlab.com/v-nova-public/conan-profiles.git" --type=git
-
-sudo apt install libx11-xcb-dev libxcb* xorg-dev
-python3 [CONAN_HOME]/linux/create_all_linux_conan_profiles.py
 ```
 
 The `pip install` step will also get other required python modules, as a happy little bonus.
@@ -72,7 +66,7 @@ Add the following line at the end of ~/.bashrc to use cmake 3.18 by default
 export PATH=/opt/cmake/bin:${PATH}
 ```
 
-## Ninja
+## Ninja (Optional)
 
 `sudo apt install ninja-build`
 
