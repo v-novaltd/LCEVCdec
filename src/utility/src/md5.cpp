@@ -27,7 +27,7 @@ static const uint32_t s[kRounds] = {
 // Use binary integer part of the sines of integers (Radians) as constants:
 //
 //   for i from 0 to 63 do
-//      K[i] := floor(232 × abs(sin(i + 1)))
+//      K[i] := floor(232 * abs(sin(i + 1)))
 //   end for
 //
 // Precomputed table:
@@ -73,7 +73,7 @@ static inline uint32_t leftrotate(uint32_t val, uint32_t dist)
 // Process one 512 bit chunk
 void MD5::chunk(const uint8_t *data)
 {
-    // break chunk into sixteen 32-bit words M[j], 0 ≤ j ≤ 15
+    // break chunk into sixteen 32-bit words M[j], 0 <= j <= 15
     uint32_t M[16] = {0};
     for(uint32_t i = 0; i < 16; ++i) {
         // Little endian
@@ -168,7 +168,7 @@ void MD5::finish()
 {
     assert(!m_finished);
 
-    // Append 0x80, and pad with 0x00 bytes so that the message length in bytes ≡ 56 (mod 64).
+    // Append 0x80, and pad with 0x00 bytes so that the message length in bytes == 56 (mod 64).
     assert(m_chunkSize < kChunkSize);
     m_chunk[m_chunkSize++] = 0x80;
 
@@ -202,26 +202,25 @@ void MD5::digest(uint8_t output[16])
     }
 
     // char digest[16] := a0 append b0 append c0 append d0 - Output is in little-endian
-    output[0] = m_a0 & 0xff;;
-    output[1] = (m_a0 >> 8) & 0xff;;
-    output[2] = (m_a0 >> 16) & 0xff;;
-    output[3] = (m_a0 >> 24) & 0xff;;
+    output[0] = m_a0 & 0xff;
+    output[1] = (m_a0 >> 8) & 0xff;
+    output[2] = (m_a0 >> 16) & 0xff;
+    output[3] = (m_a0 >> 24) & 0xff;
 
-    output[4] = m_b0 & 0xff;;
-    output[5] = (m_b0 >> 8) & 0xff;;
-    output[6] = (m_b0 >> 16) & 0xff;;
-    output[7] = (m_b0 >> 24) & 0xff;;
+    output[4] = m_b0 & 0xff;
+    output[5] = (m_b0 >> 8) & 0xff;
+    output[6] = (m_b0 >> 16) & 0xff;
+    output[7] = (m_b0 >> 24) & 0xff;
 
-    output[8] = m_c0 & 0xff;;
-    output[9] = (m_c0 >> 8) & 0xff;;
-    output[10] = (m_c0 >> 16) & 0xff;;
-    output[11] = (m_c0 >> 24) & 0xff;;
+    output[8] = m_c0 & 0xff;
+    output[9] = (m_c0 >> 8) & 0xff;
+    output[10] = (m_c0 >> 16) & 0xff;
+    output[11] = (m_c0 >> 24) & 0xff;
 
-    output[12] = m_d0 & 0xff;;
-    output[13] = (m_d0 >> 8) & 0xff;;
-    output[14] = (m_d0 >> 16) & 0xff;;
-    output[15] = (m_d0 >> 24) & 0xff;;
-
+    output[12] = m_d0 & 0xff;
+    output[13] = (m_d0 >> 8) & 0xff;
+    output[14] = (m_d0 >> 16) & 0xff;
+    output[15] = (m_d0 >> 24) & 0xff;
 }
 
 std::string MD5::hexDigest()
