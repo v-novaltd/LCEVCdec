@@ -8,6 +8,8 @@ For these instructions, this 'out of source' build directory is specified as `_b
 
 Most of these steps only need to be done once. The exceptions are: when you *edit* files, you will obviously need to *build* again (`cmake . --build`, or click 'build' in an IDE); and, when you *add* files, you will typically need to update `Sources.cmake` and then *cmake and build* again.
 
+The commands blocks below are, unless otherwise specified, intended to be run in a command prompt that has it's current directory as the root of the checked out `LCEVCdec` repository.
+
 ---
 
 ## Requirements
@@ -16,7 +18,13 @@ See [Getting Started - Windows](getting_started_windows.md).
 
 ## Conan
 
-These intstructions assume that the Conan installation has it's default configuration, with the remote 'conancenter' enabled.
+To ensure the required version of `conan` is installed:
+
+```shell
+pip install -r requirements.txt
+```
+
+These instructions assume that the Conan installation has it's default configuration, with the remote 'conancenter' enabled.
 If there is an existing configuration, that can be isolated by setting the CONAN_USER_HOME environment variable.
 
 From the command prompt used for building, with `LCEVCdec` as the current directory:
@@ -31,15 +39,19 @@ conan remote list   # will create a new configuration and cache
 
 ## Native Build
 
-Whatever you use to build, you'll need to start with the following, in the root `LCEVCdec` repo:
+Whatever you use to build, you'll need to start with the following to install dependencies, in the root `LCEVCdec` repo:
 
 ```shell
 
 mkdir _build
 cd _build
-conan install -r conancenter -u --build=missing -s compiler.runtime=MT -s compiler.version=16 -s build_type=Release .. # And
-conan install -r conancenter -u --build=missing -s compiler.runtime=MTd -s compiler.version=16 -s build_type=Debug .. # If debugging
+conan install -r conancenter -u --build=missing -s compiler.runtime=MT -s compiler.version=16 -s build_type=Release ..
+conan install -r conancenter -u --build=missing -s compiler.runtime=MTd -s compiler.version=16 -s build_type=Debug ..
 ```
+The first time the above `conan install ...` commands are run, a minimal version of the `ffmpeg` libraries will be built. This
+will be cached locally for future installs.
+
+The *Debug* install is only needed if you intend to debug the code.
 
 Instructions are provided for your choice of Visual Studio, Visual Studio Code, and Ninja (a command-line-only build tool).
 

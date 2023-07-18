@@ -8,6 +8,8 @@ For these instructions, this 'out of source' build directory is specified as `_b
 
 Most of these steps only need to be done once. The exceptions are: when you *edit* files, you will obviously need to *build* again (`cmake . --build`, or click 'build' in an IDE); and, when you *add* files, you will typically need to update `Sources.cmake` and then *cmake and build* again.
 
+The commands blocks below are, unless otherwise specified, intended to be run in a shell prompt that has it's current directory as the root of the checked out `LCEVCdec` repository.
+
 ---
 
 ## Requirements
@@ -16,7 +18,13 @@ See [Getting Started - Linux](getting_started_linux.md).
 
 ## Conan
 
-These intstructions assume that the Conan installation has it's default configuration, with the remote 'conancenter'.
+To ensure the required version of `conan` is installed:
+
+```shell
+pip install -r requirements.txt
+```
+
+These instructions assume that the Conan installation has it's default configuration, with the remote 'conancenter'.
 If there is an existing configuration, that can be isolated by setting the CONAN_USER_HOME environment variable.
 
 From a shell prompt in `LCEVCdec`:
@@ -27,10 +35,13 @@ export CONAN_USER_HOME=$PWD/_conan_home
 conan remote list   # will create a new configuration and cache
 ```
 
-THe supplied `conanfile.py` will build and cache a mininal version of the `ffmpeg` package suitable for decoding
+THe supplied `conanfile.py` will build and cache a minimal version of the `ffmpeg` package suitable for decoding
 base video in samples and tests.
 
 ## Native build using Unix Makefiles
+
+Dependencies are installed using `conan install ...`. The first time this is run for a build type, a minimal version of the `ffmpeg` libraries will be compiled. This
+will be cached locally for future installs.
 
 From a shell prompt in `LCEVCdec`:
 
