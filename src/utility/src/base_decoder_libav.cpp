@@ -14,11 +14,14 @@ extern "C"
 #pragma warning(disable: 4244)
 #endif
 #include <libavcodec/avcodec.h>
+
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
+#include <libavutil/error.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/log.h>
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
@@ -38,6 +41,8 @@ namespace lcevc_dec::utility {
 static LCEVC_PictureDesc lcevcPictureDesc(AVCodecContext* ctx, AVFilterLink* filterLink);
 static LCEVC_CodecType lcevcCodecType(enum AVCodecID avCodecID);
 static const char* libavFormatFilter(LCEVC_ColorFormat fmt);
+
+static std::string libavError(int r);
 
 // Base Decoder that uses libav
 //
@@ -82,7 +87,10 @@ private:
 
     void copyImage(AVFrame* frame);
 
+
     // libav objects
+    int m_stream = 0;
+
     AVFormatContext* m_fmtCtx = nullptr;     // Container context
     AVCodecContext* m_videoDecCtx = nullptr; // Video stream context
 
@@ -135,6 +143,7 @@ int BaseDecoderLibAV::openStream(AVMediaType type)
     if (stream < 0) {
         return stream;
     }
+    m_stream = stream;
 
     // find codec for the stream
     AVCodecParameters* const codecParameters = m_fmtCtx->streams[stream]->codecpar;
@@ -290,7 +299,7 @@ void BaseDecoderLibAV::copyImage(AVFrame* frame)
             m_image.data(), static_cast<int>(m_image.size()), static_cast<const uint8_t* const *>(frame->data),
             frame->linesize, static_cast<AVPixelFormat>(frame->format), frame->width, frame->height, 1);
         r < 0) {
-        fmt::print(stderr, "av_image_copy_to_buffer error: {}\n", r);
+        fmt::print(stderr, "av_image_copy_to_buffer error: {}\n", libavError(r));
         return;
     }
 
@@ -318,32 +327,37 @@ bool BaseDecoderLibAV::update()
                 if (r == AVERROR_EOF) {
                     m_state = State::Flushing;
                 } else {
-                    fmt::print(stderr, "av_read_frame error: %d\n", r);
+                    fmt::print(stderr, "av_read_frame error: {}\n", libavError(r));
                     break;
                 }
             } else {
-                // Got AU - extract enhancement data
-                m_enhancement.resize(m_packet->size); // Assume worst case for enhancement
-                uint32_t enhancementSize = 0;
-                LCEVC_extractEnhancementFromNAL(
-                    m_packet->data, m_packet->size, LCEVC_NALFormat_AnnexeB,
-                    lcevcCodecType(m_videoDecCtx->codec_id), m_enhancement.data(),
-                    static_cast<uint32_t>(m_enhancement.size()), &enhancementSize);
+                if(m_packet->stream_index == m_stream) {
+                    // Got AU - extract enhancement data
+                    m_enhancement.resize(m_packet->size); // Assume worst case for enhancement
+                    uint32_t enhancementSize = 0;
+                    LCEVC_extractEnhancementFromNAL(
+                        m_packet->data, m_packet->size, LCEVC_NALFormat_AnnexeB,
+                        lcevcCodecType(m_videoDecCtx->codec_id), m_enhancement.data(),
+                        static_cast<uint32_t>(m_enhancement.size()), &enhancementSize);
 
-                if (enhancementSize > 0) {
-                    // Got some LCEVC data
-                    m_enhancementData.ptr = m_enhancement.data();
-                    m_enhancementData.size = enhancementSize;
+                    if (enhancementSize > 0) {
+                        // Got some LCEVC data
+                        m_enhancementData.ptr = m_enhancement.data();
+                        m_enhancementData.size = enhancementSize;
 
-                    if (m_packet->pts == static_cast<int64_t>(AV_NOPTS_VALUE)) {
-                        m_enhancementData.timestamp = m_packet->pos;
-                    } else {
-                        m_enhancementData.timestamp = m_packet->pts;
+                        if (m_packet->pts == static_cast<int64_t>(AV_NOPTS_VALUE)) {
+                            m_enhancementData.timestamp = m_packet->pos;
+                        } else {
+                            m_enhancementData.timestamp = m_packet->pts;
+                        }
+                        return true;
                     }
-                    return true;
+                } else {
+                    av_packet_unref(m_packet);
                 }
             }
         }
+
 
         // Put compressed packet to codec
         if (m_packet->size != 0 || m_state == State::Flushing) {
@@ -352,7 +366,7 @@ bool BaseDecoderLibAV::update()
 #endif
             if (int r = avcodec_send_packet(m_videoDecCtx, m_packet); r < 0) {
                 if (r != AVERROR(EAGAIN)) {
-                    fmt::print(stderr, "avcodec_send_packet error: %d\n", r);
+                    fmt::print(stderr, "avcodec_send_packet error: {}\n", libavError(r));
                     break;
                 }
             } else {
@@ -372,7 +386,7 @@ bool BaseDecoderLibAV::update()
                     break;
                 }
                 if (r != AVERROR(EAGAIN)) {
-                    fmt::print(stderr, "avcodec_receive_frame error: %d\n", r);
+                    fmt::print(stderr, "avcodec_receive_frame error:  {}\n", libavError(r));
                     break;
                 }
             } else {
@@ -410,6 +424,8 @@ bool BaseDecoderLibAV::update()
                 return true;
             }
         }
+
+
     }
 
     return false;
@@ -555,7 +571,7 @@ static void log_callback(void* avcl, int level, const char* fmt, va_list args)
 {
     char tmp[1024];
 
-    if (level <= AV_LOG_FATAL) {
+    if (level <= AV_LOG_ERROR) {
         vsnprintf(tmp, sizeof(tmp) - 1, fmt, args);
         puts(tmp);
     }
@@ -620,6 +636,16 @@ std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view source, LCE
     decoder->m_image.resize(imageBufferSize);
 
     return decoder;
+}
+
+std::string libavError(int r)
+{
+    char tmp[256];
+    if(av_strerror(r, tmp, sizeof(tmp)-1) == 0) {
+        return tmp;
+    }
+
+    return fmt::format("?{:#08x}", r);
 }
 
 } // namespace lcevc_dec::utility::base
