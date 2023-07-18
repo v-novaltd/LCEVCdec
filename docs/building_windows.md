@@ -19,7 +19,7 @@ See [Getting Started - Windows](getting_started_windows.md).
 These intstructions assume that the Conan installation has it's default configuration, with the remote 'conancenter' enabled.
 If there is an existing configuration, that can be isolated by setting the CONAN_USER_HOME environment variable.
 
-From the CMD prompt used for building, with `LCEVCdec` as the current directory:
+From the command prompt used for building, with `LCEVCdec` as the current directory:
 
 ```shell
 mkdir _conan_home
@@ -53,9 +53,18 @@ cmake -G "Visual Studio 16 2019" ..
 
 This will generate a solution file, `LCEVCdec.sln`, which you can open in the Visual Studio IDE. You can develop AND build there. Alternately, you can remain on the command line and build like so:
 
+Release build (leaving artefacts in `install` directory):
+
 ```shell
-cmake --build . --config Debug # OR
 cmake --build . --config Release
+cmake --install . --config Release
+```
+
+Debug build (leaving artefacts in `install` directory):
+
+```shell
+cmake --build . --config Debug
+cmake --install . --config Debug
 ```
 
 ### Ninja

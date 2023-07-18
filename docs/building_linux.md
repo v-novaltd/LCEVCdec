@@ -34,7 +34,7 @@ base video in samples and tests.
 
 From a shell prompt in `LCEVCdec`:
 
-Release build:
+Release build (leaving artefacts in `install` directory):
 
 ```shell
 mkdir _build
@@ -45,7 +45,7 @@ cmake --build .
 cmake --install .
 ```
 
-Debug build:
+Debug build (leaving artefacts in `install` directory):
 
 ```shell
 mkdir _build
