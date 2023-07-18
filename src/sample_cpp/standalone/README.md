@@ -2,11 +2,11 @@ Copyright (c) V-Nova International Limited 2023. All rights reserved.
 
 # LCEVC SDK Samplw
 
-This sample shows a basic usage of the LCEVC_DEC SDK Component.
+This sample shows a basic usage of the LCEVCdec SDK Component.
 
 ## Dependancies
 
-The software requires AVCodec SDK to build. Select the download suitable for your
+The software requires an AVCodec SDK to build. Select the download suitable for your
 platform from here https://ffmpeg.org/download.html
 
 ## Required Binaries
@@ -14,16 +14,17 @@ platform from here https://ffmpeg.org/download.html
 Please ensure you have the following binaries available for the sample to
 compile and execute correctly:
 
-   - lcevc_dil.dll / liblcevc_dil.so
+   - lcevc_dec_core.dll / lcevc_dec_core.so
+   - lcevc_dec_api.dll / lcevc_dec_api.so
 
 ## Compilation
 
 A CMake build script is provided for convenience. This sample depends on the 
-LCEVC DIL SDK Component.
+LCEVCdec SDK Component.
 
 This assumes the user has an appropriate toolchain installed.
 
-1. Copy the include and lib folders from the LCEVC DIL SDK Component into the root
+1. Copy the include and lib folders from the LCEVCdec SDK Component into the root
    folder of this sample containing the CMakeLists.txt
 
 2. Make a sub-directory `mkdir cmake && cd cmake` to execute CMake from.
@@ -47,4 +48,4 @@ The file extension, e.g. yuv, determines the color format of the output frames
 yuv - I420 10/8bit output, the bit depth is dependent on the input stream
 rgb - RGB 8bit output
 
->    `lcevc_dil_sample <path to lcevc stream> dump.yuv`
+>    `lcevc_dec_api_sample_cpp <path to lcevc stream> dump.yuv`
