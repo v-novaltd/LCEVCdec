@@ -6,34 +6,36 @@
 
 #include <LCEVC/lcevc_dec.h>
 
+using namespace lcevc_dec::api_utility;
+
 namespace lcevc_dec::decoder {
 
 PictureLock::PictureLock(Picture& src, Access access)
     : m_owner(src)
 {
-    // Get buffer descs.
-    for (uint32_t bufIdx = 0; bufIdx < src.getBufferCount(); bufIdx++) {
-        // Save some effort by reusing the external-facing buffer-getter
-        LCEVC_PictureBufferDesc desc;
-        src.getBufferDesc(bufIdx, desc);
-        fromLCEVCPictureBufferDesc(desc, m_bufferDescs[bufIdx]);
-        if (access == Access::Write && m_bufferDescs[bufIdx].data != nullptr) {
-            memset(m_bufferDescs[bufIdx].data, 0, m_bufferDescs[bufIdx].byteSize);
+    // Get buffer desc.
+    LCEVC_PictureBufferDesc bufferDesc;
+    if (src.getBufferDesc(bufferDesc)) {
+        PictureBufferDesc temp;
+        fromLCEVCPictureBufferDesc(bufferDesc, temp);
+        m_bufferDesc = std::make_unique<PictureBufferDesc>(temp);
+        if (access == Access::Write && m_bufferDesc->data != nullptr) {
+            memset(m_bufferDesc->data, 0, m_bufferDesc->byteSize);
         }
     }
 
     // Get plane descs.
-    for (uint32_t planeIdx = 0; planeIdx < src.getNumPlanes(); planeIdx++) {
-        m_planeDescs[planeIdx].firstSample = src.getPlaneFirstSample(planeIdx);
-        m_planeDescs[planeIdx].rowByteStride = src.getPlaneByteStride(planeIdx);
-        m_planeDescs[planeIdx].sampleByteStride = src.getPlaneBytesPerPixel(planeIdx);
-        m_planeDescs[planeIdx].sampleByteSize = src.getBytedepth();
-        m_planeDescs[planeIdx].rowByteSize = src.getPlaneWidthBytes(planeIdx);
-        m_planeDescs[planeIdx].width = src.getPlaneWidth(planeIdx);
-        m_planeDescs[planeIdx].height = src.getPlaneHeight(planeIdx);
+    std::array<PicturePlaneDesc, PictureFormatDesc::kMaxNumPlanes> planeDescArr = {};
+    if (src.getPlaneDescArr(planeDescArr.data())) {
+        m_planeDescs = std::make_unique<std::array<PicturePlaneDesc, 4>>(planeDescArr);
 
-        if (access == Access::Write) {
-            memset(m_planeDescs[planeIdx].firstSample, 0, src.getPlaneMemorySize(planeIdx));
+        // If we didn't get a buffer, but we need to clear this plane, then we have to do that here
+        if (m_bufferDesc == nullptr && access == Access::Write) {
+            for (uint32_t planeIdx = 0; planeIdx < src.getNumPlanes(); planeIdx++) {
+                if ((*m_planeDescs)[planeIdx].firstSample != nullptr) {
+                    memset((*m_planeDescs)[planeIdx].firstSample, 0, src.getPlaneMemorySize(planeIdx));
+                }
+            }
         }
     }
 }

@@ -24,7 +24,7 @@ public:
     {
         Super::SetUp();
 
-        ditherInitialize(context.get()->memory, &dither, 0, true);
+        ditherInitialize(context.get()->memory, &dither, 0, true, -1);
     }
 
     void TearDown() final

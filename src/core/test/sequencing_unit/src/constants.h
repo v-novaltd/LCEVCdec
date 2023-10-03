@@ -194,7 +194,7 @@ static uint8_t kRandData3[kRandLengths[2]] = {
     103, 15,  207, 153, 139, 117, 99, 201, 119, 123, 57,  206, 15,  254, 8,   151, 82, 152};
 static uint8_t* const kRandData[3] = {kRandData1, kRandData2, kRandData3};
 
-static const uint32_t kContainerDefaultCapacity = 100;
+static const size_t kContainerDefaultCapacity = 100;
 static const size_t kMaxBufSize = 256;
 
 // utility function to save some effort getting input times

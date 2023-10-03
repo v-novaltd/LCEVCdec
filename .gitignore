@@ -6,8 +6,11 @@ compile_commands.json
 /.clangd/
 /.cache/
 __pycache__
-.pytest_cache
+test_cache
+test_outputs
+dec_test_results.json
 env
+.idea
 
 *.sublime-project
 *.sublime-workspace

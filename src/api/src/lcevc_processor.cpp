@@ -10,10 +10,11 @@
 
 namespace lcevc_dec::decoder {
 
-using namespace lcevc_dec::utility;
+using namespace lcevc_dec::api_utility;
 
-LcevcProcessor::LcevcProcessor(perseus_decoder& decoder)
+LcevcProcessor::LcevcProcessor(perseus_decoder& decoder, BufferManager& bufferManager)
     : m_coreDecoderRef(decoder)
+    , m_skipTemporalAccumulator(bufferManager)
 {}
 
 bool LcevcProcessor::initialise(uint32_t unprocessedLcevcCap, int32_t residualSurfaceFPSetting)
@@ -61,7 +62,7 @@ std::shared_ptr<perseus_decoder_stream> LcevcProcessor::extractProcessedLcevcDat
 
 uint32_t LcevcProcessor::getUnprocessedCapacity() const
 {
-    return lcevcContainerCapacity(m_unprocessedLcevcContainer);
+    return static_cast<uint32_t>(lcevcContainerCapacity(m_unprocessedLcevcContainer));
 }
 
 bool LcevcProcessor::isUnprocessedQueueFull() const
@@ -125,7 +126,7 @@ std::shared_ptr<perseus_decoder_stream>
 LcevcProcessor::processUpToTimehandleLoop(uint64_t timehandle, uint32_t& numProcessedOut,
                                           uint64_t& lastExtractedTH)
 {
-    uint32_t currentQueueSize = UINT32_MAX;
+    size_t currentQueueSize = std::numeric_limits<size_t>::max();
     StampedBuffer_t* lcevcDataToProcess = nullptr;
     lastExtractedTH = kInvalidTimehandle;
     numProcessedOut = 0;

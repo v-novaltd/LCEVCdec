@@ -15,8 +15,8 @@ namespace lcevc_dec::decoder {
 
 // - Event ----------------------------------------------------------------------------------------
 
-static const Event kFlushEvent(-2);
-static const Event kInvalidEvent(-1);
+static constexpr Event kInvalidEvent(LCEVC_EventCount + 1);
+static constexpr Event kFlushEvent(LCEVC_EventCount + 2);
 bool Event::isValid() const { return (eventType > 0) && (eventType < LCEVC_EventCount); }
 bool Event::isFlush() const { return eventType == kFlushEvent.eventType; }
 
@@ -25,12 +25,16 @@ bool Event::isFlush() const { return eventType == kFlushEvent.eventType; }
 EventManager::EventManager(LCEVC_DecoderHandle& apiHandle)
     : m_apiHandle(apiHandle)
 {
-    static_assert(8 * sizeof(m_eventMask) >= LCEVC_EventCount, "Increase the size of m_eventMask");
+    static_assert(8 * sizeof(m_eventMask) >=
+                      std::max(static_cast<uint8_t>(LCEVC_EventCount),
+                               std::max(kInvalidEvent.eventType, kFlushEvent.eventType)),
+                  "Increase the size of m_eventMask");
 }
 
 void EventManager::initialise(const std::vector<int32_t>& enabledEvents)
 {
-    // No failure case, because we've already validated the events in DecoderConfig::validate
+    // No failure case, because we've already validated the events in DecoderConfig::validate. To
+    // reiterate, that validation is: eventTypes are POSITIVE & SMALL. Internally, they are uint8_t
     for (int32_t eventType : enabledEvents) {
         m_eventMask = m_eventMask | (1 << eventType);
     }
@@ -41,8 +45,8 @@ void EventManager::initialise(const std::vector<int32_t>& enabledEvents)
 void EventManager::release()
 {
     // Send ourselves a flushing event, to force any prior events out of the queue and break out
-    // of our loop.
-    triggerEvent(kFlushEvent);
+    // of our loop. Note that catchExceptions is true, because this is called in a destructor.
+    triggerEvent(kFlushEvent, true);
 
     // Prevent double-release:
     if (m_eventThread.joinable()) {
@@ -51,11 +55,21 @@ void EventManager::release()
     }
 }
 
-void EventManager::triggerEvent(Event event)
+void EventManager::triggerEvent(Event event, bool catchExceptions)
 {
     std::lock_guard<std::mutex> lock(m_eventQueueMutex);
+
     if (isEventEnabled(event.eventType) || event.isFlush()) {
-        m_eventQueue.push(event);
+        try {
+            m_eventQueue.push(event);
+        } catch (const std::exception& e) {
+            // Possible if m_eventQueue.size() > SIZE_MAX, needs to be caught when this function is
+            // used in a class destructor.
+            if (!catchExceptions) {
+                throw e;
+            }
+        }
+
         m_eventQueueCv.notify_all();
     }
 }
@@ -68,7 +82,7 @@ void EventManager::setEventCallback(EventCallback callback, void* userData)
 
 void EventManager::eventLoop()
 {
-    lcevc_dec::utility::os::setThreadName("LCEVC_EventManager");
+    lcevc_dec::api_utility::os::setThreadName(VN_TO_THREAD_NAME("LCEVC_EventManager"));
 
     Event nextEvent = kInvalidEvent;
     while (getNextEvent(nextEvent)) {
@@ -79,8 +93,14 @@ void EventManager::eventLoop()
         }
 
         if (m_eventCallback != nullptr) {
+            std::unique_ptr<LCEVC_DecodeInformation> shortLivedDecInfo = nullptr;
+            if (nextEvent.decodeInfo.timestamp >= 0) {
+                shortLivedDecInfo = std::make_unique<LCEVC_DecodeInformation>();
+                memcpy(shortLivedDecInfo.get(), &(nextEvent.decodeInfo), sizeof(*shortLivedDecInfo));
+            }
+
             m_eventCallback(m_apiHandle.hdl, static_cast<LCEVC_Event>(nextEvent.eventType),
-                            nextEvent.picHandle, nextEvent.decodeInfo, nextEvent.data,
+                            nextEvent.picHandle, shortLivedDecInfo.get(), nextEvent.data,
                             nextEvent.dataSize, m_eventCallbackUserData);
         }
     }
@@ -93,14 +113,10 @@ bool EventManager::getNextEvent(Event& event)
     // callback itself uses the API, then THAT call will wait for the API lock.
     std::unique_lock<std::mutex> lock(m_eventQueueMutex);
 
-    // If the event queue is empty, wait here until we're notified (we put it in a loop: if we add
-    // 1 event but get 2 notifications for it, then the 1st notification will trigger the callback,
-    // while the 2nd notification will get stopped here because the queue will have been emptied).
-    while (m_eventQueue.empty()) {
-        m_eventQueueCv.wait(lock);
-    }
+    // If the event queue is empty, wait here until we're notified. So, wait here until notified
+    // AND m_eventQueue is non-empty (the condition prevents spurious unblocks)
+    m_eventQueueCv.wait(lock, [this]() { return !m_eventQueue.empty(); });
 
-    // Queue is non-empty, let's proceed:
     event = m_eventQueue.front();
     m_eventQueue.pop();
 

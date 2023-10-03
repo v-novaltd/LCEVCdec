@@ -19,7 +19,7 @@ if(VN_SDK_EXECUTABLES)
 		)
 
 	# Tests can include interal headers from helper sources
-	target_include_directories(lcevc_api_test_harness PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../../utility/src")
+	target_include_directories(lcevc_api_test_harness PUBLIC "${CMAKE_SOURCE_DIR}/src/utility/src")
 
 	add_executable(lcevc_dec::api_test_harness ALIAS lcevc_api_test_harness)
 

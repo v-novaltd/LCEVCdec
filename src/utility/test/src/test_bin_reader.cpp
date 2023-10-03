@@ -1,8 +1,8 @@
 // Copyright (c) V-Nova International Limited 2023. All rights reserved.
 //
 #include "bin_reader.h"
-#include "find_assets_dir.h"
 #include "filesystem.h"
+#include "find_assets_dir.h"
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>

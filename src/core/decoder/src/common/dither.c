@@ -19,12 +19,13 @@ typedef struct Dither
     Random_t random;
     bool enabled;
     uint8_t strength;
+    bool strengthIsOverridden;
     DitherType_t type;
 }* Dither_t;
 
 /*------------------------------------------------------------------------------*/
 
-bool ditherInitialize(Memory_t memory, Dither_t* dither, uint64_t seed, bool enabled)
+bool ditherInitialize(Memory_t memory, Dither_t* dither, uint64_t seed, bool enabled, int32_t overrideStrength)
 {
     Dither_t result = VN_CALLOC_T(memory, struct Dither);
 
@@ -34,6 +35,11 @@ bool ditherInitialize(Memory_t memory, Dither_t* dither, uint64_t seed, bool ena
 
     result->memory = memory;
     result->enabled = enabled;
+    result->strengthIsOverridden = (overrideStrength >= 0 && overrideStrength <= kMaxDitherStrength);
+    if (result->strengthIsOverridden) {
+        result->strength = (uint8_t)overrideStrength;
+        result->type = DTUniform;
+    }
 
     if (enabled) {
         /* Prepare buffer & RNG */
@@ -63,33 +69,35 @@ void ditherRelease(Dither_t dither)
 
 bool ditherRegenerate(Dither_t dither, uint8_t strength, DitherType_t type)
 {
-    if (strength > kMaxDitherStrength) {
-        return false;
-    }
-
     if (!dither) {
         return true;
     }
 
-    dither->strength = strength;
-    dither->type = type;
+    if (!dither->strengthIsOverridden) {
+        dither->strength = strength;
+        dither->type = type;
+    }
+
+    if (dither->strength > kMaxDitherStrength) {
+        return false;
+    }
 
     if (!ditherIsEnabled(dither)) {
         return true;
     }
 
-    if (strength == 0 || type == DTNone) {
+    if (dither->strength == 0 || dither->type == DTNone) {
         memorySet(dither->buffer, 0, kDitherBufferSize);
         return true;
     }
 
     /* Populate dither buffers with values between [-strength, strength]. */
     Random_t random = dither->random;
-    const uint32_t saturation = (2 * strength) + 1;
+    const uint32_t saturation = (2 * dither->strength) + 1;
 
     for (size_t i = 0; i < kDitherBufferSize; ++i) {
         const uint32_t value = randomValue(random) % saturation;
-        dither->buffer[i] = (int8_t)(value - strength);
+        dither->buffer[i] = (int8_t)(value - dither->strength);
     }
 
     return true;

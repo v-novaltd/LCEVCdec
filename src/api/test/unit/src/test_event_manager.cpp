@@ -43,8 +43,12 @@ public:
     }
 
 protected:
-    EventManager m_manager;
+    EventManager& GetManager() { return m_manager; }
+    EventCountArr& GetEventCounts() { return m_callbackCounts; }
+
+private:
     LCEVC_DecoderHandle m_arbitraryHandle{123};
+    EventManager m_manager;
     EventCountArr m_callbackCounts = {};
 };
 
@@ -118,13 +122,13 @@ TEST(eventManagerInit, noCallbackUntilInit)
 TEST_F(EventManagerFixture, release)
 {
     // This test involves a hard-coded wait of 50ms... Sorry!
-    m_manager.triggerEvent(LCEVC_CanSendBase);
+    GetManager().triggerEvent(LCEVC_CanSendBase);
     bool wasTimeout = false;
-    atomicWaitUntil(wasTimeout, equal, m_callbackCounts[LCEVC_CanSendBase], 1);
+    atomicWaitUntil(wasTimeout, equal, GetEventCounts()[LCEVC_CanSendBase], 1);
     EXPECT_FALSE(wasTimeout);
 
-    m_manager.release();
-    m_manager.triggerEvent(LCEVC_CanSendBase);
-    atomicWaitUntil(wasTimeout, equal, m_callbackCounts[LCEVC_CanSendBase], 2);
+    GetManager().release();
+    GetManager().triggerEvent(LCEVC_CanSendBase);
+    atomicWaitUntil(wasTimeout, equal, GetEventCounts()[LCEVC_CanSendBase], 2);
     EXPECT_TRUE(wasTimeout);
 }

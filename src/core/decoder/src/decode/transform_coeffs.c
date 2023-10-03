@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
 
 #include "decode/transform_coeffs.h"
 
@@ -15,7 +15,7 @@
 /* @todo: These constants need tuning. */
 enum CoeffsConstants
 {
-    CCDefaultInitialCapacity = 16384,
+    CCDefaultInitialCapacity = 1024,
     CCGrowCapacityFactor = 2
 };
 
@@ -27,7 +27,7 @@ typedef struct TransformCoeffs
     uint32_t count;
     uint32_t capacity;
     bool error;
-}* TransformCoeffs_t;
+} * TransformCoeffs_t;
 
 typedef struct DecodeChunkArgs
 {

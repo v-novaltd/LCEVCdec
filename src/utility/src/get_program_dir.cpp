@@ -6,7 +6,6 @@
 
 #include <climits>
 
-
 namespace lcevc_dec::utility {
 
 #if VN_OS(WINDOWS)
@@ -30,8 +29,8 @@ std::string getExecutablePath()
     char tmp[PATH_MAX] = "";
 
     // Use /proc & readlink() to get real executable path
-    char link[PATH_MAX];
-    sprintf(link, "/proc/%d/exe", getpid());
+    char link[PATH_MAX] = {};
+    snprintf(link, PATH_MAX, "/proc/%d/exe", getpid());
     ssize_t size = readlink(link, tmp, sizeof(tmp));
 
     if (size < 0) {
@@ -49,9 +48,9 @@ std::string getExecutablePath()
 std::string getExecutablePath()
 {
     char tmp[PATH_MAX];
-    uint32_t bufsize = sizeof(buf);
+    uint32_t bufsize = sizeof(tmp);
 
-    _NSGetExecutablePath(buf, &bufsize);
+    _NSGetExecutablePath(tmp, &bufsize);
 
     return filesystem::canonical(tmp);
 }

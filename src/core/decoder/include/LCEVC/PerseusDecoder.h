@@ -453,6 +453,7 @@ extern "C"
 		const char*           debug_config_path;          /**< Where the debug config file should be written, null will disable the writing */
 		float                 s_strength;                 /**< S strength in the range 0 to 1 to override signalling with 0 to disable, -1 to use whatever is signalled >**/
 		uint64_t              dither_seed;                /**< The value used to seed the dither buffer with, a value of 0 will use the current time >**/
+		int32_t               dither_override_strength;   /**< If positive, and less than kMaxDitherStrength, this value overrides the stream's dither strength. */
 		uint8_t               generate_cmdbuffers;        /**< Set to 1 to enable cmdbuffer generation - when initialised with 1 then no surfaces are written to. */
 		uint8_t               logo_overlay_enable;        /**< Specify to enable overlay watermark >**/
 		uint16_t              logo_overlay_position_x;    /**< Specify displacement in pixels of left edge of overlay watermark from left edge of video>**/

@@ -18,7 +18,8 @@ struct fmt::formatter<LCEVC_ColorFormat> : public formatter<string_view>
     template <typename FormatContext>
     auto format(const LCEVC_ColorFormat& cf, FormatContext& ctx) const
     {
-        return formatter<string_view>::format(std::string("ColorFormat_") + std::string(lcevc_dec::utility::toString(cf)), ctx);
+        return formatter<string_view>::format(
+            std::string("ColorFormat_") + std::string(lcevc_dec::utility::toString(cf)), ctx);
     }
 };
 
@@ -30,7 +31,8 @@ struct fmt::formatter<LCEVC_ReturnCode> : public formatter<string_view>
     template <typename FormatContext>
     auto format(const LCEVC_ReturnCode& rc, FormatContext& ctx) const
     {
-        return formatter<string_view>::format(std::string("ReturnCode_") + std::string(lcevc_dec::utility::toString(rc)), ctx);
+        return formatter<string_view>::format(
+            std::string("ReturnCode_") + std::string(lcevc_dec::utility::toString(rc)), ctx);
     }
 };
 
@@ -41,29 +43,32 @@ struct fmt::formatter<LCEVC_ColorRange> : public formatter<string_view>
     template <typename FormatContext>
     auto format(const LCEVC_ColorRange& cr, FormatContext& ctx) const
     {
-        return formatter<string_view>::format(std::string("ColorRange_") + std::string(lcevc_dec::utility::toString(cr)), ctx);
+        return formatter<string_view>::format(
+            std::string("ColorRange_") + std::string(lcevc_dec::utility::toString(cr)), ctx);
     }
 };
 
-// LCEVC_ColorStandard
+// LCEVC_ColorPrimaries
 template <>
-struct fmt::formatter<LCEVC_ColorStandard> : public formatter<string_view>
+struct fmt::formatter<LCEVC_ColorPrimaries> : public formatter<string_view>
 {
     template <typename FormatContext>
-    auto format(const LCEVC_ColorStandard& cs, FormatContext& ctx) const
+    auto format(const LCEVC_ColorPrimaries& cs, FormatContext& ctx) const
     {
-        return formatter<string_view>::format(std::string("ColorStandard_") + std::string(lcevc_dec::utility::toString(cs)), ctx);
+        return formatter<string_view>::format(
+            std::string("ColorPrimaries_") + std::string(lcevc_dec::utility::toString(cs)), ctx);
     }
 };
 
-// LCEVC_ColorTransfer
+// LCEVC_TransferCharacteristics
 template <>
-struct fmt::formatter<LCEVC_ColorTransfer> : public formatter<string_view>
+struct fmt::formatter<LCEVC_TransferCharacteristics> : public formatter<string_view>
 {
     template <typename FormatContext>
-    auto format(const LCEVC_ColorTransfer& ct, FormatContext& ctx) const
+    auto format(const LCEVC_TransferCharacteristics& ct, FormatContext& ctx) const
     {
-        return formatter<string_view>::format(std::string("ColorTransfer_") + std::string(lcevc_dec::utility::toString(ct)), ctx);
+        return formatter<string_view>::format(
+            std::string("TransferCharacteristics_") + std::string(lcevc_dec::utility::toString(ct)), ctx);
     }
 };
 
@@ -74,7 +79,8 @@ struct fmt::formatter<LCEVC_PictureFlag> : public formatter<string_view>
     template <typename FormatContext>
     auto format(const LCEVC_PictureFlag& pf, FormatContext& ctx) const
     {
-        return formatter<string_view>::format(std::string("PictureFlag_") + std::string(lcevc_dec::utility::toString(pf)), ctx);
+        return formatter<string_view>::format(
+            std::string("PictureFlag_") + std::string(lcevc_dec::utility::toString(pf)), ctx);
     }
 };
 
@@ -85,7 +91,8 @@ struct fmt::formatter<LCEVC_Access> : public formatter<string_view>
     template <typename FormatContext>
     auto format(const LCEVC_Access& ac, FormatContext& ctx) const
     {
-        return formatter<string_view>::format(std::string("Access_") + std::string(lcevc_dec::utility::toString(ac)), ctx);
+        return formatter<string_view>::format(
+            std::string("Access_") + std::string(lcevc_dec::utility::toString(ac)), ctx);
     }
 };
 
@@ -96,7 +103,8 @@ struct fmt::formatter<LCEVC_Event> : public formatter<string_view>
     template <typename FormatContext>
     auto format(const LCEVC_Event& ev, FormatContext& ctx) const
     {
-        return formatter<string_view>::format(std::string("Event_") + std::string(lcevc_dec::utility::toString(ev)), ctx);
+        return formatter<string_view>::format(
+            std::string("Event_") + std::string(lcevc_dec::utility::toString(ev)), ctx);
     }
 };
 

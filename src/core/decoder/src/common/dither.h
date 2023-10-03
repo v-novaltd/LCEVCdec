@@ -67,25 +67,25 @@ typedef struct Dither* Dither_t;
 
 /*! Initializes the dither module
  *
- * \param ctx      The decoder context.
- * \param dither   The dither module to initialize.
- * \param seed     The seed to initialise the random number generator with, if 0 it wil use time()
- * \param enabled  Global flag controlling dither functionality.
+ * \param ctx              The decoder context.
+ * \param dither           The dither module to initialize.
+ * \param seed             The seed to initialise the random number generator
+ *                         with, if 0 it will use time()
+ * \param enabled          Global flag controlling dither functionality.
+ * \param overrideStrength A strength which overrides the stream's strength (if
+ *                         positive, and less than or equal to
+ *                         kMaxDitherStrength).
  *
  * \return false if memory allocation failed, otherwise true.
  */
-bool ditherInitialize(Memory_t ctx, Dither_t* dither, uint64_t seed, bool enabled);
+bool ditherInitialize(Memory_t ctx, Dither_t* dither, uint64_t seed, bool enabled, int32_t overrideStrength);
 
 /*! Releases the dither module and any associated memory. */
 void ditherRelease(Dither_t dither);
 
-/*! Regenerates the internal dither buffer with new values.
- *
- * This tries to avoid regenerating the buffer if the strength
- * is the same as previous as we query the buffer from a random
- * location which will provide the effect of randomness.
- *
- * This function early exists if dithering has been disabled globally.
+/*! Regenerates the internal dither buffer.
+ * 
+ * This function early-exits if dithering has been disabled globally.
  *
  * \param dither The dither module.
  * \param strength The signaled dither strength, must be in the range 0 to 128.

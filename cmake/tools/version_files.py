@@ -12,9 +12,6 @@ import datetime
 import getpass
 import os
 import platform
-import socket
-import subprocess
-import sys
 import re
 
 from write_changed import capture_output, write_if_changed
@@ -163,7 +160,7 @@ class ComponentGenerator:
     def __init__(self, component, name, git_version, git_hash, output_src, output_h,
                  output_rc, binary_name, binary_type, description):
 
-        ## Fill in instance variable for use by template formatting
+        # Fill in instance variable for use by template formatting
         self.component = component
         self.name = name
         self.git_version = git_version

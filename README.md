@@ -27,6 +27,7 @@ See [Getting Started](docs/getting_started.md) to set up the appropiate build to
 See:
 
  * [Building - Linux](docs/building_linux.md) to build Linux hosted targets.
+ * [Building - macOS](docs/building_macos.md) to build macOS hosted targets.
  * [Building - Windows](docs/building_windows.md) to build Windows hosted targets.
 
 ## Installation

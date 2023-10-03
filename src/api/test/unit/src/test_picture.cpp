@@ -21,7 +21,7 @@
 // - Usings and consts ----------------------------------------------------------------------------
 
 using namespace lcevc_dec::decoder;
-using namespace lcevc_dec::utility;
+using namespace lcevc_dec::api_utility;
 
 static const uint32_t kBigRes[2] = {1920, 1080};
 static const uint32_t kSmallRes[2] = {960, 540};
@@ -38,31 +38,42 @@ static const uint8_t kYUVValues[kI420NumPlanes] = {'V', '-', 'N'};
 
 // - Helper functions -----------------------------------------------------------------------------
 
-static bool initPic(Picture& pic, std::vector<SmartBuffer>& buffersOut, LCEVC_ColorFormat format,
-                    uint32_t width, uint32_t height, LCEVC_AccelBufferHandle accelBufferHandle,
-                    LCEVC_Access access)
+static bool setDesc(PictureExternal& pic, const LCEVC_PictureDesc& newDesc,
+                    const LCEVC_PicturePlaneDesc* planeDescArr, const LCEVC_PictureBufferDesc& bufferDesc)
 {
+    return pic.setDescExternal(newDesc, planeDescArr, &bufferDesc);
+}
+static bool setDesc(PictureManaged& pic, const LCEVC_PictureDesc& newDesc,
+                    const LCEVC_PicturePlaneDesc*, const LCEVC_PictureBufferDesc&)
+{
+    return pic.setDesc(newDesc);
+}
+static bool setDesc(Picture& pic, const LCEVC_PictureDesc& newDesc,
+                    const LCEVC_PicturePlaneDesc* planeDescArr, const LCEVC_PictureBufferDesc& bufferDesc)
+{
+    if (pic.isManaged()) {
+        return setDesc(static_cast<PictureManaged&>(pic), newDesc, planeDescArr, bufferDesc);
+    }
+    return setDesc(static_cast<PictureExternal&>(pic), newDesc, planeDescArr, bufferDesc);
+}
+
+static bool initPic(Picture& pic, SmartBuffer& bufferOut, LCEVC_ColorFormat format, uint32_t width,
+                    uint32_t height, LCEVC_AccelBufferHandle accelBufferHandle, LCEVC_Access access)
+{
+    LCEVC_PictureBufferDesc bufDesc = {};
+    LCEVC_PicturePlaneDesc planeDescArr[kMaxNumPlanes] = {};
     if (!pic.isManaged()) {
-        if (!initPictureExternalAndBuffers(static_cast<PictureExternal&>(pic), buffersOut, format,
-                                           width, height, accelBufferHandle, access)) {
-            return false;
-        }
+        setupPictureExternal(bufDesc, bufferOut, planeDescArr, format, width, height,
+                             accelBufferHandle, access);
     }
 
     LCEVC_PictureDesc desc = {};
     LCEVC_DefaultPictureDesc(&desc, format, width, height);
-    if (!pic.setDesc(desc)) {
+    if (!setDesc(pic, desc, planeDescArr, bufDesc)) {
         return false;
     }
 
     return true;
-}
-
-static void bind(Picture& pic, uint32_t numBuffers, const LCEVC_PictureBufferDesc* buffers)
-{
-    if (!pic.isManaged()) {
-        static_cast<PictureExternal&>(pic).bindMemoryBuffers(numBuffers, buffers);
-    }
 }
 
 // - Fixtures -------------------------------------------------------------------------------------
@@ -72,23 +83,18 @@ class PictureFixture : public testing::Test
 {
 public:
     PictureFixture();
-    void bindIfNecessary() { bind(static_cast<Picture&>(m_pic), kI420NumPlanes, m_bufferDescs); }
 
     void SetUp() override
     {
-        // Can't use initMaybeExternalPic, since we want to track the buffer descs too, to test
-        // against later.
-        setupBuffers(m_externalBuffers, LCEVC_I420_8, kBigRes[0], kBigRes[1]);
-        setupBufferDesc(m_bufferDescs, m_externalBuffers, LCEVC_AccelBufferHandle{kInvalidHandle},
-                        LCEVC_Access_Modify);
-        bindIfNecessary();
+        setupPictureExternal(m_bufferDesc, m_externalBuffer, m_planeDescArr, LCEVC_I420_8, kBigRes[0],
+                             kBigRes[1], LCEVC_AccelBufferHandle{kInvalidHandle}, LCEVC_Access_Modify);
     }
 
     bool setDesc()
     {
         LCEVC_PictureDesc defaultDesc;
         LCEVC_DefaultPictureDesc(&defaultDesc, LCEVC_I420_8, kBigRes[0], kBigRes[1]);
-        return m_pic.setDesc(defaultDesc);
+        return ::setDesc(m_pic, defaultDesc, m_planeDescArr, m_bufferDesc);
     }
 
     VNInline PicType constructPic();
@@ -98,8 +104,9 @@ protected:
     BufferManager m_BufMan;
 
     // for external pics:
-    std::vector<SmartBuffer> m_externalBuffers;
-    LCEVC_PictureBufferDesc m_bufferDescs[kMaxNumPlanes] = {};
+    SmartBuffer m_externalBuffer;
+    LCEVC_PictureBufferDesc m_bufferDesc = {};
+    LCEVC_PicturePlaneDesc m_planeDescArr[kMaxNumPlanes] = {};
 
     PicType m_pic;
 };
@@ -141,60 +148,72 @@ TEST(pictureExternal, isManaged)
     EXPECT_FALSE(pic.isManaged());
 }
 
-TEST_F(PicExtFixture, bindMemory)
-{
-    // Does it say that it succeeds?
-    EXPECT_TRUE(m_pic.bindMemoryBuffers(static_cast<uint32_t>(m_externalBuffers.size()), m_bufferDescs));
-
-    // Did it ACTUALLY succeed? This only checks that the picture has the right number of
-    // 0-initialised pixels. A more thorough test (using arbitrary pixel values) is part of the
-    // copyData test.
-    for (uint32_t plane = 0; plane < m_pic.getNumPlanes(); plane++) {
-        EXPECT_EQ(m_pic.getPlaneFirstSample(plane), m_bufferDescs[plane].data);
-        EXPECT_EQ(memcmp(m_pic.getPlaneFirstSample(plane), m_bufferDescs[plane].data,
-                         m_bufferDescs[plane].byteSize),
-                  0);
-    }
-}
-
 TEST_F(PicExtFixture, validSetDesc)
 {
-    m_pic.bindMemoryBuffers(static_cast<uint32_t>(m_externalBuffers.size()), m_bufferDescs);
     // Succeed if desc is equal or smaller, even if it's a mismatched type (e.g. switching from
-    // a I420 at high-res to an NV12 at low-res)
-    LCEVC_PictureDesc descToSet = {};
-    LCEVC_PictureDesc descToGet = {};
-    ASSERT_EQ(LCEVC_DefaultPictureDesc(&descToSet, LCEVC_NV12_8, kSmallRes[0], kSmallRes[1]), LCEVC_Success);
-    EXPECT_TRUE(m_pic.setDesc(descToSet));
-    m_pic.getDesc(descToGet);
-    EXPECT_TRUE(equals(descToGet, descToSet));
+    // a I420 at high-res to an NV12 at low-res). Since we're switched to NV12, note that the byte
+    // stride for the 2nd plane will be the same as that for the first.
+    LCEVC_PictureDesc desiredDesc = {};
+    const LCEVC_PictureBufferDesc& desiredBufferDesc = m_bufferDesc; // default is fine.
+    LCEVC_PicturePlaneDesc desiredPlaneDescs[2] = {
+        {desiredBufferDesc.data, kSmallRes[0]},
+        {desiredBufferDesc.data + kSmallRes[0] * kSmallRes[1], kSmallRes[0]}};
+    ASSERT_EQ(LCEVC_DefaultPictureDesc(&desiredDesc, LCEVC_NV12_8, kSmallRes[0], kSmallRes[1]),
+              LCEVC_Success);
+    EXPECT_TRUE(m_pic.setDescExternal(desiredDesc, desiredPlaneDescs, &desiredBufferDesc));
+
+    LCEVC_PictureDesc actualDesc = {};
+    m_pic.getDesc(actualDesc);
+    EXPECT_TRUE(equals(actualDesc, desiredDesc));
+
+    LCEVC_PictureBufferDesc actualBufDesc = {};
+    EXPECT_TRUE(m_pic.getBufferDesc(actualBufDesc));
+    EXPECT_TRUE(equals(actualBufDesc, desiredBufferDesc));
+
+    for (uint32_t planeIdx = 0; planeIdx < m_pic.getNumPlanes(); planeIdx++) {
+        EXPECT_EQ(m_pic.getPlaneFirstSample(planeIdx), desiredPlaneDescs[planeIdx].firstSample);
+        EXPECT_EQ(m_pic.getPlaneByteStride(planeIdx), desiredPlaneDescs[planeIdx].rowByteStride);
+    }
 }
 
 TEST_F(PicExtFixture, invalidSetDesc)
 {
-    m_pic.bindMemoryBuffers(static_cast<uint32_t>(m_externalBuffers.size()), m_bufferDescs);
-
-    // Fail if desc is bigger than bound memory (e.g. same res, larger bitdepth)
-    LCEVC_PictureDesc defaultDesc = {};
-    ASSERT_EQ(LCEVC_DefaultPictureDesc(&defaultDesc, LCEVC_I420_10_LE, kBigRes[0], kBigRes[1]),
+    LCEVC_PictureDesc bigPictureDesc = {};
+    ASSERT_EQ(LCEVC_DefaultPictureDesc(&bigPictureDesc, LCEVC_I420_10_LE, kBigRes[0], kBigRes[1]),
               LCEVC_Success);
-    EXPECT_FALSE(m_pic.setDesc(defaultDesc));
+    SmartBuffer buffersDummy = {};
+
+    // Fail if our buffer is small...
+    LCEVC_PictureBufferDesc newSmallBufferDesc = {};
+    {
+        LCEVC_PicturePlaneDesc planeDescArrDummy[kMaxNumPlanes] = {};
+        setupPictureExternal(newSmallBufferDesc, buffersDummy, planeDescArrDummy, LCEVC_I420_8,
+                             kBigRes[0], kBigRes[1], LCEVC_AccelBufferHandle{kInvalidHandle},
+                             LCEVC_Access_Unknown);
+    }
+
+    // ...But our planes are big (because they're 10bit)
+    LCEVC_PicturePlaneDesc newBigPlaneDescArr[kMaxNumPlanes] = {};
+    {
+        LCEVC_PictureBufferDesc bufferDescDummy = {};
+        setupPictureExternal(bufferDescDummy, buffersDummy, newBigPlaneDescArr, LCEVC_I420_10_LE,
+                             kBigRes[0], kBigRes[1], LCEVC_AccelBufferHandle{kInvalidHandle},
+                             LCEVC_Access_Unknown);
+    }
+
+    EXPECT_FALSE(m_pic.setDescExternal(bigPictureDesc, newBigPlaneDescArr, &newSmallBufferDesc));
 }
 
-TEST_F(PicExtFixture, getBuffers)
+TEST_F(PicExtFixture, getBuffer)
 {
-    m_pic.bindMemoryBuffers(static_cast<uint32_t>(m_externalBuffers.size()), m_bufferDescs);
     setDesc();
 
-    EXPECT_EQ(m_pic.getBufferCount(), m_externalBuffers.size());
-    for (uint32_t buffer = 0; buffer < m_pic.getBufferCount(); buffer++) {
-        LCEVC_PictureBufferDesc desc;
-        EXPECT_TRUE(m_pic.getBufferDesc(buffer, desc));
-        EXPECT_EQ(desc.accelBuffer.hdl, m_bufferDescs[buffer].accelBuffer.hdl);
-        EXPECT_EQ(desc.access, m_bufferDescs[buffer].access);
-        EXPECT_EQ(desc.byteSize, m_bufferDescs[buffer].byteSize);
-        EXPECT_EQ(desc.data, m_bufferDescs[buffer].data);
-    }
+    LCEVC_PictureBufferDesc desc;
+    EXPECT_TRUE(m_pic.getBufferDesc(desc));
+    EXPECT_EQ(desc.accelBuffer.hdl, m_bufferDesc.accelBuffer.hdl);
+    EXPECT_EQ(desc.access, m_bufferDesc.access);
+    EXPECT_EQ(desc.byteSize, m_bufferDesc.byteSize);
+    EXPECT_EQ(desc.data, m_bufferDesc.data);
 }
 
 // - PictureManaged -----------------------------
@@ -224,18 +243,15 @@ TEST_F(PicManFixture, validSetDesc)
     EXPECT_TRUE(equals(descToGet, descToSet));
 }
 
-TEST_F(PicManFixture, getBuffers)
+TEST_F(PicManFixture, getBuffer)
 {
     setDesc();
 
     // Managed pictures currently store all planes in one buffer.
-    EXPECT_EQ(m_pic.getBufferCount(), 1);
     EXPECT_EQ(m_pic.getNumPlanes(), kI420NumPlanes);
-    for (uint32_t buffer = 0; buffer < m_pic.getBufferCount(); buffer++) {
-        LCEVC_PictureBufferDesc desc;
-        EXPECT_TRUE(m_pic.getBufferDesc(buffer, desc));
-        EXPECT_EQ(desc.byteSize, kBigByteSize);
-    }
+    LCEVC_PictureBufferDesc desc;
+    EXPECT_TRUE(m_pic.getBufferDesc(desc));
+    EXPECT_EQ(desc.byteSize, kBigByteSize);
 }
 
 TEST(pictureManaged, bufferManagersDontOverlap)
@@ -268,18 +284,19 @@ TEST(pictureManaged, bufferManagersDontOverlap)
 
 TYPED_TEST(PictureFixture, setDescMatchesGet)
 {
-    // Provide a bunch of values that are definitely not the default values
+    // Provide a bunch of values that are definitely not the default values. Make sure width and
+    // height are still even numbers though (for I420 validity)
     LCEVC_PictureDesc crazyDesc = {};
     crazyDesc.colorFormat = LCEVC_I420_12_LE;
     crazyDesc.colorRange = LCEVC_ColorRange_Limited;
-    crazyDesc.colorStandard = LCEVC_ColorStandard_BT601_NTSC;
-    crazyDesc.colorTransfer = LCEVC_ColorTransfer_ST2084;
-    crazyDesc.cropBottom = 23;
-    crazyDesc.cropLeft = 15;
-    crazyDesc.cropRight = 97;
-    crazyDesc.cropTop = 143;
+    crazyDesc.colorPrimaries = LCEVC_ColorPrimaries_BT601_NTSC;
+    crazyDesc.transferCharacteristics = LCEVC_TransferCharacteristics_PQ;
+    crazyDesc.cropBottom = 22;
+    crazyDesc.cropLeft = 16;
+    crazyDesc.cropRight = 98;
+    crazyDesc.cropTop = 144;
     crazyDesc.hdrStaticInfo = kNonsenseHDRInfo;
-    crazyDesc.height = 999 + crazyDesc.cropTop + crazyDesc.cropBottom;
+    crazyDesc.height = 998 + crazyDesc.cropTop + crazyDesc.cropBottom;
     crazyDesc.sampleAspectRatioDen = 2;
     crazyDesc.sampleAspectRatioNum = 3;
     crazyDesc.width = 10 + crazyDesc.cropLeft + crazyDesc.cropRight;
@@ -287,30 +304,40 @@ TYPED_TEST(PictureFixture, setDescMatchesGet)
     const uint32_t expectedHeight = crazyDesc.height - (crazyDesc.cropTop + crazyDesc.cropBottom);
     const uint32_t expectedWidth = crazyDesc.width - (crazyDesc.cropLeft + crazyDesc.cropRight);
 
-    EXPECT_TRUE(this->m_pic.setDesc(crazyDesc));
+    // Some miscellaneous extra setup is required for external pics, but is unused otherwise.
+    SmartBuffer dummyBuf = {};
+    setupPictureExternal(this->m_bufferDesc, dummyBuf, this->m_planeDescArr, crazyDesc.colorFormat,
+                         crazyDesc.width, crazyDesc.height, LCEVC_AccelBufferHandle{kInvalidHandle},
+                         LCEVC_Access_Unknown);
+    EXPECT_TRUE(::setDesc(this->m_pic, crazyDesc, this->m_planeDescArr, this->m_bufferDesc));
+
     EXPECT_EQ(this->m_pic.getWidth(), expectedWidth);
     EXPECT_EQ(this->m_pic.getHeight(), expectedHeight);
     EXPECT_EQ(this->m_pic.getBitdepth(), 12); // LCEVC_I420_12_LE
     EXPECT_EQ(this->m_pic.getBytedepth(), kBytesIn12Bits);
     EXPECT_EQ(this->m_pic.getNumPlanes(), kI420NumPlanes);
     for (uint32_t planeIdx = 0; planeIdx < this->m_pic.getNumPlanes(); planeIdx++) {
-        // I420 so chroma planes are half width and half height (rounded up). Note that these DON'T
-        // take cropping into account (only the getWidth and getHeight functions do).
+        // I420 so chroma planes are half width and half height (rounded up).
         const uint32_t expectedSampleStride =
             (planeIdx == 0 ? crazyDesc.width : (crazyDesc.width + 1) / 2);
         const uint32_t expectedByteStride = kBytesIn12Bits * expectedSampleStride;
-        uint32_t expectedPlaneHeight = (planeIdx == 0 ? crazyDesc.height : (crazyDesc.height + 1) / 2);
+        const uint32_t expectedUncroppedPlaneHeight =
+            (planeIdx == 0 ? crazyDesc.height : (crazyDesc.height + 1) / 2);
+        const uint32_t expectedPlaneHeight = (planeIdx == 0 ? expectedHeight : (expectedHeight + 1) / 2);
+        const uint32_t expectedPlaneWidth = (planeIdx == 0 ? expectedWidth : (expectedWidth + 1) / 2);
         EXPECT_EQ(this->m_pic.getPlaneHeight(planeIdx), expectedPlaneHeight);
+        EXPECT_EQ(this->m_pic.getPlaneWidth(planeIdx), expectedPlaneWidth);
         EXPECT_EQ(this->m_pic.getPlaneBytesPerPixel(planeIdx),
                   kBytesIn12Bits); // would be double for nv12's chroma plane though.
 
         // Byte stride and width-in-bytes will be the same because we don't have any padding
-        // (padding hasn't been implemented yet, see PictureExternal::setDesc).
+        // (padding hasn't been implemented yet, see PictureExternal::setDescExternal).
         EXPECT_EQ(this->m_pic.getPlaneByteStride(planeIdx), expectedByteStride);
-        EXPECT_EQ(this->m_pic.getPlaneWidthBytes(planeIdx), expectedByteStride);
+        EXPECT_EQ(this->m_pic.getPlaneWidthBytes(planeIdx), kBytesIn12Bits * expectedPlaneWidth);
         EXPECT_EQ(this->m_pic.getPlaneSampleStride(planeIdx), expectedSampleStride);
 
-        EXPECT_EQ(this->m_pic.getPlaneMemorySize(planeIdx), expectedByteStride * expectedPlaneHeight);
+        EXPECT_EQ(this->m_pic.getPlaneMemorySize(planeIdx),
+                  expectedByteStride * expectedUncroppedPlaneHeight);
     }
 }
 
@@ -332,12 +359,12 @@ TYPED_TEST(PictureFixture, invalidSetDesc)
     ASSERT_EQ(LCEVC_DefaultPictureDesc(&defaultDesc, LCEVC_I420_8, kBigRes[0], kBigRes[1]), LCEVC_Success);
     defaultDesc.cropBottom = kBigRes[1] * 2 / 3;
     defaultDesc.cropTop = kBigRes[1] * 2 / 3;
-    EXPECT_FALSE(this->m_pic.setDesc(defaultDesc));
+    EXPECT_FALSE(::setDesc(this->m_pic, defaultDesc, this->m_planeDescArr, this->m_bufferDesc));
 
     // Invalid enum
     LCEVC_DefaultPictureDesc(&defaultDesc, LCEVC_I420_8, kBigRes[0], kBigRes[1]);
     defaultDesc.colorFormat = LCEVC_ColorFormat_Unknown;
-    EXPECT_FALSE(this->m_pic.setDesc(defaultDesc));
+    EXPECT_FALSE(::setDesc(this->m_pic, defaultDesc, this->m_planeDescArr, this->m_bufferDesc));
 }
 
 TYPED_TEST(PictureFixture, copyData)
@@ -349,8 +376,8 @@ TYPED_TEST(PictureFixture, copyData)
 
     // Init the source pic (make more challenging using NV12)
     TypeParam pic = this->constructPic();
-    std::vector<SmartBuffer> nv12Buffers;
-    initPic(pic, nv12Buffers, LCEVC_NV12_8, kBigRes[0], kBigRes[1],
+    SmartBuffer nv12Buffer;
+    initPic(pic, nv12Buffer, LCEVC_NV12_8, kBigRes[0], kBigRes[1],
             LCEVC_AccelBufferHandle{kInvalidHandle}, LCEVC_Access_Modify);
 
     // Fill the picture with data. We do cheeky memory mangling here to manually interleave
@@ -368,24 +395,30 @@ TYPED_TEST(PictureFixture, copyData)
     EXPECT_TRUE(this->m_pic.copyData(pic));
 
     for (uint32_t plane = 0; plane < this->m_pic.getNumPlanes(); plane++) {
-        const uint8_t* ptrToNV12 = pic.getPlaneFirstSample(std::min(plane, 1U));
-        const uint8_t* ptrToI420 = this->m_pic.getPlaneFirstSample(plane);
+        const uint8_t* ptrToPlaneNV12 = pic.getPlaneFirstSample(std::min(plane, 1U));
+        const uint8_t* ptrToPlaneI420 = this->m_pic.getPlaneFirstSample(plane);
 
         if (plane == 0) {
-            EXPECT_EQ(memcmp(ptrToNV12, ptrToI420, this->m_pic.getPlaneMemorySize(plane) - 1), 0);
+            EXPECT_EQ(memcmp(ptrToPlaneNV12, ptrToPlaneI420, this->m_pic.getPlaneMemorySize(plane) - 1), 0);
             continue;
         }
 
         // Can't really hack a memcmp thing so just manually iterate
-        const uint8_t* const end = ptrToNV12 + pic.getPlaneMemorySize(plane);
         if (plane == 2) {
-            ptrToNV12++;
+            ptrToPlaneNV12++;
         }
 
-        while (ptrToNV12 < end) {
-            EXPECT_EQ(*ptrToNV12, *ptrToI420);
-            ptrToNV12 += 2;
-            ptrToI420++;
+        for (uint32_t row = 0; row < pic.getPlaneHeight(plane); row++) {
+            const uint8_t* ptrToRowNV12 = ptrToPlaneNV12 + row * pic.getPlaneByteStride(plane);
+            const uint8_t* ptrToRowI420 = ptrToPlaneI420 + row * this->m_pic.getPlaneByteStride(plane);
+            const uint8_t* const nv12End = ptrToRowNV12 + pic.getPlaneWidthBytes(plane);
+            while (ptrToRowNV12 < nv12End) {
+                // Assert here, so it fails fast, rather than printing one error per pixel.
+                ASSERT_EQ(*ptrToRowNV12, *ptrToRowI420)
+                    << "Failed at row " << row << " out of " << pic.getPlaneHeight(plane);
+                ptrToRowNV12 += pic.getPlaneBytesPerPixel(plane);
+                ptrToRowI420 += this->m_pic.getPlaneBytesPerPixel(plane);
+            }
         }
     }
 }
@@ -435,9 +468,9 @@ TYPED_TEST(PictureFixture, lock)
     // desc (trivial success)
     LCEVC_PictureDesc newNV12Desc;
     LCEVC_DefaultPictureDesc(&newNV12Desc, LCEVC_NV12_8, 540, 960);
-    EXPECT_FALSE(this->m_pic.setDesc(newNV12Desc));
+    EXPECT_FALSE(::setDesc(this->m_pic, newNV12Desc, this->m_planeDescArr, this->m_bufferDesc));
     EXPECT_TRUE(this->setDesc());
 
     this->m_pic.unlock();
-    EXPECT_TRUE(this->m_pic.setDesc(newNV12Desc));
+    EXPECT_TRUE(::setDesc(this->m_pic, newNV12Desc, this->m_planeDescArr, this->m_bufferDesc));
 }

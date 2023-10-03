@@ -8,6 +8,12 @@ lcevc_set_properties(lcevc_dec_core_sequencing)
 
 target_sources(lcevc_dec_core_sequencing PRIVATE ${SOURCES})
 
+target_link_libraries(lcevc_dec_core_sequencing
+	PUBLIC
+		lcevc_dec::platform
+		lcevc_dec::compiler
+)
+
 target_include_directories(lcevc_dec_core_sequencing
 	PUBLIC
 		"${CMAKE_CURRENT_LIST_DIR}/include"

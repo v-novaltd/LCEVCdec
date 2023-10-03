@@ -45,11 +45,11 @@ void stampedBufferRelease(StampedBuffer_t** buffer);
  *                                  capacity (all inserts fail), otherwise capacity will simply set
  *                                  the maximum size.
  */
-LCEVCContainer_t* lcevcContainerCreate(uint32_t capacity);
+LCEVCContainer_t* lcevcContainerCreate(size_t capacity);
 void lcevcContainerDestroy(LCEVCContainer_t* container);
 
-uint32_t lcevcContainerSize(const LCEVCContainer_t* container);
-uint32_t lcevcContainerCapacity(const LCEVCContainer_t* container);
+size_t lcevcContainerSize(const LCEVCContainer_t* container);
+size_t lcevcContainerCapacity(const LCEVCContainer_t* container);
 
 /*! Set the maxNumReorderFrames
  * @param[in]  maxNumReorderFrames  The maximum number of frames that can be fed in before you get
@@ -114,7 +114,7 @@ StampedBuffer_t* lcevcContainerExtract(LCEVCContainer_t* container, uint64_t tim
  * @return                          The next StampedBuffer_t, in timehandle order.
  */
 StampedBuffer_t* lcevcContainerExtractNextInOrder(LCEVCContainer_t* container, bool force,
-                                                  uint64_t* timehandleOut, uint32_t* queueSizeOut);
+                                                  uint64_t* timehandleOut, size_t* queueSizeOut);
 
 /*! Set the timehandle printer (the function used when logging timehandles).*/
 void lcevcContainerSetPrinter(LCEVCContainer_t* container, thPrinter printer);

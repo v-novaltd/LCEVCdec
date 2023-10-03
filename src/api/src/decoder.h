@@ -117,7 +117,8 @@ public:
     // Picture-handling
     bool allocPictureManaged(const LCEVC_PictureDesc& desc, LCEVC_PictureHandle& pictureHandle);
     bool allocPictureExternal(const LCEVC_PictureDesc& desc, LCEVC_PictureHandle& pictureHandle,
-                              uint32_t bufferCount, const LCEVC_PictureBufferDesc* bufferDescArr);
+                              const LCEVC_PicturePlaneDesc* planeDescArr,
+                              const LCEVC_PictureBufferDesc* buffer);
     bool releasePicture(Handle<Picture> pictureHandle);
     Picture* getPicture(Handle<Picture> handle) { return m_picturePool.lookup(handle); }
 

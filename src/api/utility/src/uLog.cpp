@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2023. All rights reserved. */
 #include "uLog.h"
 
 #include "uChrono.h"
@@ -153,8 +153,8 @@ void log_printv(LogType type, const char* function, uint32_t line, const char* f
         // Don't add timing info to debug line if a callback is set
         if (sLog.enable_stdout && (sLog.callback == nullptr)) {
             count = snprintf(sFormatBuffer[1], 16384, "[%" PRId64 "]%s (%u): %s",
-                             lcevc_dec::utility::GetTime<lcevc_dec::utility::NanoSecond>(), function, line,
-                             sFormatBuffer[0]);
+                             lcevc_dec::api_utility::GetTime<lcevc_dec::api_utility::NanoSecond>(),
+                             function, line, sFormatBuffer[0]);
         } else {
             count = snprintf(sFormatBuffer[1], 16384, "%s (%u): %s", function, line, sFormatBuffer[0]);
         }

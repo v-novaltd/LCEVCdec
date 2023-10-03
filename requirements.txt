@@ -1,3 +1,5 @@
 conan==1.58.0
 braceexpand==0.1.7
 markupsafe==2.0.1
+gcovr==6.0
+flake8>=5.0.0

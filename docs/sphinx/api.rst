@@ -43,9 +43,11 @@ Enums
 
 .. doxygenenum:: LCEVC_ColorRange
 
-.. doxygenenum:: LCEVC_ColorStandard
+.. doxygenenum:: LCEVC_ColorPrimaries
 
-.. doxygenenum:: LCEVC_ColorTransfer
+.. doxygenenum:: LCEVC_TransferCharacteristics
+
+.. doxygenenum:: LCEVC_MatrixCoefficients
 
 .. doxygenenum:: LCEVC_PictureFlag
 
@@ -78,8 +80,6 @@ initialised before running function-specific methods.
 .. doxygenfunction:: LCEVC_GetPictureDesc
 
 .. doxygenfunction:: LCEVC_SetPictureDesc
-
-.. doxygenfunction:: LCEVC_GetPictureBufferCount
 
 .. doxygenfunction:: LCEVC_GetPictureBuffer
 

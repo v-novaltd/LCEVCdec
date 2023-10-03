@@ -25,24 +25,27 @@ struct Event
     // The constructor parameters are in a different order to the member variables, because the
     // parameters are designed to let you do "Event e(LCEVC_EventType)", whereas the member
     // variables are in memory alignment order.
-    Event(int32_t eventTypeIn, Handle<Picture> picHandleIn = kInvalidHandle,
-          const LCEVC_DecodeInformation* decodeInfoIn = nullptr, const uint8_t* dataIn = nullptr,
-          uint32_t dataSizeIn = 0)
+    constexpr Event(uint8_t eventTypeIn, Handle<Picture> picHandleIn = kInvalidHandle,
+                    const DecodeInformation* decodeInfoIn = nullptr,
+                    const uint8_t* dataIn = nullptr, uint32_t dataSizeIn = 0)
         : picHandle(picHandleIn)
-        , decodeInfo(decodeInfoIn)
         , data(dataIn)
         , dataSize(dataSizeIn)
         , eventType(eventTypeIn)
-    {}
+    {
+        if (decodeInfoIn != nullptr) {
+            memcpy(&decodeInfo, decodeInfoIn, sizeof(decodeInfo));
+        }
+    }
 
     bool isValid() const;
     bool isFlush() const;
 
     Handle<Picture> picHandle;
-    const LCEVC_DecodeInformation* decodeInfo;
+    DecodeInformation decodeInfo = DecodeInformation(-1); // must be a copy so that it's valid until received
     const uint8_t* data;
     uint32_t dataSize;
-    int32_t eventType;
+    uint8_t eventType;
 };
 
 // - EventManager ---------------------------------------------------------------------------------
@@ -56,8 +59,9 @@ public:
     void initialise(const std::vector<int32_t>& enabledEvents);
     void release();
 
-    void triggerEvent(Event event);
-    bool isEventEnabled(int32_t eventType) const { return m_eventMask & (1 << eventType); }
+    // catchExceptions should be false everywhere except in destructors
+    void triggerEvent(Event event, bool catchExceptions = false);
+    bool isEventEnabled(uint8_t eventType) const { return m_eventMask & (1 << eventType); }
     void setEventCallback(EventCallback callback, void* userData);
 
 private:

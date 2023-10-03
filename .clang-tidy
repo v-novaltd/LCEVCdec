@@ -11,6 +11,7 @@ Checks: >
     -zircon-*,
     -*-avoid-c-arrays,
     -bugprone-easily-swappable-parameters,
+    -cppcoreguidelines-avoid-do-while,
     -cppcoreguidelines-avoid-magic-numbers,
     -cppcoreguidelines-macro-usage,
     -cppcoreguidelines-non-private-member-variables-in-classes,

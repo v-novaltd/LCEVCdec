@@ -29,7 +29,7 @@ const struct PictureLayout::Info PictureLayout::kPictureLayoutInfo[] = {
     {LCEVC_I420_10_LE,      3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    10, "_10bit_p420.yuv"},
     {LCEVC_I420_12_LE,      3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    12, "_12bit_p420.yuv"},
     {LCEVC_I420_14_LE,      3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    14, "_14bit_p420.yuv"},
-    {LCEVC_I420_16_LE,      3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    14, "_16bit_p420.yuv"},
+    {LCEVC_I420_16_LE,      3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    16, "_16bit_p420.yuv"},
     {LCEVC_YUV420_RASTER_8, 3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    8,  "_p420.yuv"},
     {LCEVC_NV12_8,          3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 2, 2},    {0, 0, 1},    8,  ".nv12"},
     {LCEVC_NV21_8,          3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 2, 2},    {0, 1, 0},    8,  ".nv21"},
@@ -53,7 +53,7 @@ namespace {
     LCEVC_PictureDesc defaultPictureDesc(LCEVC_ColorFormat format, uint32_t width, uint32_t height)
     {
         LCEVC_PictureDesc desc = {0};
-        LCEVC_DefaultPictureDesc(&desc, format, width,  height);
+        LCEVC_DefaultPictureDesc(&desc, format, width, height);
         return desc;
     }
 
@@ -78,6 +78,21 @@ const PictureLayout::Info& PictureLayout::findLayoutInfo(LCEVC_ColorFormat forma
     }
 
     return kPictureLayoutInfoUnknown;
+}
+
+uint8_t PictureLayout::getBitsPerSample(LCEVC_ColorFormat format)
+{
+    return findLayoutInfo(format).bits;
+}
+
+uint8_t PictureLayout::getPlaneWidthShift(LCEVC_ColorFormat format, uint32_t planeIdx)
+{
+    return findLayoutInfo(format).planeWidthShift[planeIdx];
+}
+
+uint8_t PictureLayout::getPlaneHeightShift(LCEVC_ColorFormat format, uint32_t planeIdx)
+{
+    return findLayoutInfo(format).planeHeightShift[planeIdx];
 }
 
 PictureLayout::PictureLayout()
@@ -184,7 +199,7 @@ bool PictureLayout::isCompatible(const PictureLayout& other) const
     }
 
     // Sample bit depths must match
-    if (m_layoutInfo->bits!= other.m_layoutInfo->bits) {
+    if (m_layoutInfo->bits != other.m_layoutInfo->bits) {
         return false;
     }
 
@@ -192,7 +207,6 @@ bool PictureLayout::isCompatible(const PictureLayout& other) const
     if (m_layoutInfo->planes != other.m_layoutInfo->planes) {
         return false;
     }
-
 
     for (uint32_t plane = 0; plane < m_layoutInfo->planes; ++plane) {
         if (m_layoutInfo->planeWidthShift[plane] != other.m_layoutInfo->planeWidthShift[plane] ||

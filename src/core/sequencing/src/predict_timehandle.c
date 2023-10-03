@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
 #include "predict_timehandle.h"
 
 #include "lcevc_container.h"
@@ -93,7 +93,7 @@ static void timehandlePredictorUpdateDelta(TimehandlePredictor_t* predictor, uin
 
 // External functions
 
-TimehandlePredictor_t* timehandlePredictorCreate()
+TimehandlePredictor_t* timehandlePredictorCreate(void)
 {
     TimehandlePredictor_t* out = calloc(1, sizeof(TimehandlePredictor_t));
     out->timehandlePrintFn = defaultPrinter;
@@ -197,11 +197,15 @@ bool timehandlePredictorIsNext(const TimehandlePredictor_t* predictor, uint64_t 
     // should NOT be abs (for example, if deltaLowerBound is 0, we want to spot and reject when the
     // timehandles go backwards)
     int64_t delta = (int64_t)(timehandle) - (int64_t)(predictor->lastHintedTimehandle);
+    if (delta < 0) {
+        return false;
+    }
 
-    return (predictor->deltaLowerBound <= delta) && (delta <= predictor->deltaUpperBound);
+    return (predictor->deltaLowerBound <= (uint64_t)delta) &&
+           ((uint64_t)delta <= predictor->deltaUpperBound);
 }
 
-void timehandlePredictorSetMaxNumReorderFrames(TimehandlePredictor_t* predictor, uint64_t maxNumReorderFrames)
+void timehandlePredictorSetMaxNumReorderFrames(TimehandlePredictor_t* predictor, uint32_t maxNumReorderFrames)
 
 {
     if (maxNumReorderFrames == 0) {

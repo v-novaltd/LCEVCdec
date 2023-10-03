@@ -8,9 +8,11 @@
 #include <LCEVC/PerseusDecoder.h>
 #include <LCEVC/lcevc_dec.h>
 
+#include <limits>
+
 // ------------------------------------------------------------------------------------------------
 
-using namespace lcevc_dec::utility;
+using namespace lcevc_dec::api_utility;
 
 namespace lcevc_dec::decoder {
 
@@ -29,6 +31,7 @@ static void coreDecLogCallback(void* userData, perseus_decoder_log_type type, co
 // - DecoderConfig --------------------------------------------------------------------------------
 
 const ConfigMap<DecoderConfig> DecoderConfig::kConfigMap({
+    {"enable_logo_overlay", makeBinding(&DecoderConfig::m_enableLogoOverlay)},
     {"highlight_residuals", makeBinding(&DecoderConfig::m_highlightResiduals)},
     {"log_stdout", makeBinding(&DecoderConfig::m_logToStdOut)},
     {"use_loq0", makeBinding(&DecoderConfig::m_useLoq0)},
@@ -38,6 +41,9 @@ const ConfigMap<DecoderConfig> DecoderConfig::kConfigMap({
     {"dpi_pipeline_mode", makeBinding(&DecoderConfig::m_coreDecoderPipelineMode)},
     {"dpi_threads", makeBinding(&DecoderConfig::m_coreDecoderNumThreads)},
     {"log_level", makeBinding(&DecoderConfig::m_logLevel)},
+    {"logo_overlay_delay_frames", makeBinding(&DecoderConfig::m_logoOverlayDelayFrames)},
+    {"logo_overlay_position_y", makeBinding(&DecoderConfig::m_logoOverlayPositionX)},
+    {"logo_overlay_position_", makeBinding(&DecoderConfig::m_logoOverlayPositionY)},
     {"results_queue_cap", makeBinding(&DecoderConfig::m_resultsQueueCap)},
     {"loq_unprocessed_cap", makeBinding(&DecoderConfig::m_loqUnprocessedCap)},
     {"passthrough_mode", makeBinding(&DecoderConfig::m_passthroughMode)},
@@ -73,9 +79,9 @@ bool DecoderConfig::validate() const
 
     for (int32_t eventType : m_events) {
         if (eventType >= LCEVC_EventCount || eventType < 0) {
-            VNLogError(
-                "Invalid config: event types must be between 0 and %d, but %d was supplied.\n",
-                LCEVC_EventCount, eventType);
+            VNLogError("Invalid config: event types must be between 0 and %d (which should be less "
+                       "than %hhu), but %d was supplied.\n",
+                       LCEVC_EventCount, std::numeric_limits<uint8_t>::max(), eventType);
             valid = false;
         }
     }
@@ -93,24 +99,39 @@ void DecoderConfig::initialiseCoreConfig(perseus_decoder_config& cfgOut) const
 {
     perseus_decoder_config_init(&cfgOut);
 
+    // Normal settings (passed directly to Core decoder)
+    cfgOut.logo_overlay_enable = m_enableLogoOverlay;
+    cfgOut.use_approximate_pa =
+        (m_predictedAverageMethod == static_cast<int32_t>(PredictedAverageMethod::BakedIntoKernel));
+    cfgOut.dither_override_strength = m_ditherStrength;
+    cfgOut.log_callback = &coreDecLogCallback;
+
+    // Settings where negative means "don't set"
     if (m_coreDecoderNumThreads != -1) {
         cfgOut.num_worker_threads = m_coreDecoderNumThreads;
     }
     if (m_coreDecoderPipelineMode != -1) {
         cfgOut.pipeline_mode = static_cast<perseus_pipeline_mode>(m_coreDecoderPipelineMode);
     }
+    if (m_logoOverlayDelayFrames > 0) {
+        cfgOut.logo_overlay_delay = static_cast<uint16_t>(m_logoOverlayDelayFrames);
+    }
+    if (m_logoOverlayPositionX > 0) {
+        cfgOut.logo_overlay_position_x = static_cast<uint16_t>(m_logoOverlayPositionX);
+    }
+    if (m_logoOverlayPositionY > 0) {
+        cfgOut.logo_overlay_position_y = static_cast<uint16_t>(m_logoOverlayPositionY);
+    }
     if (m_sFilterStrength >= 0.0f) {
         cfgOut.s_strength = m_sFilterStrength;
     }
-    cfgOut.use_approximate_pa =
-        (m_predictedAverageMethod == static_cast<int32_t>(PredictedAverageMethod::BakedIntoKernel));
 
-    cfgOut.log_callback = &coreDecLogCallback;
-
-    VNLogVerbose("num_worker_threads   : %d\n", cfgOut.num_worker_threads);
-    VNLogVerbose("pipeline_mode        : %d\n", cfgOut.pipeline_mode);
-    VNLogVerbose("s_strength           : %d\n", cfgOut.s_strength);
-    VNLogVerbose("use_approximate_pa   : %d\n", cfgOut.use_approximate_pa);
+    VNLogVerbose("dither_override_strength : %d\n", cfgOut.dither_override_strength);
+    VNLogVerbose("logo_overlay_enable      : %d\n", cfgOut.logo_overlay_enable);
+    VNLogVerbose("num_worker_threads       : %d\n", cfgOut.num_worker_threads);
+    VNLogVerbose("pipeline_mode            : %d\n", cfgOut.pipeline_mode);
+    VNLogVerbose("s_strength               : %d\n", cfgOut.s_strength);
+    VNLogVerbose("use_approximate_pa       : %d\n", cfgOut.use_approximate_pa);
 }
 
 } // namespace lcevc_dec::decoder

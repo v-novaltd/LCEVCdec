@@ -30,6 +30,7 @@ int main(int argc, char** argv)
     std::string inputFile;
     std::string outputFile;
     std::string configurationFile;
+    std::string inputFormat;
     bool verbose{false};
     LCEVC_ColorFormat baseFormat{};
 
@@ -37,7 +38,8 @@ int main(int argc, char** argv)
     app.add_option("input", inputFile, "Input stream")->required();
     app.add_option("output", outputFile, "Output YUV")->required();
     app.add_option("configuration", configurationFile, "JSON configuration");
-    app.add_option("-f,--format", baseFormat, "Base format")->default_val(LCEVC_ColorFormat_Unknown);
+    app.add_option("--input-format", inputFormat, "Input stream format");
+    app.add_option("-b,--base-format", baseFormat, "Base format")->default_val(LCEVC_ColorFormat_Unknown);
     app.add_flag("-v,--verbose", verbose, "Verbose output");
 
     try {
@@ -47,18 +49,18 @@ int main(int argc, char** argv)
     }
 
     // Open base decoder
-    auto baseDecoder = createBaseDecoderLibAV(inputFile, baseFormat);
+    auto baseDecoder = createBaseDecoderLibAV(inputFile, inputFormat, baseFormat);
 
     if (!baseDecoder) {
         fmt::print("Could not open input {}\n", inputFile);
-        std::exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     // Open output file
     std::unique_ptr<FILE, decltype(&fclose)> output(fopen(outputFile.c_str(), "wb"), fclose);
     if (!output) {
         fmt::print("Could not open output {}\n", outputFile);
-        std::exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
     // Create and initialize LCEVC decoder
@@ -66,7 +68,7 @@ int main(int argc, char** argv)
     VN_LCEVC_CHECK(LCEVC_CreateDecoder(&decoder, LCEVC_AccelContextHandle{}));
 
     // Default to stdout for logs
-    LCEVC_ConfigureDecoderInt(decoder, "log_stdout", true);
+    LCEVC_ConfigureDecoderBool(decoder, "log_stdout", true);
 
     // Apply an JSON config
     if (!configurationFile.empty()) {
@@ -85,7 +87,7 @@ int main(int argc, char** argv)
 
     LCEVC_PictureDesc outputDesc;
     // Use 2x2 as a safe small size
-    LCEVC_DefaultPictureDesc(&outputDesc, baseDecoder->description().colorFormat, 2, 2);
+    LCEVC_DefaultPictureDesc(&outputDesc, LCEVC_I420_8, 2, 2);
     VN_LCEVC_CHECK(LCEVC_AllocPicture(decoder, &outputDesc, &outputPicture));
 
     // Output frame counter
@@ -93,7 +95,6 @@ int main(int argc, char** argv)
 
     // Frame loop - consume data from base
     while (baseDecoder->update()) {
-
         // Make sure LCEVC data is sent before base frame
         if (baseDecoder->hasEnhancement()) {
             // Fetch encoded enhancement data from base decoder
@@ -117,21 +118,11 @@ int main(int argc, char** argv)
 
             VN_LCEVC_CHECK(LCEVC_AllocPicture(decoder, &baseDecoder->description(), &basePicture));
 
-            LCEVC_PictureLockHandle lock = {};
-            VN_LCEVC_CHECK(LCEVC_LockPicture(decoder, basePicture, LCEVC_Access_Write, &lock));
-
-            for (uint32_t plane = 0; plane < baseDecoder->layout().planes(); ++plane) {
-                LCEVC_PicturePlaneDesc planeDescription;
-                VN_LCEVC_CHECK(LCEVC_GetPictureLockPlaneDesc(decoder, lock, plane, &planeDescription));
-                memcpy(planeDescription.firstSample,
-                       baseImage.ptr + baseDecoder->layout().planeOffset(plane),
-                       baseDecoder->layout().planeSize(plane));
-            }
-            VN_LCEVC_CHECK(LCEVC_UnlockPicture(decoder, lock));
+            copyPictureFromMemory(decoder, basePicture, baseImage.ptr, baseImage.size);
 
             // Try to end base picture into LCEVC decoder
-            if (VN_LCEVC_AGAIN(LCEVC_SendDecoderBase(decoder, baseImage.timestamp, false, basePicture,
-                                                     1000000, nullptr))) {
+            if (VN_LCEVC_AGAIN(LCEVC_SendDecoderBase(decoder, baseImage.timestamp, false,
+                                                     basePicture, 1000000, nullptr))) {
                 fmt::print("SendDecoderBase: {:#08x} {}\n", baseImage.timestamp, basePicture);
                 baseDecoder->clearImage();
             }
@@ -171,14 +162,16 @@ int main(int argc, char** argv)
 
                 LCEVC_PictureLockHandle lock;
                 VN_LCEVC_CHECK(LCEVC_LockPicture(decoder, decodedPicture, LCEVC_Access_Read, &lock));
+                PictureLayout layout(decoder, decodedPicture);
+
                 // Write out each row of image to output file
                 for (uint32_t plane = 0; plane < planeCount; ++plane) {
                     LCEVC_PicturePlaneDesc planeDescription = {nullptr};
                     VN_LCEVC_CHECK(LCEVC_GetPictureLockPlaneDesc(decoder, lock, plane, &planeDescription));
-                    for (unsigned row = 0; row < planeDescription.height; ++row) {
+                    for (unsigned row = 0; row < layout.planeHeight(plane); ++row) {
                         fwrite(planeDescription.firstSample +
                                    static_cast<size_t>(row * planeDescription.rowByteStride),
-                               planeDescription.rowByteSize, 1, output.get());
+                               layout.rowSize(plane), 1, output.get());
                     }
                 }
                 VN_LCEVC_CHECK(LCEVC_UnlockPicture(decoder, lock));

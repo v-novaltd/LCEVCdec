@@ -4,13 +4,13 @@
 #include "LCEVC/utility/types.h"
 #include "LCEVC/utility/types_cli11.h"
 
-#include <gtest/gtest.h>
-#include <fmt/core.h>
 #include <CLI/CLI.hpp>
+#include <fmt/core.h>
+#include <gtest/gtest.h>
 
+#include <array>
 #include <sstream>
 #include <string_view>
-#include <array>
 
 using namespace lcevc_dec::utility;
 
@@ -19,31 +19,30 @@ TEST(Convert, ColorFormat)
     LCEVC_ColorFormat fmt{LCEVC_ColorFormat_Unknown};
 
     // An error wne enumerations value are not covered - add case, and appropriate tests
-    switch(fmt) {
-    case LCEVC_ColorFormat_Unknown:
-    case LCEVC_I420_8:
-    case LCEVC_I420_10_LE:
-    case LCEVC_I420_12_LE:
-    case LCEVC_I420_14_LE:
-    case LCEVC_I420_16_LE:
-    case LCEVC_YUV420_RASTER_8:
-    case LCEVC_NV12_8:
-    case LCEVC_NV21_8:
-    case LCEVC_RGB_8:
-    case LCEVC_BGR_8:
-    case LCEVC_RGBA_8:
-    case LCEVC_BGRA_8:
-    case LCEVC_ARGB_8:
-    case LCEVC_ABGR_8:
-    case LCEVC_RGBA_10_2_LE:
-    case LCEVC_GRAY_8:
-    case LCEVC_GRAY_10_LE:
-    case LCEVC_GRAY_12_LE:
-    case LCEVC_GRAY_14_LE:
-    case LCEVC_GRAY_16_LE:
+    switch (fmt) {
+        case LCEVC_ColorFormat_Unknown:
+        case LCEVC_I420_8:
+        case LCEVC_I420_10_LE:
+        case LCEVC_I420_12_LE:
+        case LCEVC_I420_14_LE:
+        case LCEVC_I420_16_LE:
+        case LCEVC_YUV420_RASTER_8:
+        case LCEVC_NV12_8:
+        case LCEVC_NV21_8:
+        case LCEVC_RGB_8:
+        case LCEVC_BGR_8:
+        case LCEVC_RGBA_8:
+        case LCEVC_BGRA_8:
+        case LCEVC_ARGB_8:
+        case LCEVC_ABGR_8:
+        case LCEVC_RGBA_10_2_LE:
+        case LCEVC_GRAY_8:
+        case LCEVC_GRAY_10_LE:
+        case LCEVC_GRAY_12_LE:
+        case LCEVC_GRAY_14_LE:
+        case LCEVC_GRAY_16_LE:
 
-    case LCEVC_ColorFormat_ForceInt32:
-        ;
+        case LCEVC_ColorFormat_ForceInt32:;
     }
 
     EXPECT_TRUE(fromString("I420_8", fmt) && (fmt == LCEVC_I420_8));
@@ -134,20 +133,19 @@ TEST(Convert, ReturnCode)
     LCEVC_ReturnCode rc{LCEVC_Error};
 
     // An error wne enumerations value are not covered - add case, and appropriate tests
-    switch(rc) {
-    case LCEVC_Success:
-    case LCEVC_Again:
-    case LCEVC_NotFound:
-    case LCEVC_Error:
-    case LCEVC_Uninitialized:
-    case LCEVC_Initialized:
-    case LCEVC_InvalidParam:
-    case LCEVC_NotSupported:
-    case LCEVC_Flushed:
-    case LCEVC_Timeout:
+    switch (rc) {
+        case LCEVC_Success:
+        case LCEVC_Again:
+        case LCEVC_NotFound:
+        case LCEVC_Error:
+        case LCEVC_Uninitialized:
+        case LCEVC_Initialized:
+        case LCEVC_InvalidParam:
+        case LCEVC_NotSupported:
+        case LCEVC_Flushed:
+        case LCEVC_Timeout:
 
-    case LCEVC_ReturnCode_ForceInt32:
-        ;
+        case LCEVC_ReturnCode_ForceInt32:;
     }
 
     EXPECT_TRUE(fromString("Success", rc) && (rc == LCEVC_Success));
@@ -182,13 +180,12 @@ TEST(Convert, ColorRange)
     LCEVC_ColorRange cr{LCEVC_ColorRange_Unknown};
 
     // An error wne enumerations value are not covered - add case, and appropriate tests
-    switch(cr) {
-    case LCEVC_ColorRange_Unknown:
-    case LCEVC_ColorRange_Full:
-    case LCEVC_ColorRange_Limited:
+    switch (cr) {
+        case LCEVC_ColorRange_Unknown:
+        case LCEVC_ColorRange_Full:
+        case LCEVC_ColorRange_Limited:
 
-    case LCEVC_ColorRange_ForceInt32:
-        ;
+        case LCEVC_ColorRange_ForceInt32:;
     }
 
     EXPECT_TRUE(fromString("Full", cr) && (cr == LCEVC_ColorRange_Full));
@@ -198,57 +195,86 @@ TEST(Convert, ColorRange)
     EXPECT_STREQ(toString(LCEVC_ColorRange_Limited).data(), "Limited");
 }
 
-TEST(Convert, ColorStandard)
+TEST(Convert, ColorPrimaries)
 {
-    LCEVC_ColorStandard cs{LCEVC_ColorStandard_Unknown};
+    LCEVC_ColorPrimaries cp{LCEVC_ColorPrimaries_Unspecified};
 
     // An error wne enumerations value are not covered - add case, and appropriate tests
-    switch(cs) {
-    case LCEVC_ColorStandard_Unknown:
-    case LCEVC_ColorStandard_BT709:
-    case LCEVC_ColorStandard_BT601_PAL:
-    case LCEVC_ColorStandard_BT601_NTSC:
-    case LCEVC_ColorStandard_BT2020:
-
-    case LCEVC_ColorStandard_ForceInt32:
-        ;
+    switch (cp) {
+        case LCEVC_ColorPrimaries_Reserved_0:
+        case LCEVC_ColorPrimaries_BT709:
+        case LCEVC_ColorPrimaries_Unspecified:
+        case LCEVC_ColorPrimaries_Reserved_3:
+        case LCEVC_ColorPrimaries_BT470_M:
+        case LCEVC_ColorPrimaries_BT470_BG:
+        case LCEVC_ColorPrimaries_BT601_NTSC:
+        case LCEVC_ColorPrimaries_SMPTE240:
+        case LCEVC_ColorPrimaries_GENERIC_FILM:
+        case LCEVC_ColorPrimaries_BT2020:
+        case LCEVC_ColorPrimaries_XYZ:
+        case LCEVC_ColorPrimaries_SMPTE431:
+        case LCEVC_ColorPrimaries_SMPTE432:
+        case LCEVC_ColorPrimaries_Reserved_13:
+        case LCEVC_ColorPrimaries_Reserved_14:
+        case LCEVC_ColorPrimaries_Reserved_15:
+        case LCEVC_ColorPrimaries_Reserved_16:
+        case LCEVC_ColorPrimaries_Reserved_17:
+        case LCEVC_ColorPrimaries_Reserved_18:
+        case LCEVC_ColorPrimaries_Reserved_19:
+        case LCEVC_ColorPrimaries_Reserved_20:
+        case LCEVC_ColorPrimaries_Reserved_21:
+        case LCEVC_ColorPrimaries_P22:
+        case LCEVC_ColorPrimaries_ForceInt32:;
     }
 
-    EXPECT_TRUE(fromString("BT709", cs) && (cs == LCEVC_ColorStandard_BT709));
-    EXPECT_TRUE(fromString("BT601_NTSC", cs) && (cs == LCEVC_ColorStandard_BT601_NTSC));
-    EXPECT_TRUE(fromString("BT601_PAL", cs) && (cs == LCEVC_ColorStandard_BT601_PAL));
-    EXPECT_TRUE(fromString("BT2020", cs) && (cs == LCEVC_ColorStandard_BT2020));
+    EXPECT_TRUE(fromString("BT709", cp) && (cp == LCEVC_ColorPrimaries_BT709));
+    EXPECT_TRUE(fromString("BT470_BG", cp) && (cp == LCEVC_ColorPrimaries_BT470_BG));
+    EXPECT_TRUE(fromString("BT601_NTSC", cp) && (cp == LCEVC_ColorPrimaries_BT601_NTSC));
+    EXPECT_TRUE(fromString("BT2020", cp) && (cp == LCEVC_ColorPrimaries_BT2020));
 
-    EXPECT_STREQ(toString(LCEVC_ColorStandard_BT709).data(), "BT709");
-    EXPECT_STREQ(toString(LCEVC_ColorStandard_BT601_NTSC).data(), "BT601_NTSC");
-    EXPECT_STREQ(toString(LCEVC_ColorStandard_BT601_PAL).data(), "BT601_PAL");
-    EXPECT_STREQ(toString(LCEVC_ColorStandard_BT2020).data(), "BT2020");
+    EXPECT_STREQ(toString(LCEVC_ColorPrimaries_BT709).data(), "BT709");
+    EXPECT_STREQ(toString(LCEVC_ColorPrimaries_BT470_BG).data(), "BT470_BG");
+    EXPECT_STREQ(toString(LCEVC_ColorPrimaries_BT601_NTSC).data(), "BT601_NTSC");
+    EXPECT_STREQ(toString(LCEVC_ColorPrimaries_BT2020).data(), "BT2020");
 }
 
-TEST(Convert, ColorTransfer)
+TEST(Convert, TransferCharacteristics)
 {
-    LCEVC_ColorTransfer ct{LCEVC_ColorTransfer_Unknown};
+    LCEVC_TransferCharacteristics ct{LCEVC_TransferCharacteristics_Unspecified};
 
     // An error wne enumerations value are not covered - add case, and appropriate tests
-    switch(ct) {
-    case LCEVC_ColorTransfer_Unknown:
-    case LCEVC_ColorTransfer_SDR:
-    case LCEVC_ColorTransfer_Linear:
-    case LCEVC_ColorTransfer_ST2084:
-    case LCEVC_ColorTransfer_HLG:
-    case LCEVC_ColorTransfer_ForceInt32:
-        ;
+    switch (ct) {
+        case LCEVC_TransferCharacteristics_Reserved_0:
+        case LCEVC_TransferCharacteristics_BT709:
+        case LCEVC_TransferCharacteristics_Unspecified:
+        case LCEVC_TransferCharacteristics_Reserved_3:
+        case LCEVC_TransferCharacteristics_GAMMA22:
+        case LCEVC_TransferCharacteristics_GAMMA28:
+        case LCEVC_TransferCharacteristics_BT601:
+        case LCEVC_TransferCharacteristics_SMPTE240:
+        case LCEVC_TransferCharacteristics_LINEAR:
+        case LCEVC_TransferCharacteristics_LOG100:
+        case LCEVC_TransferCharacteristics_LOG100_SQRT10:
+        case LCEVC_TransferCharacteristics_IEC61966:
+        case LCEVC_TransferCharacteristics_BT1361:
+        case LCEVC_TransferCharacteristics_SRGB_SYCC:
+        case LCEVC_TransferCharacteristics_BT2020_10BIT:
+        case LCEVC_TransferCharacteristics_BT2020_12BIT:
+        case LCEVC_TransferCharacteristics_PQ:
+        case LCEVC_TransferCharacteristics_SMPTE428:
+        case LCEVC_TransferCharacteristics_HLG:
+        case LCEVC_TransferCharacteristics_ForceInt32:;
     }
 
-    EXPECT_TRUE(fromString("Linear", ct) && (ct == LCEVC_ColorTransfer_Linear));
-    EXPECT_TRUE(fromString("SDR", ct) && (ct == LCEVC_ColorTransfer_SDR));
-    EXPECT_TRUE(fromString("ST2084", ct) && (ct == LCEVC_ColorTransfer_ST2084));
-    EXPECT_TRUE(fromString("HLG", ct) && (ct == LCEVC_ColorTransfer_HLG));
+    EXPECT_TRUE(fromString("LINEAR", ct) && (ct == LCEVC_TransferCharacteristics_LINEAR));
+    EXPECT_TRUE(fromString("BT709", ct) && (ct == LCEVC_TransferCharacteristics_BT709));
+    EXPECT_TRUE(fromString("PQ", ct) && (ct == LCEVC_TransferCharacteristics_PQ));
+    EXPECT_TRUE(fromString("HLG", ct) && (ct == LCEVC_TransferCharacteristics_HLG));
 
-    EXPECT_STREQ(toString(LCEVC_ColorTransfer_Linear).data(), "Linear");
-    EXPECT_STREQ(toString(LCEVC_ColorTransfer_SDR).data(), "SDR");
-    EXPECT_STREQ(toString(LCEVC_ColorTransfer_ST2084).data(), "ST2084");
-    EXPECT_STREQ(toString(LCEVC_ColorTransfer_HLG).data(), "HLG");
+    EXPECT_STREQ(toString(LCEVC_TransferCharacteristics_LINEAR).data(), "LINEAR");
+    EXPECT_STREQ(toString(LCEVC_TransferCharacteristics_BT709).data(), "BT709");
+    EXPECT_STREQ(toString(LCEVC_TransferCharacteristics_PQ).data(), "PQ");
+    EXPECT_STREQ(toString(LCEVC_TransferCharacteristics_HLG).data(), "HLG");
 }
 
 TEST(Convert, PictureFlag)
@@ -256,13 +282,12 @@ TEST(Convert, PictureFlag)
     LCEVC_PictureFlag pf{LCEVC_PictureFlag_Unknown};
 
     // An error wne enumerations value are not covered - add case, and appropriate tests
-    switch(pf) {
-    case LCEVC_PictureFlag_Unknown:
-    case LCEVC_PictureFlag_IDR:
-    case LCEVC_PictureFlag_Interlaced:
+    switch (pf) {
+        case LCEVC_PictureFlag_Unknown:
+        case LCEVC_PictureFlag_IDR:
+        case LCEVC_PictureFlag_Interlaced:
 
-    case LCEVC_PictureFlag_ForceInt32:
-        ;
+        case LCEVC_PictureFlag_ForceInt32:;
     }
 
     EXPECT_TRUE(fromString("IDR", pf) && (pf == LCEVC_PictureFlag_IDR));
@@ -277,13 +302,12 @@ TEST(Convert, Access)
     LCEVC_Access ac{LCEVC_Access_Unknown};
 
     // An error wne enumerations value are not covered - add case, and appropriate tests
-    switch(ac) {
-    case LCEVC_Access_Unknown:
-    case LCEVC_Access_Read:
-    case LCEVC_Access_Modify:
-    case LCEVC_Access_Write:
-    case LCEVC_Access_ForceInt32:
-        ;
+    switch (ac) {
+        case LCEVC_Access_Unknown:
+        case LCEVC_Access_Read:
+        case LCEVC_Access_Modify:
+        case LCEVC_Access_Write:
+        case LCEVC_Access_ForceInt32:;
     }
 
     EXPECT_TRUE(fromString("Read", ac) && (ac == LCEVC_Access_Read));
@@ -300,19 +324,18 @@ TEST(Convert, Event)
     LCEVC_Event ev{LCEVC_Exit};
 
     // An error wne enumerations value are not covered - add case, and appropriate tests
-    switch(ev) {
-    case LCEVC_Log:
-    case LCEVC_Exit:
-    case LCEVC_CanSendBase:
-    case LCEVC_CanSendEnhancement:
-    case LCEVC_CanSendPicture:
-    case LCEVC_CanReceive:
-    case LCEVC_BasePictureDone:
-    case LCEVC_OutputPictureDone:
+    switch (ev) {
+        case LCEVC_Log:
+        case LCEVC_Exit:
+        case LCEVC_CanSendBase:
+        case LCEVC_CanSendEnhancement:
+        case LCEVC_CanSendPicture:
+        case LCEVC_CanReceive:
+        case LCEVC_BasePictureDone:
+        case LCEVC_OutputPictureDone:
 
-    case LCEVC_EventCount:
-    case LCEVC_Event_ForceInt32:
-        ;
+        case LCEVC_EventCount:
+        case LCEVC_Event_ForceUInt8:;
     }
 
     EXPECT_TRUE(fromString("Log", ev) && (ev == LCEVC_Log));
@@ -339,20 +362,22 @@ TEST(Convert, fmt)
     LCEVC_ColorFormat fmt = LCEVC_I420_8;
 
     EXPECT_STREQ(fmt::format("Formatted {}", fmt).c_str(), "Formatted ColorFormat_I420_8");
-    EXPECT_STREQ(fmt::format("Formatted {:>32}", fmt).c_str(), "Formatted               ColorFormat_I420_8");
+    EXPECT_STREQ(fmt::format("Formatted {:>32}", fmt).c_str(),
+                 "Formatted               ColorFormat_I420_8");
     EXPECT_STREQ(fmt::format("{:<20} X", fmt).c_str(), "ColorFormat_I420_8   X");
 
     LCEVC_ReturnCode rc{LCEVC_Error};
-    EXPECT_STREQ(fmt::format("Formatted {:*^30}", rc).c_str(), "Formatted *******ReturnCode_Error*******");
+    EXPECT_STREQ(fmt::format("Formatted {:*^30}", rc).c_str(),
+                 "Formatted *******ReturnCode_Error*******");
 
     LCEVC_ColorRange cr{LCEVC_ColorRange_Full};
     EXPECT_STREQ(fmt::format("Formatted {}", cr).c_str(), "Formatted ColorRange_Full");
 
-    LCEVC_ColorStandard cs{LCEVC_ColorStandard_BT601_NTSC};
-    EXPECT_STREQ(fmt::format("Formatted {}", cs).c_str(), "Formatted ColorStandard_BT601_NTSC");
+    LCEVC_ColorPrimaries cs{LCEVC_ColorPrimaries_BT601_NTSC};
+    EXPECT_STREQ(fmt::format("Formatted {}", cs).c_str(), "Formatted ColorPrimaries_BT601_NTSC");
 
-    LCEVC_ColorTransfer ct{LCEVC_ColorTransfer_HLG};
-    EXPECT_STREQ(fmt::format("Formatted {}", ct).c_str(), "Formatted ColorTransfer_HLG");
+    LCEVC_TransferCharacteristics ct{LCEVC_TransferCharacteristics_HLG};
+    EXPECT_STREQ(fmt::format("Formatted {}", ct).c_str(), "Formatted TransferCharacteristics_HLG");
 
     LCEVC_PictureFlag pf{LCEVC_PictureFlag_IDR};
     EXPECT_STREQ(fmt::format("Formatted {}", pf).c_str(), "Formatted PictureFlag_IDR");
@@ -362,7 +387,6 @@ TEST(Convert, fmt)
 
     LCEVC_Event ev{LCEVC_CanReceive};
     EXPECT_STREQ(fmt::format("Formatted {}", ev).c_str(), "Formatted Event_CanReceive");
-
 }
 
 TEST(Convert, CLI11)
@@ -370,8 +394,8 @@ TEST(Convert, CLI11)
     LCEVC_ColorFormat cf{LCEVC_ColorFormat_Unknown};
     LCEVC_ReturnCode rc{LCEVC_Success};
     LCEVC_ColorRange cr{LCEVC_ColorRange_Unknown};
-    LCEVC_ColorStandard cs{LCEVC_ColorStandard_Unknown};
-    LCEVC_ColorTransfer ct{LCEVC_ColorTransfer_Unknown};
+    LCEVC_ColorPrimaries cs{LCEVC_ColorPrimaries_Unspecified};
+    LCEVC_TransferCharacteristics ct{LCEVC_TransferCharacteristics_Unspecified};
     LCEVC_PictureFlag pf{LCEVC_PictureFlag_IDR};
     LCEVC_Access ac{LCEVC_Access_Modify};
     LCEVC_Event ev{LCEVC_CanReceive};
@@ -379,8 +403,9 @@ TEST(Convert, CLI11)
     CLI::App app{"LCEVC_DEC C++ Type Converting"};
     app.add_option("--colorFormat", cf, "Color Format")->default_val(LCEVC_ColorFormat_Unknown);
     app.add_option("--colorRange", cr, "Color Range")->default_val(LCEVC_ColorRange_Unknown);
-    app.add_option("--colorStandard", cs, "Color Standard")->default_val(LCEVC_ColorStandard_Unknown);
-    app.add_option("--colorTransfer", ct, "Color Transfer")->default_val(LCEVC_ColorTransfer_Unknown);
+    app.add_option("--colorPrimaries", cs, "Color Primaries")->default_val(LCEVC_ColorPrimaries_Unspecified);
+    app.add_option("--transferCharacteristics", ct, "Transfer Characteristics")
+        ->default_val(LCEVC_TransferCharacteristics_Unspecified);
     app.add_option("--returnCode", rc, "Return Code");
     app.add_option("--pictureFlag", pf, "Picture Flag");
     app.add_option("--access", ac, "Access");
@@ -390,8 +415,8 @@ TEST(Convert, CLI11)
         "",
         "--colorFormat=I420_8",
         "--colorRange=full",
-        "--colorStandard=bt2020",
-        "--colorTransfer=ST2084",
+        "--colorPrimaries=bt2020",
+        "--transferCharacteristics=BT2020_10BIT",
         "--returnCode=Error",
         "--pictureFlag=Idr",
         "--access=Read",
@@ -403,8 +428,8 @@ TEST(Convert, CLI11)
     EXPECT_EQ(cf, LCEVC_I420_8);
     EXPECT_EQ(rc, LCEVC_Error);
     EXPECT_EQ(cr, LCEVC_ColorRange_Full);
-    EXPECT_EQ(cs, LCEVC_ColorStandard_BT2020);
-    EXPECT_EQ(ct, LCEVC_ColorTransfer_ST2084);
+    EXPECT_EQ(cs, LCEVC_ColorPrimaries_BT2020);
+    EXPECT_EQ(ct, LCEVC_TransferCharacteristics_BT2020_10BIT);
     EXPECT_EQ(pf, LCEVC_PictureFlag_IDR);
     EXPECT_EQ(ac, LCEVC_Access_Read);
     EXPECT_EQ(ev, LCEVC_Log);

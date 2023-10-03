@@ -8,10 +8,19 @@
 #include <vector>
 
 using namespace lcevc_dec::decoder;
-using namespace lcevc_dec::utility;
+using namespace lcevc_dec::api_utility;
 
-void setupBuffers(std::vector<SmartBuffer>& buffersOut, LCEVC_ColorFormat format, uint32_t width,
-                  uint32_t height)
+EnhancementWithData getEnhancement(int64_t pts, const std::vector<uint8_t> kValidEnhancements[3])
+{
+    const size_t idx = pts % 3;
+    const auto size = static_cast<uint32_t>(kValidEnhancements[idx].size());
+    return EnhancementWithData(kValidEnhancements[idx].data(), size);
+}
+
+void setupPictureExternal(LCEVC_PictureBufferDesc& bufferDescOut, SmartBuffer& bufferOut,
+                          LCEVC_PicturePlaneDesc planeDescArrOut[kMaxNumPlanes],
+                          LCEVC_ColorFormat format, uint32_t width, uint32_t height,
+                          LCEVC_AccelBufferHandle accelBufferHandle, LCEVC_Access access)
 {
     PictureFormatDesc fullFormat;
     const PictureFormat::Enum internalFormat = fromLCEVCDescColorFormat(format);
@@ -19,35 +28,18 @@ void setupBuffers(std::vector<SmartBuffer>& buffersOut, LCEVC_ColorFormat format
     fullFormat.Initialise(internalFormat, width, height, interleaving);
 
     // make the buffers
-    buffersOut.clear();
-    buffersOut.reserve(fullFormat.GetPlaneCount());
-    for (uint32_t plane = 0; plane < fullFormat.GetPlaneCount(); plane++) {
-        buffersOut.push_back(std::make_shared<std::vector<uint8_t>>(fullFormat.GetPlaneMemorySize(plane)));
+    bufferOut = std::make_shared<std::vector<uint8_t>>(fullFormat.GetMemorySize());
+
+    bufferDescOut = {
+        bufferOut->data(),
+        static_cast<uint32_t>(bufferOut->size()),
+        accelBufferHandle,
+        access,
+    };
+
+    uint8_t* curDataPtr = bufferOut->data();
+    for (uint32_t planeIdx = 0; planeIdx < fullFormat.GetPlaneCount(); planeIdx++) {
+        planeDescArrOut[planeIdx] = {curDataPtr, fullFormat.GetPlaneStrideBytes(planeIdx)};
+        curDataPtr += fullFormat.GetPlaneMemorySize(planeIdx);
     }
-}
-
-void setupBufferDesc(LCEVC_PictureBufferDesc (&descArrOut)[kMaxNumPlanes],
-                     const std::vector<SmartBuffer>& buffers,
-                     LCEVC_AccelBufferHandle accelBufferHandle, LCEVC_Access access)
-{
-    for (uint32_t plane = 0; plane < buffers.size(); plane++) {
-        descArrOut[plane] = {
-            buffers[plane]->data(),
-            static_cast<uint32_t>(buffers[plane]->size()),
-            accelBufferHandle,
-            access,
-        };
-    }
-}
-
-bool initPictureExternalAndBuffers(PictureExternal& out, std::vector<SmartBuffer>& buffersOut,
-                                   LCEVC_ColorFormat format, uint32_t width, uint32_t height,
-                                   LCEVC_AccelBufferHandle accelBufferHandle, LCEVC_Access access)
-{
-    setupBuffers(buffersOut, format, width, height);
-
-    LCEVC_PictureBufferDesc descArr[kMaxNumPlanes] = {};
-    setupBufferDesc(descArr, buffersOut, accelBufferHandle, access);
-
-    return out.bindMemoryBuffers(static_cast<uint32_t>(buffersOut.size()), descArr);
 }

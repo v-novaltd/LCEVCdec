@@ -11,7 +11,7 @@
 // - Forward declarations -------------------------------------------------------------------------
 
 namespace lcevc_dec::decoder {
-using PictureBuffer = lcevc_dec::utility::DataBuffer;
+using PictureBuffer = lcevc_dec::api_utility::DataBuffer;
 
 // - Helper types ------------------------------------------------------------------------------------
 

@@ -29,7 +29,7 @@ class LCEVCContainerTestFixture : public testing::Test
 protected:
     // Virtual functions
     void SetUp() override { SetUp(kContainerDefaultCapacity, kEmptyArray); }
-    virtual void SetUp(uint32_t capacity, const std::vector<uint64_t>& timehandleList)
+    virtual void SetUp(size_t capacity, const std::vector<uint64_t>& timehandleList)
     {
         m_capacity = capacity;
         m_lcevcContainer = lcevcContainerCreate(m_capacity);
@@ -41,10 +41,10 @@ protected:
     // Non-virtual helper functions
     void populate(const std::vector<uint64_t>& timehandleList)
     {
-        uint32_t limit = m_capacity;
+        size_t limit = m_capacity;
         if (limit == 0) {
-            limit = UINT32_MAX;
-        } else if (limit == UINT32_MAX) {
+            limit = std::numeric_limits<size_t>::max();
+        } else if (limit == std::numeric_limits<size_t>::max()) {
             limit = 0;
         }
 
@@ -56,7 +56,7 @@ protected:
     bool addArbitraryData(uint64_t timehandle, size_t index)
     {
         index = index % kLenRandLengths;
-        const size_t bufLen = kRandLengths[index];
+        const uint32_t bufLen = static_cast<uint32_t>(kRandLengths[index]);
         uint8_t* randomData = kRandData[index];
         return lcevcContainerInsert(m_lcevcContainer, randomData, bufLen, timehandle, getTimeSinceStart());
     }
@@ -69,7 +69,7 @@ protected:
             addArbitraryData(srcData[i], i);
 
             uint64_t dummyTh = 0;
-            uint32_t dummyQueueLen = 0;
+            size_t dummyQueueLen = 0;
             StampedBuffer_t* nextBufferInOrder =
                 lcevcContainerExtractNextInOrder(m_lcevcContainer, false, &dummyTh, &dummyQueueLen);
             if (i < m_deltaRepeatCount) {
@@ -106,7 +106,7 @@ protected:
             addArbitraryData(srcData[i], i);
 
             uint64_t dummyTh = 0;
-            uint32_t dummyQueueLen = 0;
+            size_t dummyQueueLen = 0;
             StampedBuffer_t* nextBufferInOrder =
                 lcevcContainerExtractNextInOrder(m_lcevcContainer, false, &dummyTh, &dummyQueueLen);
 
@@ -135,7 +135,7 @@ protected:
     void forceUntilEnd(std::set<uint64_t>& timehandlesNotFound)
     {
         uint64_t dummyTh = 0;
-        uint32_t dummyQueueLen = 0;
+        size_t dummyQueueLen = 0;
         StampedBuffer_t* nextBuffer = nullptr;
         while ((nextBuffer = lcevcContainerExtractNextInOrder(m_lcevcContainer, true, &dummyTh,
                                                               &dummyQueueLen)) != nullptr) {
@@ -145,7 +145,7 @@ protected:
 
     // Member variables
     LCEVCContainer_t* m_lcevcContainer = nullptr;
-    uint32_t m_capacity = 0;
+    size_t m_capacity = 0;
     const uint32_t m_maxNumReorderFrames = 16; // Todo: try streams with other values.
     const uint32_t m_deltaRepeatCount = m_maxNumReorderFrames / 2;
 };
@@ -191,7 +191,7 @@ class LCEVCContainerTestFixtureUIntMaxCapacity
     using PARENT = LCEVCContainerTestFixture;
 
 protected:
-    void SetUp() override { PARENT::SetUp(UINT32_MAX, kEmptyArray); }
+    void SetUp() override { PARENT::SetUp(std::numeric_limits<size_t>::max(), kEmptyArray); }
 };
 
 class LCEVCContainerTestFixtureMediumCapacity
@@ -265,10 +265,10 @@ TEST_F(LCEVCContainerTestFixture, removeSubtractsWhatWasAdded)
     const uint64_t inputTime = getTimeSinceStart();
     lcevcContainerInsert(m_lcevcContainer, randomData, bufSize, timehandle, inputTime);
 
-    const uint8_t oldSize = lcevcContainerSize(m_lcevcContainer);
+    const size_t oldSize = lcevcContainerSize(m_lcevcContainer);
 
     uint64_t retrievedTimehandle = 0;
-    uint32_t queueSize = 0;
+    size_t queueSize = 0;
     StampedBuffer_t* releaseThis =
         lcevcContainerExtractNextInOrder(m_lcevcContainer, true, &retrievedTimehandle, &queueSize);
     EXPECT_EQ(lcevcContainerSize(m_lcevcContainer), oldSize - 1);
@@ -304,7 +304,7 @@ TEST_P(LCEVCContainerTestFixturePreFillSome, extractIsSortedAfterInsertion)
 {
     // Container has already been filled, so just check it's sorted now.
     uint64_t timehandle = 0;
-    uint32_t queueSize = 0;
+    size_t queueSize = 0;
     StampedBuffer_t* curBuffer =
         lcevcContainerExtractNextInOrder(m_lcevcContainer, true, &timehandle, &queueSize);
     while (lcevcContainerSize(m_lcevcContainer) > 0) {
@@ -432,7 +432,7 @@ TEST_P(LCEVCContainerTestFixturePreFillAll, extractFromMiddleRemovesAllLower)
         // This makes sure that ONLY higher timehandles remain
         while (lcevcContainerSize(m_lcevcContainer) > 0) {
             uint64_t nextTh = UINT64_MAX;
-            uint32_t dummyQueueSize = 0;
+            size_t dummyQueueSize = 0;
             StampedBuffer_t* nextOut =
                 lcevcContainerExtractNextInOrder(m_lcevcContainer, true, &nextTh, &dummyQueueSize);
 
@@ -458,7 +458,7 @@ TEST_F(LCEVCContainerTestFixtureMediumCapacity, insertSucceedsUntilCapacity)
 {
     ASSERT_LT(m_capacity, kTimehandles.size()) << "Capacity of fixture was set too low";
 
-    for (int i = 0; i < kTimehandles.size(); i++) {
+    for (size_t i = 0; i < kTimehandles.size(); i++) {
         const bool insertionSucceeded = addArbitraryData(kTimehandles[i], i);
         EXPECT_EQ(insertionSucceeded, i < m_capacity);
     }
@@ -539,7 +539,7 @@ TEST_F(LCEVCContainerTestFixture, extractAlwaysFailsIfTimehandlesIncreaseExponen
         addArbitraryData(kTimehandlesIncreaseExponentially[i], i);
 
         uint64_t dummyTh = 0;
-        uint32_t dummyQueueLen = 0;
+        size_t dummyQueueLen = 0;
         StampedBuffer_t* nextBufferInOrder =
             lcevcContainerExtractNextInOrder(m_lcevcContainer, false, &dummyTh, &dummyQueueLen);
         EXPECT_EQ(nextBufferInOrder, nullptr);
@@ -554,7 +554,7 @@ TEST_F(LCEVCContainerTestFixture, extractAlwaysFailsIfTimehandlesStrictlyDecreas
         addArbitraryData(kSortedTimehandles[i], i);
 
         uint64_t dummyTh = 0;
-        uint32_t dummyQueueLen = 0;
+        size_t dummyQueueLen = 0;
         StampedBuffer_t* nextBufferInOrder =
             lcevcContainerExtractNextInOrder(m_lcevcContainer, false, &dummyTh, &dummyQueueLen);
         EXPECT_EQ(nextBufferInOrder, nullptr);
@@ -569,7 +569,7 @@ TEST_F(LCEVCContainerTestFixture, extractAlwaysFailsIfTimehandlesApproximatelyDe
         addArbitraryData(kTimehandles[i], i);
 
         uint64_t dummyTh = 0;
-        uint32_t dummyQueueLen = 0;
+        size_t dummyQueueLen = 0;
         StampedBuffer_t* nextBufferInOrder =
             lcevcContainerExtractNextInOrder(m_lcevcContainer, false, &dummyTh, &dummyQueueLen);
         EXPECT_EQ(nextBufferInOrder, nullptr);
@@ -592,7 +592,7 @@ TEST_F(LCEVCContainerTestFixture, extractRecoversAfterEarlyDroppedFrame)
         addArbitraryData(kTimehandles[i], i);
 
         uint64_t dummyTh = 0;
-        uint32_t dummyQueueLen = 0;
+        size_t dummyQueueLen = 0;
         StampedBuffer_t* nextBufferInOrder =
             lcevcContainerExtractNextInOrder(m_lcevcContainer, false, &dummyTh, &dummyQueueLen);
         EXPECT_EQ(nextBufferInOrder, nullptr);
@@ -630,7 +630,7 @@ TEST_F(LCEVCContainerTestFixture, extractRecoversAfterRepeatedLateDroppedFrames)
         numAdded++;
 
         uint64_t dummyTh = 0;
-        uint32_t dummyQueueLen = 0;
+        size_t dummyQueueLen = 0;
         StampedBuffer_t* nextBufferInOrder =
             lcevcContainerExtractNextInOrder(m_lcevcContainer, false, &dummyTh, &dummyQueueLen);
         if (nextBufferInOrder == nullptr && i >= m_deltaRepeatCount) {

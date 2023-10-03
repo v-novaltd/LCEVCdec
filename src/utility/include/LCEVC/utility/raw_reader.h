@@ -32,7 +32,7 @@ public:
     uint64_t offset() const;
 
 private:
-    RawReader(const LCEVC_PictureDesc& description, std::unique_ptr<std::istream> stream);
+    explicit RawReader(const LCEVC_PictureDesc& description, std::unique_ptr<std::istream> stream);
 
     friend std::unique_ptr<RawReader> createRawReader(const LCEVC_PictureDesc& description,
                                                       std::string_view name);

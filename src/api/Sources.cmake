@@ -32,6 +32,18 @@ list(APPEND HEADERS
 	"src/picture.h"
 	"src/picture_lock.h"
 	"src/pool.h"
+	"utility/include/uChrono.h"
+	"utility/include/uConfigMap.h"
+	"utility/include/uEnumMap.h"
+	"utility/include/uEnums.h"
+	"utility/include/uLog.h"
+	"utility/include/uPictureCopy.h"
+	"utility/include/uPictureFormatDesc.h"
+	"utility/include/uPlatform.h"
+	"utility/include/uString.h"
+	"utility/include/uTimestamps.h"
+	"utility/include/uTypes.h"
+	"utility/include/uTypeTraits.h"
 	)
 
 list(APPEND INTERFACES

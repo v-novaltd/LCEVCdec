@@ -17,7 +17,7 @@
 
 namespace lcevc_dec::decoder {
 
-using namespace lcevc_dec::utility;
+using namespace lcevc_dec::api_utility;
 
 // Assume that we will need not-very-many accel contexts. We may need a surprisingly large amount
 // of pictures though (enough to max out the unprocessed, temporary/pending, and processed queues).
@@ -31,7 +31,7 @@ Decoder::Decoder(const LCEVC_AccelContextHandle& accelContext, LCEVC_DecoderHand
     : m_accelContextPool(kAccelContextPoolCapacity)
     , m_pictureLockPool(kPictureLockPoolCapacity)
     , m_picturePool(kPicturePoolCapacity)
-    , m_lcevcProcessor(m_coreDecoder)
+    , m_lcevcProcessor(m_coreDecoder, m_bufferManager)
     , m_eventManager(apiHandle)
 {
     VNUnused(accelContext);
@@ -67,10 +67,12 @@ bool Decoder::initialize()
         return false;
     }
 
-    // Initialization done:
+    // Initialization done. Note that we trigger "can send enhancement" first, in case the client
+    // is blindly sending data every time they get a "can send", without checking that they've sent
+    // the enhancement before the base.
     m_isInitialized = true;
-    triggerEvent(LCEVC_CanSendBase);
     triggerEvent(LCEVC_CanSendEnhancement);
+    triggerEvent(LCEVC_CanSendBase);
     triggerEvent(LCEVC_CanSendPicture);
 
     return true;
@@ -213,7 +215,7 @@ LCEVC_ReturnCode Decoder::produceOutputPicture(LCEVC_PictureHandle& outputHandle
     outputHandle.hdl = nextResult.pictureHandle.handle;
 
     triggerEvent(Event(static_cast<int32_t>(LCEVC_OutputPictureDone),
-                       Handle<Picture>(outputHandle.hdl), &decodeInfoOut));
+                       Handle<Picture>(outputHandle.hdl), &(nextResult.decodeInfo)));
 
     return nextResult.returnCode;
 }
@@ -230,6 +232,13 @@ LCEVC_ReturnCode Decoder::flush()
 
 void Decoder::flushInputs()
 {
+    // Enhancements
+    const bool enhancementsFull = isUnprocessedEnhancementQueueFull();
+    m_lcevcProcessor.flush();
+    if (enhancementsFull && !isUnprocessedEnhancementQueueFull()) {
+        triggerEvent(LCEVC_CanSendEnhancement);
+    }
+
     // Bases
     const bool basesFull = isBaseQueueFull();
     while (!m_baseContainer.empty()) {
@@ -239,13 +248,6 @@ void Decoder::flushInputs()
     }
     if (basesFull && !isBaseQueueFull()) {
         triggerEvent(LCEVC_CanSendBase);
-    }
-
-    // Enhancements
-    const bool enhancementsFull = isUnprocessedEnhancementQueueFull();
-    m_lcevcProcessor.flush();
-    if (enhancementsFull && !isUnprocessedEnhancementQueueFull()) {
-        triggerEvent(LCEVC_CanSendEnhancement);
     }
 }
 
@@ -418,24 +420,19 @@ bool Decoder::allocPictureManaged(const LCEVC_PictureDesc& desc, LCEVC_PictureHa
     }
 
     auto* freshPicture = static_cast<PictureManaged*>(getPicture(pictureHandle.hdl));
-    return freshPicture->setDesc(desc); // this also binds memory
+    return freshPicture->setDesc(desc);
 }
 
 bool Decoder::allocPictureExternal(const LCEVC_PictureDesc& desc, LCEVC_PictureHandle& pictureHandle,
-                                   uint32_t bufferCount, const LCEVC_PictureBufferDesc* bufferDescArr)
+                                   const LCEVC_PicturePlaneDesc* planeDescArr,
+                                   const LCEVC_PictureBufferDesc* buffer)
 {
     if (!rawAllocPicture<PictureExternal>(pictureHandle)) {
         return false;
     }
 
-    // External pics don't bind when their desc is set: instead, setDesc checks that you've ALREADY
-    // bound enough memory.
     auto* freshPicture = static_cast<PictureExternal*>(getPicture(pictureHandle.hdl));
-    if (!freshPicture->bindMemoryBuffers(bufferCount, bufferDescArr)) {
-        VNLogError("Failed to bind memory for external picture at %p\n", freshPicture);
-        return false;
-    }
-    return freshPicture->setDesc(desc);
+    return freshPicture->setDescExternal(desc, planeDescArr, buffer);
 }
 
 template <typename PicType, typename... Args>

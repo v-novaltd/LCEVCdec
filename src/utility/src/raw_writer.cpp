@@ -75,7 +75,8 @@ std::unique_ptr<RawWriter> createRawWriter(const LCEVC_PictureDesc& pictureDescr
         return nullptr;
     }
 
-    std::unique_ptr<std::ostream> stream = std::make_unique<std::ofstream>(std::string(filename));
+    std::unique_ptr<std::ostream> stream =
+        std::make_unique<std::ofstream>(std::string(filename), std::ios::binary);
     if (!stream->good()) {
         return nullptr;
     }

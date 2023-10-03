@@ -9,14 +9,18 @@
 
 inline LCEVC_ColorFormat PictureLayout::format() const { return m_layoutInfo->format; }
 
-inline uint32_t PictureLayout::width(uint32_t plane) const
+inline uint32_t PictureLayout::width() const { return planeWidth(0); }
+
+inline uint32_t PictureLayout::height() const { return planeHeight(0); }
+
+inline uint32_t PictureLayout::planeWidth(uint32_t plane) const
 {
     assert(plane < m_layoutInfo->planes);
 
     return m_width >> m_layoutInfo->planeWidthShift[plane];
 }
 
-inline uint32_t PictureLayout::height(uint32_t plane) const
+inline uint32_t PictureLayout::planeHeight(uint32_t plane) const
 {
     assert(plane < m_layoutInfo->planes);
 
@@ -36,7 +40,7 @@ inline uint32_t PictureLayout::size() const { return m_size; }
 inline uint32_t PictureLayout::planeSize(uint32_t plane) const
 {
     assert(plane < m_layoutInfo->planes);
-    return m_rowStrides[plane] * height(plane);
+    return m_rowStrides[plane] * planeHeight(plane);
 }
 
 inline uint32_t PictureLayout::planeOffset(uint32_t plane) const
@@ -61,7 +65,7 @@ inline uint32_t PictureLayout::rowStride(uint32_t plane) const
 inline uint32_t PictureLayout::sampleStride(uint32_t plane) const
 {
     assert(plane < m_layoutInfo->planes);
-    return  sampleSize()  * m_layoutInfo->interleave[plane];
+    return sampleSize() * m_layoutInfo->interleave[plane];
 }
 
 inline uint32_t PictureLayout::rowSize(uint32_t plane) const
@@ -72,7 +76,7 @@ inline uint32_t PictureLayout::rowSize(uint32_t plane) const
            (m_width >> m_layoutInfo->planeWidthShift[plane]);
 }
 
-inline uint32_t PictureLayout::sampleSize() const { return (m_layoutInfo->bits+7)/8; }
+inline uint32_t PictureLayout::sampleSize() const { return (m_layoutInfo->bits + 7) / 8; }
 
 inline uint32_t PictureLayout::sampleBits() const { return m_layoutInfo->bits; }
 

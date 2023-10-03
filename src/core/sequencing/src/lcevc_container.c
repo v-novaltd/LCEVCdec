@@ -274,11 +274,11 @@ typedef struct LCEVCContainer
     bool processedFirst;
 } LCEVCContainer_t;
 
-LCEVCContainer_t* lcevcContainerCreate(uint32_t capacity)
+LCEVCContainer_t* lcevcContainerCreate(size_t capacity)
 {
     if (capacity == 0) {
-        capacity = UINT32_MAX;
-    } else if (capacity == UINT32_MAX) {
+        capacity = SIZE_MAX;
+    } else if (capacity == SIZE_MAX) {
         capacity = 0;
     }
 
@@ -299,9 +299,12 @@ void lcevcContainerDestroy(LCEVCContainer_t* container)
     free(container);
 }
 
-uint32_t lcevcContainerSize(const LCEVCContainer_t* container) { return container->list.size; }
+size_t lcevcContainerSize(const LCEVCContainer_t* container)
+{
+    return container->list.size;
+}
 
-uint32_t lcevcContainerCapacity(const LCEVCContainer_t* container)
+size_t lcevcContainerCapacity(const LCEVCContainer_t* container)
 {
     return container->list.capacity;
 }
@@ -355,7 +358,7 @@ void lcevcContainerClear(LCEVCContainer_t* container)
 StampedBuffer_t* lcevcContainerExtract(LCEVCContainer_t* container, uint64_t timehandle, bool* isAtHeadOut)
 {
     uint32_t count = 0;
-    uint32_t dummyQSize = 0;
+    size_t dummyQSize = 0;
     uint64_t dummyTH = 0;
     StampedBuffer_t* currentHead =
         lcevcContainerExtractNextInOrder(container, true, &dummyTH, &dummyQSize);
@@ -389,7 +392,7 @@ StampedBuffer_t* lcevcContainerExtract(LCEVCContainer_t* container, uint64_t tim
 }
 
 StampedBuffer_t* lcevcContainerExtractNextInOrder(LCEVCContainer_t* container, bool force,
-                                                  uint64_t* timehandleOut, uint32_t* queueSizeOut)
+                                                  uint64_t* timehandleOut, size_t* queueSizeOut)
 {
     *timehandleOut = kInvalidTimehandle;
 

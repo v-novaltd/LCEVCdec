@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2023. All rights reserved. */
 #pragma once
 
 #include "uTypes.h"

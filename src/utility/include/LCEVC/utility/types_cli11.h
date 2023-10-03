@@ -19,8 +19,8 @@
 bool lexical_cast(const std::string& input, LCEVC_ColorFormat& v);
 bool lexical_cast(const std::string& input, LCEVC_ReturnCode& v);
 bool lexical_cast(const std::string& input, LCEVC_ColorRange& v);
-bool lexical_cast(const std::string& input, LCEVC_ColorStandard& v);
-bool lexical_cast(const std::string& input, LCEVC_ColorTransfer& v);
+bool lexical_cast(const std::string& input, LCEVC_ColorPrimaries& v);
+bool lexical_cast(const std::string& input, LCEVC_TransferCharacteristics& v);
 bool lexical_cast(const std::string& input, LCEVC_PictureFlag& v);
 bool lexical_cast(const std::string& input, LCEVC_Access& v);
 bool lexical_cast(const std::string& input, LCEVC_Event& v);
@@ -45,13 +45,13 @@ constexpr const char* type_name<LCEVC_ColorRange>()
 }
 
 template <>
-constexpr const char* type_name<LCEVC_ColorStandard>()
+constexpr const char* type_name<LCEVC_ColorPrimaries>()
 {
-    return "COLORSTANDARD";
+    return "COLORPRIMARIES";
 }
 
 template <>
-constexpr const char* type_name<LCEVC_ColorTransfer>()
+constexpr const char* type_name<LCEVC_TransferCharacteristics>()
 {
     return "COLORTRANSFER";
 }

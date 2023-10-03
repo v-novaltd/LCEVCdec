@@ -9,12 +9,12 @@ class Clock
 {
 public:
     Clock()
-        : m_creationTime(lcevc_dec::utility::GetTime<lcevc_dec::utility::MicroSecond>())
+        : m_creationTime(lcevc_dec::api_utility::GetTime<lcevc_dec::api_utility::MicroSecond>())
     {}
 
     VNInline uint64_t getTimeSinceStart() const
     {
-        return lcevc_dec::utility::GetTime<lcevc_dec::utility::MicroSecond>() - m_creationTime;
+        return lcevc_dec::api_utility::GetTime<lcevc_dec::api_utility::MicroSecond>() - m_creationTime;
     }
 
 private:

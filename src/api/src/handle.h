@@ -24,7 +24,7 @@ template <typename T>
 struct Handle
 {
     Handle() = delete;
-    Handle(uintptr_t newH)
+    constexpr Handle(uintptr_t newH)
         : handle(newH)
     {}
 

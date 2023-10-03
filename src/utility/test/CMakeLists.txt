@@ -29,4 +29,4 @@ target_include_directories(lcevc_dec_utility_test PUBLIC "${CMAKE_CURRENT_LIST_D
 
 add_executable(lcevc_dec::utility_test ALIAS lcevc_dec_utility_test)
 
-install(TARGETS lcevc_dec_utility_test  DESTINATION "bin")
+install(TARGETS lcevc_dec_utility_test DESTINATION "bin")

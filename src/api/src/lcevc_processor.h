@@ -18,7 +18,7 @@ namespace lcevc_dec::decoder {
 class LcevcProcessor
 {
 public:
-    LcevcProcessor(perseus_decoder& parser);
+    LcevcProcessor(perseus_decoder& parser, BufferManager& bufferManager);
 
     bool initialise(uint32_t unprocessedLcevcCap, int32_t residualSurfaceFPSetting);
     void release();
@@ -54,7 +54,7 @@ private:
     LCEVCContainer_t* m_unprocessedLcevcContainer = nullptr;
 
     // Picture with no data (accumulates temporal when skipping)
-    PictureExternal m_skipTemporalAccumulator;
+    PictureManaged m_skipTemporalAccumulator;
 
     // Config (set in initialise, not constructor, so can't be const)
     int32_t m_residualSurfaceFPSetting = -1; // This is "pss_surface_fp_setting" (see dil_config_json.md)

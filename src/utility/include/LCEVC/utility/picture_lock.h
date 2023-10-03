@@ -43,24 +43,20 @@ public:
     }
 
     // Get pointer to start of given row
-    template <typename T=void>
-    T *rowData(uint32_t plane, uint32_t row) const {
+    template <typename T = void>
+    T* rowData(uint32_t plane, uint32_t row) const
+    {
         assert(plane < m_planeDescs.size());
-        assert(row < m_planeDescs[plane].height);
+        assert(row < height(plane));
 
-        return static_cast<T *>(static_cast<void *>(m_planeDescs[plane].firstSample + static_cast<size_t>(row * m_planeDescs[plane].rowByteStride)));
+        return static_cast<T*>(
+            static_cast<void*>(m_planeDescs[plane].firstSample +
+                               static_cast<size_t>(row * m_planeDescs[plane].rowByteStride)));
     }
 
     // Get row size in bytes of given plane
-    uint32_t rowSize(uint32_t plane) const {
-        assert(plane < m_planeDescs.size());
-
-        return m_planeDescs[plane].rowByteSize;
-    }
-
-    uint32_t height(uint32_t plane) const {
-        return m_planeDescs[plane].height;
-    }
+    uint32_t rowSize(uint32_t plane) const;
+    uint32_t height(uint32_t plane) const;
 
     // Handle to locked picture
     LCEVC_PictureHandle picture() const { return m_picture; }

@@ -5,6 +5,7 @@
 #include "bin_reader.h"
 
 #include "LCEVC/utility/byte_order.h"
+#include "bin_format.h"
 
 #include <fmt/core.h>
 
@@ -13,18 +14,6 @@
 #include <string_view>
 
 namespace lcevc_dec::utility {
-
-// LCEVC BIN constants
-//
-static constexpr char kMagicBytes[8] = {'l', 'c', 'e', 'v', 'c', 'b', 'i', 'n'};
-static constexpr uint32_t kVersion = 1;
-
-enum BlockTypes
-{
-    LCEVCPayload = 0,
-    Extension = 65535,
-    Unknown = 65536
-};
 
 BinReader::BinReader(std::unique_ptr<std::istream> stream)
     : m_stream(std::move(stream))
@@ -64,7 +53,7 @@ bool BinReader::read(int64_t& decodeIndex, int64_t& presentationIndex, std::vect
     }
 
     // Payload header
-    if (type != LCEVCPayload || size < 16) {
+    if (type != static_cast<uint16_t>(BlockTypes::LCEVCPayload) || size < 16) {
         fmt::print(stderr, "Unrecognized BIN block.");
         return false;
     }
@@ -88,15 +77,13 @@ bool BinReader::read(int64_t& decodeIndex, int64_t& presentationIndex, std::vect
 
 uint64_t BinReader::offset() const { return m_stream->tellg(); }
 
+std::istream* BinReader::stream() const { return m_stream.get(); }
+
 // Create an LCEVC BIN file reader
 //
-std::unique_ptr<BinReader> createBinReader(std::string_view name)
-{
-    auto stream = std::make_unique<std::ifstream>(std::string(name), std::ios::binary);
-    if (!stream->good()) {
-        return nullptr;
-    }
 
+std::unique_ptr<BinReader> createBinReader(std::unique_ptr<std::istream> stream)
+{
     std::unique_ptr<BinReader> reader(new BinReader(std::move(stream)));
 
     if (!reader->readHeader()) {
@@ -104,6 +91,16 @@ std::unique_ptr<BinReader> createBinReader(std::string_view name)
     }
 
     return reader;
+}
+
+std::unique_ptr<BinReader> createBinReader(std::string_view name)
+{
+    auto stream = std::make_unique<std::ifstream>(std::string(name), std::ios::binary);
+    if (!stream->good()) {
+        return nullptr;
+    }
+
+    return createBinReader(std::move(stream));
 }
 
 } // namespace lcevc_dec::utility

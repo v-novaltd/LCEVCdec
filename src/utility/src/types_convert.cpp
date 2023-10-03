@@ -32,7 +32,8 @@ inline std::string_view enumToString(const std::pair<E, const char*> (&arr)[N], 
 }
 
 template <typename E, size_t N>
-inline bool enumFromString(const std::pair<E, const char*> (&arr)[N], std::string_view str, E defaultValue, E& out)
+inline bool enumFromString(const std::pair<E, const char*> (&arr)[N], std::string_view str,
+                           E defaultValue, E& out)
 {
     for (auto i = 0u; i < N; ++i) {
         if (!strcasecmp(arr[i].second, str.data())) {
@@ -119,7 +120,10 @@ static const std::pair<LCEVC_ColorFormat, const char*> kColorFormatTable[]{
     {LCEVC_ColorFormat_Unknown, "unknown"},
 };
 
-std::string_view toString(LCEVC_ColorFormat colorFormat) { return enumToString(kColorFormatTable, colorFormat); }
+std::string_view toString(LCEVC_ColorFormat colorFormat)
+{
+    return enumToString(kColorFormatTable, colorFormat);
+}
 
 bool fromString(std::string_view str, LCEVC_ColorFormat& out)
 {
@@ -168,42 +172,57 @@ bool fromString(std::string_view str, LCEVC_ColorRange& out)
     return enumFromString(kColorRangeTable, str, LCEVC_ColorRange_Unknown, out);
 }
 
-//// LCEVC_ColorStandard
+//// LCEVC_ColorPrimaries
 //
-static const std::pair<LCEVC_ColorStandard, const char*> kColorStandardTable[]{
-    {LCEVC_ColorStandard_BT709, "BT709"},
-    {LCEVC_ColorStandard_BT601_NTSC, "BT601_NTSC"},
-    {LCEVC_ColorStandard_BT601_PAL, "BT601_PAL"},
-    {LCEVC_ColorStandard_BT2020, "BT2020"},
+static const std::pair<LCEVC_ColorPrimaries, const char*> kColorPrimariesTable[]{
+    {LCEVC_ColorPrimaries_BT709, "BT709"},
+    {LCEVC_ColorPrimaries_BT470_BG, "BT470_BG"},
+    {LCEVC_ColorPrimaries_BT601_NTSC, "BT601_NTSC"},
+    {LCEVC_ColorPrimaries_BT2020, "BT2020"},
 };
 
-std::string_view toString(LCEVC_ColorStandard colorStandard)
+std::string_view toString(LCEVC_ColorPrimaries colorPrimaries)
 {
-    return enumToString(kColorStandardTable, colorStandard);
+    return enumToString(kColorPrimariesTable, colorPrimaries);
 }
 
-bool fromString(std::string_view str, LCEVC_ColorStandard& out)
+bool fromString(std::string_view str, LCEVC_ColorPrimaries& out)
 {
-    return enumFromString(kColorStandardTable, str, LCEVC_ColorStandard_Unknown, out);
+    return enumFromString(kColorPrimariesTable, str, LCEVC_ColorPrimaries_Unspecified, out);
 }
 
-//// LCEVC_ColorTransfer
+//// LCEVC_TransferCharacteristics
 //
-static const std::pair<LCEVC_ColorTransfer, const char*> kColorTransferTable[]{
-    {LCEVC_ColorTransfer_Linear, "Linear"},
-    {LCEVC_ColorTransfer_SDR, "SDR"},
-    {LCEVC_ColorTransfer_ST2084, "ST2084"},
-    {LCEVC_ColorTransfer_HLG, "HLG"},
+static const std::pair<LCEVC_TransferCharacteristics, const char*> kTransferCharacteristicsTable[]{
+    {LCEVC_TransferCharacteristics_BT709, "BT709"},
+    {LCEVC_TransferCharacteristics_Unspecified, "Unspecified"},
+    {LCEVC_TransferCharacteristics_Reserved_3, "Reserved_3"},
+    {LCEVC_TransferCharacteristics_GAMMA22, "GAMMA22"},
+    {LCEVC_TransferCharacteristics_GAMMA28, "GAMMA28"},
+    {LCEVC_TransferCharacteristics_BT601, "BT601"},
+    {LCEVC_TransferCharacteristics_SMPTE240, "SMPTE240"},
+    {LCEVC_TransferCharacteristics_LINEAR, "LINEAR"},
+    {LCEVC_TransferCharacteristics_LOG100, "LOG100"},
+    {LCEVC_TransferCharacteristics_LOG100_SQRT10, "LOG100_SQRT10"},
+    {LCEVC_TransferCharacteristics_IEC61966, "IEC61966"},
+    {LCEVC_TransferCharacteristics_BT1361, "BT1361"},
+    {LCEVC_TransferCharacteristics_SRGB_SYCC, "SRGB_SYCC"},
+    {LCEVC_TransferCharacteristics_BT2020_10BIT, "BT2020_10BIT"},
+    {LCEVC_TransferCharacteristics_BT2020_12BIT, "BT2020_12BIT"},
+    {LCEVC_TransferCharacteristics_PQ, "PQ"},
+    {LCEVC_TransferCharacteristics_SMPTE428, "SMPTE428"},
+    {LCEVC_TransferCharacteristics_HLG, "HLG"},
 };
 
-std::string_view toString(LCEVC_ColorTransfer colorTransfer)
+std::string_view toString(LCEVC_TransferCharacteristics transferCharacteristics)
 {
-    return enumToString(kColorTransferTable, colorTransfer);
+    return enumToString(kTransferCharacteristicsTable, transferCharacteristics);
 }
 
-bool fromString(std::string_view str, LCEVC_ColorTransfer& out)
+bool fromString(std::string_view str, LCEVC_TransferCharacteristics& out)
 {
-    return enumFromString(kColorTransferTable, str, LCEVC_ColorTransfer_Unknown, out);
+    return enumFromString(kTransferCharacteristicsTable, str,
+                          LCEVC_TransferCharacteristics_Unspecified, out);
 }
 
 //// LCEVC_PictureFlag

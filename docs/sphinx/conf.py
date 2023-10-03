@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 
 project = 'LCEVC Decoder SDK'
@@ -29,8 +28,10 @@ html_logo = 'lcevc-logo.png'
 # Breathe Configuration
 breathe_default_project = "LCEVC_DEC"
 
+
 def setup(app):
     app.add_css_file('custom.css')
+
 
 nitpick_ignore = [
     ('cpp:identifier', 'int8_t'),

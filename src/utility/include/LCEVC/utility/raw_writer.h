@@ -32,7 +32,7 @@ public:
     uint64_t offset() const;
 
 private:
-    RawWriter(const LCEVC_PictureDesc& description, std::unique_ptr<std::ostream>&& stream);
+    explicit RawWriter(const LCEVC_PictureDesc& description, std::unique_ptr<std::ostream>&& stream);
 
     friend std::unique_ptr<RawWriter> createRawWriter(const LCEVC_PictureDesc& description,
                                                       std::string_view name);

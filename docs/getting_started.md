@@ -23,3 +23,9 @@ Once installed see [Building - Windows](building_windows.md).
 See [Getting Started - Linux](getting_started_linux.md).
 
 Once installed see [Building - Linux](building_linux.md).
+
+## macOS Host
+
+See [Getting Started - macOS](getting_started_macos.md).
+
+Once installed see [Building - macOS](building_macos.md).

@@ -30,8 +30,8 @@ public:
     PictureLayout(LCEVC_DecoderHandle decoderHandle, LCEVC_PictureHandle pictureHandle);
 
     LCEVC_ColorFormat format() const;
-    uint32_t width(uint32_t plane = 0) const;
-    uint32_t height(uint32_t plane = 0) const;
+    uint32_t width() const;
+    uint32_t height() const;
 
     // Return true if width and height are valid for the chosen format
     bool isValid() const;
@@ -41,6 +41,12 @@ public:
 
     // Return total size in bytes of image
     uint32_t size() const;
+
+    // Return width of plane in pixels
+    uint32_t planeWidth(uint32_t plane) const;
+
+    // Return height of plane in pixels
+    uint32_t planeHeight(uint32_t plane) const;
 
     // Return bytes offset of plane within image
     uint32_t planeOffset(uint32_t plane) const;
@@ -79,6 +85,11 @@ public:
     // Construct a vooya/YUView compatible raw filename based on name
     std::string makeRawFilename(std::string_view name) const;
 
+    // Static accessors, to get info about a format without creating a specific layout object
+    static uint8_t getBitsPerSample(LCEVC_ColorFormat format);
+    static uint8_t getPlaneWidthShift(LCEVC_ColorFormat format, uint32_t planeIdx);
+    static uint8_t getPlaneHeightShift(LCEVC_ColorFormat format, uint32_t planeIdx);
+
 private:
     // Per format constants - held as a static table
     struct Info
@@ -88,11 +99,11 @@ private:
         uint8_t validWidthMask;   // Width bits that must be zero for valid picture
         uint8_t validHeightMask;  // Height bits that must be zero for valid picture
 
-        uint8_t planeWidthShift[kMaxPlanes];  // width of image must divide by 2^width_plane_shift for all planes
+        uint8_t planeWidthShift[kMaxPlanes]; // width of image must divide by 2^width_plane_shift for all planes
         uint8_t planeHeightShift[kMaxPlanes]; // height of image must divide by 2^height_plane_shift for all planes
-        uint8_t alignment[kMaxPlanes];        // Alignment of this plane
-        uint8_t interleave[kMaxPlanes];       // Interleaving of this plane - number of components that are interleaved with this plane - including itself
-        uint8_t offset[kMaxPlanes];           // Offset of component within sample interleave
+        uint8_t alignment[kMaxPlanes];  // Alignment of this plane
+        uint8_t interleave[kMaxPlanes]; // Interleaving of this plane - number of components that are interleaved with this plane - including itself
+        uint8_t offset[kMaxPlanes];     // Offset of component within sample interleave
 
         uint8_t bits;       // Number of LSB bits per sample
         const char* suffix; // Vooya compatible suffix for files
@@ -114,7 +125,7 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
 
-    // Calculated size, strides and offsets
+    // Calculated size, strides (in bytes), and offsets
     uint32_t m_rowStrides[kMaxPlanes]{0};
     uint32_t m_planeOffsets[kMaxPlanes]{0};
     uint32_t m_size = 0;

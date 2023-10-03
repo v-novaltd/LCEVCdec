@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2023. All rights reserved. */
 #pragma once
 
 #include "uTypes.h"
@@ -17,10 +17,12 @@
     char NoEmptyfileDummy; \
     }
 #define VNThreadLocal __declspec(thread)
+#define VN_TO_THREAD_NAME(x) L##x
 #else
 #define VNAlign(x) __attribute__((aligned(x)))
 #define VNEmptyFile()
 #define VNThreadLocal __thread
+#define VN_TO_THREAD_NAME(x) x
 #endif
 
 #define VNUnused(x) (void)(x)
@@ -67,46 +69,46 @@
 #define snprintf(DEST, COUNT, FORMAT, ...) sprintf((DEST), (FORMAT), __VA_ARGS__)
 #endif
 
-namespace lcevc_dec { namespace utility {
-    namespace os {
-        std::string GetAppPath();
-        std::string GetCwd();
-        void setThreadName(std::string name);
-    } // namespace os
+namespace lcevc_dec::api_utility {
+namespace os {
+    std::string GetAppPath();
+    std::string GetCwd();
+#if defined(WIN32)
+    void setThreadName(const std::wstring& name);
+#else
+    void setThreadName(const std::string& name);
+#endif
+} // namespace os
 
-    namespace lib {
-        std::wstring utf8ToUtf16(const std::string& utf8Str);
-        std::string utf16ToUtf8(const std::wstring& utf16Str);
+namespace lib {
+    void* Open(const std::string& name, const std::string& version = "", std::string* returnmsg = NULL);
+    bool Close(void* handle);
+    void* GetSymbol(void* handle, const std::string& name);
+    std::string GetError();
 
-        void* Open(const std::string& name, const std::string& version = "", std::string* returnmsg = NULL);
-        bool Close(void* handle);
-        void* GetSymbol(void* handle, const std::string& name);
-        std::string GetError();
+    template <typename T>
+    VNInline static bool GetFunction(void* libHandle, const char* fnName, T& out, bool bThrowOnFail = false)
+    {
+        out = (T)GetSymbol(libHandle, fnName);
 
-        template <typename T>
-        VNInline static bool GetFunction(void* libHandle, const char* fnName, T& out,
-                                         bool bThrowOnFail = false)
-        {
-            out = (T)GetSymbol(libHandle, fnName);
-
-            if (out == nullptr && bThrowOnFail) {
-                throw std::runtime_error("Failed to find lib function\n");
-            }
-
-            return (out != nullptr);
+        if (out == nullptr && bThrowOnFail) {
+            throw std::runtime_error("Failed to find lib function\n");
         }
-    } // namespace lib
 
-    namespace file {
-        uint64_t Tell(FILE* f);
-        void Seek(FILE* f, long long offset, int32_t origin);
-        uint64_t Size(FILE* f);
-        FILE* OpenFileSearched(const std::string& filename, const char* mode);
-        bool ReadContentsText(const std::string& filename, std::string& output);
-        bool ReadContentsBinary(const std::string& filename, DataBuffer& output);
-        bool Exists(const char* path);
-        bool Exists(const std::string& path);
-        uint64_t GetModifiedTime(const char* path);
-        bool IsTerminal(FILE* f);
-    } // namespace file
-}}    // namespace lcevc_dec::utility
+        return (out != nullptr);
+    }
+} // namespace lib
+
+namespace file {
+    uint64_t Tell(FILE* f);
+    void Seek(FILE* f, long long offset, int32_t origin);
+    uint64_t Size(FILE* f);
+    FILE* OpenFileSearched(const std::string& filename, const char* mode);
+    bool ReadContentsText(const std::string& filename, std::string& output);
+    bool ReadContentsBinary(const std::string& filename, DataBuffer& output);
+    bool Exists(const char* path);
+    bool Exists(const std::string& path);
+    uint64_t GetModifiedTime(const char* path);
+    bool IsTerminal(FILE* f);
+} // namespace file
+} // namespace lcevc_dec::api_utility

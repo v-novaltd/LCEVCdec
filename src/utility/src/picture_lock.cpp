@@ -23,7 +23,6 @@ PictureLock::PictureLock(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle pictur
     }
 }
 
-
 void PictureLock::unlock()
 {
     if (m_lock.hdl) {
@@ -34,6 +33,27 @@ void PictureLock::unlock()
     m_picture.hdl = {0};
     m_lock.hdl = {0};
     m_planeDescs.clear();
+}
+
+uint32_t PictureLock::rowSize(uint32_t planeIdx) const
+{
+    LCEVC_PictureDesc desc = {};
+    if (LCEVC_GetPictureDesc(m_decoder, m_picture, &desc) != LCEVC_Success) {
+        return 0;
+    }
+
+    const uint8_t bytesPerSample = (PictureLayout::getBitsPerSample(desc.colorFormat) + 7) / 8;
+    return bytesPerSample * (desc.width >> PictureLayout::getPlaneWidthShift(desc.colorFormat, planeIdx));
+}
+
+uint32_t PictureLock::height(uint32_t planeIdx) const
+{
+    LCEVC_PictureDesc desc = {};
+    if (LCEVC_GetPictureDesc(m_decoder, m_picture, &desc) != LCEVC_Success) {
+        return 0;
+    }
+
+    return (desc.height >> PictureLayout::getPlaneHeightShift(desc.colorFormat, planeIdx));
 }
 
 } // namespace lcevc_dec::utility

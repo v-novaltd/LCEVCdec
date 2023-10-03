@@ -10,13 +10,15 @@
 #include "handle.h"
 #include "uPictureFormatDesc.h"
 
-// - Forward declarations (api) -------------------------------------------------------------------
+// - Forward declarations (external) --------------------------------------------------------------
 
 struct LCEVC_DecodeInformation;
 struct LCEVC_HDRStaticInfo;
 struct LCEVC_PictureDesc;
 struct LCEVC_PictureBufferDesc;
 struct LCEVC_PicturePlaneDesc;
+
+struct perseus_decoder_stream;
 
 // - Forward declarations (internal) --------------------------------------------------------------
 
@@ -26,10 +28,6 @@ class AccelBuffer;
 class Decoder;
 class Picture;
 } // namespace lcevc_dec::decoder
-
-// - Types (internal) -----------------------------------------------------------------------------
-
-struct perseus_decoder_stream;
 
 // ------------------------------------------------------------------------------------------------
 
@@ -42,24 +40,65 @@ enum class ColorRange
     Full = 1,
     Limited = 2
 };
-
 ColorRange fromLCEVCColorRange(int32_t lcevcColorRange);
 int32_t toLCEVCColorRange(ColorRange colorRange);
-lcevc_dec::utility::Colorspace::Enum fromLCEVCColorStandard(int32_t lcevcColorStandard);
-int32_t toLCEVCColorStandard(lcevc_dec::utility::Colorspace::Enum colorspace);
 
-// Replicates LCEVC_ColorTransfer
-enum class ColorTransfer
+// Translates from LCEVC_ColorPrimaries
+
+lcevc_dec::api_utility::Colorspace::Enum fromLCEVCColorPrimaries(int32_t lcevcColorPrimaries);
+int32_t toLCEVCColorPrimaries(lcevc_dec::api_utility::Colorspace::Enum colorspace);
+
+// Replicates LCEVC_MatrixCoefficients
+enum class MatrixCoefficients
 {
-    Unknown = 0,
-    Linear = 1,
-    SDR = 2,
-    ST2084 = 3,
-    HLG = 4,
-};
+    Identity = 0,
+    BT709 = 1,
+    Unspecified = 2,
+    Reserved3 = 3,
+    USFCC = 4,
+    BT470BG = 5,
+    BT601NTSC = 6,
+    SMPTE240 = 7,
+    YCgCo = 8,
+    BT2020NCL = 9,
+    BT2020CL = 10,
+    SMPTE2085 = 11,
+    ChromaticityNCL = 12,
+    ChromaticityCL = 13,
+    ICTCP = 14,
 
-ColorTransfer fromLCEVCColorTransfer(int32_t lcevcColorRange);
-int32_t toLCEVCColorTransfer(ColorTransfer colorRange);
+    Unknown
+};
+MatrixCoefficients fromLCEVCMatrixCoefficients(int32_t lcevcmatrixCoefficients);
+int32_t toLCEVCMatrixCoefficients(MatrixCoefficients matrixCoefficients);
+
+// Replicates LCEVC_TransferCharacteristics
+enum class TransferCharacteristics
+{
+    Reserved0 = 0,
+    BT709 = 1,
+    Unspecified = 2,
+    Reserved3 = 3,
+    Gamma22 = 4,
+    Gamma28 = 5,
+    BT601 = 6,
+    SMPTE240 = 7,
+    Linear = 8,
+    Log100 = 9,
+    Log100Sqrt10 = 10,
+    IEC61966 = 11,
+    BT1361 = 12,
+    SRGBsYCC = 13,
+    BT202010Bit = 14,
+    BT202012Bit = 15,
+    PQ = 16,
+    SMPTE428 = 17,
+    HLG = 18,
+
+    Unknown
+};
+TransferCharacteristics fromLCEVCTransferCharacteristics(int32_t lcevcTransferCharacteristics);
+int32_t toLCEVCTransferCharacteristics(TransferCharacteristics transferCharacteristics);
 
 // Replicates LCEVC_HDRStaticInfo
 struct HDRStaticInfo
@@ -82,7 +121,7 @@ bool equals(const LCEVC_HDRStaticInfo& lhs, const LCEVC_HDRStaticInfo& rhs);
 // Replicates LCEVC_DecodeInformation
 struct DecodeInformation
 {
-    DecodeInformation(int64_t timestampIn)
+    explicit constexpr DecodeInformation(int64_t timestampIn)
         : timestamp(timestampIn)
     {}
     int64_t timestamp;
@@ -106,10 +145,10 @@ struct AspectRatio
 };
 
 // Helpers for LCEVC_ColorFormat
-lcevc_dec::utility::PictureFormat::Enum fromLCEVCDescColorFormat(int32_t descColorFormat);
-lcevc_dec::utility::PictureInterleaving::Enum fromLCEVCDescInterleaving(int32_t descColorFormat);
-int32_t toLCEVCDescColorFormat(lcevc_dec::utility::PictureFormat::Enum format,
-                               lcevc_dec::utility::PictureInterleaving::Enum ilv);
+lcevc_dec::api_utility::PictureFormat::Enum fromLCEVCDescColorFormat(int32_t descColorFormat);
+lcevc_dec::api_utility::PictureInterleaving::Enum fromLCEVCDescInterleaving(int32_t descColorFormat);
+int32_t toLCEVCDescColorFormat(lcevc_dec::api_utility::PictureFormat::Enum format,
+                               lcevc_dec::api_utility::PictureInterleaving::Enum ilv);
 // Bitdepth is "bits per channel" where R, G, and B are channels, and so are Y, U, and V.
 uint32_t bitdepthFromLCEVCDescColorFormat(int32_t descColorFormat);
 
@@ -134,7 +173,7 @@ struct PictureBufferDesc
     Handle<AccelBuffer> accelBuffer = kInvalidHandle;
     int32_t access = 0;
 };
-
+bool equals(const LCEVC_PictureBufferDesc& lhs, const LCEVC_PictureBufferDesc& rhs);
 void fromLCEVCPictureBufferDesc(const LCEVC_PictureBufferDesc& lcevcPictureBufferDesc,
                                 PictureBufferDesc& pictureBufferDescOut);
 void toLCEVCPictureBufferDesc(const PictureBufferDesc& pictureBufferDesc,
@@ -144,22 +183,17 @@ void toLCEVCPictureBufferDesc(const PictureBufferDesc& pictureBufferDesc,
 struct PicturePlaneDesc
 {
     uint8_t* firstSample = nullptr;
-    uint32_t sampleByteStride = 0;
     uint32_t rowByteStride = 0;
-    uint32_t sampleByteSize = 0;
-    uint32_t rowByteSize = 0;
-    uint32_t width = 0;
-    uint32_t height = 0;
 };
-
+bool equals(const LCEVC_PicturePlaneDesc& lhs, const LCEVC_PicturePlaneDesc& rhs);
 void fromLCEVCPicturePlaneDesc(const LCEVC_PicturePlaneDesc& lcevcPicturePlaneDesc,
                                PicturePlaneDesc& picturePlaneDescOut);
 void toLCEVCPicturePlaneDesc(const PicturePlaneDesc& picturePlaneDesc,
                              LCEVC_PicturePlaneDesc& lcevcPicturePlaneDescOut);
 
 // Helpers for perseus_interleaving and perseus_bitdepth
-bool toCoreInterleaving(const lcevc_dec::utility::PictureFormat::Enum& format,
-                        const lcevc_dec::utility::PictureInterleaving::Enum& interleaving,
+bool toCoreInterleaving(const lcevc_dec::api_utility::PictureFormat::Enum& format,
+                        const lcevc_dec::api_utility::PictureInterleaving::Enum& interleaving,
                         int32_t& interleavingOut);
 bool toCoreBitdepth(uint8_t val, int32_t& out);
 bool fromCoreBitdepth(const int32_t& val, uint8_t& out);

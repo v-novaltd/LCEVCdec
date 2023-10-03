@@ -20,8 +20,11 @@ public:
 
     uint64_t offset() const;
 
+    std::istream* stream() const;
+
 private:
-    BinReader(std::unique_ptr<std::istream> stream);
+    explicit BinReader(std::unique_ptr<std::istream> stream);
+    friend std::unique_ptr<BinReader> createBinReader(std::unique_ptr<std::istream> stream);
     friend std::unique_ptr<BinReader> createBinReader(std::string_view name);
 
     bool readHeader();
@@ -30,10 +33,18 @@ private:
 };
 
 /*!
+ * \brief Create a BinReader, given an input stream
+ *
+ * @param[in]     stream Input stream to use - will take ownership
+ * @return        Unique pointer to the new BinReader, or nullptr if failed
+ */
+std::unique_ptr<BinReader> createBinReader(std::unique_ptr<std::istream> stream);
+
+/*!
  * \brief Create a BinReader, given a filename
  *
- * @param[in]       name Filename of LCEVC BIN file
- * @return          Unique ptr to the new BinReader, or nullptr if failed
+ * @param[in]     name Filename of LCEVC BIN file
+ * @return        Unique pointer to the new BinReader, or nullptr if failed
  */
 std::unique_ptr<BinReader> createBinReader(std::string_view name);
 

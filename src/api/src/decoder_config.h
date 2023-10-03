@@ -36,9 +36,9 @@ public:
     // This, on the other hand, is normal.
     uint32_t getResultsQueueCap() const { return m_resultsQueueCap; }
 
-    lcevc_dec::utility::DILPassthroughPolicy getPassthroughMode() const
+    lcevc_dec::api_utility::DILPassthroughPolicy getPassthroughMode() const
     {
-        return static_cast<lcevc_dec::utility::DILPassthroughPolicy>(m_passthroughMode);
+        return static_cast<lcevc_dec::api_utility::DILPassthroughPolicy>(m_passthroughMode);
     }
     int32_t getResidualSurfaceFPSetting() const { return m_residualSurfaceFPSetting; }
 
@@ -57,6 +57,7 @@ public:
     const std::vector<int32_t>& getEvents() const { return m_events; }
 
 private:
+    bool m_enableLogoOverlay = false;
     bool m_highlightResiduals = false;
     bool m_logToStdOut = false;
     bool m_useLoq0 = true;
@@ -68,11 +69,14 @@ private:
     int32_t m_coreDecoderPipelineMode = -1;
     int32_t m_ditherStrength = -1;
     int32_t m_logLevel = static_cast<int32_t>(LogType_Error);
+    int32_t m_logoOverlayDelayFrames = -1;
+    int32_t m_logoOverlayPositionX = -1;
+    int32_t m_logoOverlayPositionY = -1;
     int32_t m_resultsQueueCap = 24;
     int32_t m_loqUnprocessedCap = 100;
-    int32_t m_passthroughMode = static_cast<int32_t>(lcevc_dec::utility::DILPassthroughPolicy::Allow);
+    int32_t m_passthroughMode = static_cast<int32_t>(lcevc_dec::api_utility::DILPassthroughPolicy::Allow);
     int32_t m_predictedAverageMethod =
-        static_cast<int32_t>(lcevc_dec::utility::PredictedAverageMethod::Standard);
+        static_cast<int32_t>(lcevc_dec::api_utility::PredictedAverageMethod::Standard);
     int32_t m_residualSurfaceFPSetting = -1;
 
     std::vector<int32_t> m_events;

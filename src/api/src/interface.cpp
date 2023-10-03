@@ -14,7 +14,7 @@
 
 namespace lcevc_dec::decoder {
 
-using namespace lcevc_dec::utility;
+using namespace lcevc_dec::api_utility;
 
 static_assert(sizeof(HDRStaticInfo) == sizeof(LCEVC_HDRStaticInfo),
               "Please keep HDRStaticInfo up to date with LCEVC_HDRStaticInfo. If this struct has "
@@ -23,7 +23,14 @@ static_assert(sizeof(DecodeInformation) == sizeof(LCEVC_DecodeInformation),
               "Please keep DecodeInformation up to date with LCEVC_DecodeInformation.");
 static_assert(sizeof(PictureBufferDesc) == sizeof(LCEVC_PictureBufferDesc),
               "Please keep PictureBufferDesc up to date with LCEVC_PictureBufferDesc. If this "
-              "struct has changed, you WILL need to update its equals function, as well as "
+              "struct has changed, you will need to update its equals function, as well as "
+              "functions which convert to and from LCEVC_PictureBufferDesc");
+static_assert(sizeof(LCEVC_PictureDesc) == 76,
+              "If LCEVC_PictureDesc has changed, please update the equals operator, and update the "
+              "size being checked here to the new size.");
+static_assert(sizeof(PicturePlaneDesc) == sizeof(LCEVC_PicturePlaneDesc),
+              "Please keep PicturePlaneDesc up to date with LCEVC_PicturePlaneDesc. If this "
+              "struct has changed, you will need to update its equals function, as well as "
               "functions which convert to and from LCEVC_PictureDesc");
 
 bool equals(const LCEVC_HDRStaticInfo& lhs, const LCEVC_HDRStaticInfo& rhs)
@@ -56,64 +63,176 @@ int32_t toLCEVCColorRange(ColorRange colorRange)
     return LCEVC_ColorRange_Unknown;
 }
 
-Colorspace::Enum fromLCEVCColorStandard(int32_t lcevcColorStandard)
+Colorspace::Enum fromLCEVCColorPrimaries(int32_t lcevcColorPrimaries)
 {
-    auto safeLcevcColorStandard = static_cast<LCEVC_ColorStandard>(lcevcColorStandard);
+    auto safeLcevcColorPrimaries = static_cast<LCEVC_ColorPrimaries>(lcevcColorPrimaries);
 
-    switch (safeLcevcColorStandard) {
-        case LCEVC_ColorStandard_BT709: return Colorspace::YCbCr_BT709;
-        case LCEVC_ColorStandard_BT601_PAL:
-        case LCEVC_ColorStandard_BT601_NTSC: return Colorspace::YCbCr_BT601;
-        case LCEVC_ColorStandard_BT2020: return Colorspace::YCbCr_BT2020;
-        case LCEVC_ColorStandard_Unknown:
-        case LCEVC_ColorStandard_ForceInt32: break;
+    switch (safeLcevcColorPrimaries) {
+        case LCEVC_ColorPrimaries_BT709: return Colorspace::YCbCr_BT709;
+
+        // These aren't identical but apparently we don't distinguish them
+        case LCEVC_ColorPrimaries_BT470_BG:
+        case LCEVC_ColorPrimaries_BT2020: return Colorspace::YCbCr_BT2020;
+
+        // These are the same based on comments in lcevc_dec.h
+        case LCEVC_ColorPrimaries_SMPTE240:
+        case LCEVC_ColorPrimaries_BT601_NTSC: return Colorspace::YCbCr_BT601;
+
+        // Every other format has no corresponding internal format.
+        case LCEVC_ColorPrimaries_Reserved_0:
+        case LCEVC_ColorPrimaries_Unspecified:
+        case LCEVC_ColorPrimaries_Reserved_3:
+        case LCEVC_ColorPrimaries_BT470_M:
+        case LCEVC_ColorPrimaries_GENERIC_FILM:
+        case LCEVC_ColorPrimaries_XYZ:
+        case LCEVC_ColorPrimaries_SMPTE431:
+        case LCEVC_ColorPrimaries_SMPTE432:
+        case LCEVC_ColorPrimaries_Reserved_13:
+        case LCEVC_ColorPrimaries_Reserved_14:
+        case LCEVC_ColorPrimaries_Reserved_15:
+        case LCEVC_ColorPrimaries_Reserved_16:
+        case LCEVC_ColorPrimaries_Reserved_17:
+        case LCEVC_ColorPrimaries_Reserved_18:
+        case LCEVC_ColorPrimaries_Reserved_19:
+        case LCEVC_ColorPrimaries_Reserved_20:
+        case LCEVC_ColorPrimaries_Reserved_21:
+        case LCEVC_ColorPrimaries_P22:
+        case LCEVC_ColorPrimaries_ForceInt32: break;
     }
     return Colorspace::Invalid;
 }
 
-int32_t toLCEVCColorStandard(Colorspace::Enum colorspace)
+int32_t toLCEVCColorPrimaries(Colorspace::Enum colorspace)
 {
     // Our colorspace utility doesn't distinguish PAL and NTSC so default to PAL. Auto and Invalid
     // default to unknown, and sRGB outputs as BT709 (since sRGB uses the same primaries and white
     // point).
     switch (colorspace) {
         case Colorspace::sRGB:
-        case Colorspace::YCbCr_BT709: return LCEVC_ColorStandard_BT709;
-        case Colorspace::YCbCr_BT601: return LCEVC_ColorStandard_BT601_PAL;
-        case Colorspace::YCbCr_BT2020: return LCEVC_ColorStandard_BT2020;
+        case Colorspace::YCbCr_BT709: return LCEVC_ColorPrimaries_BT709;
+        case Colorspace::YCbCr_BT601: return LCEVC_ColorPrimaries_BT470_BG;
+        case Colorspace::YCbCr_BT2020: return LCEVC_ColorPrimaries_BT2020;
         case Colorspace::Auto:
         case Colorspace::Invalid: break;
     }
-    return LCEVC_ColorStandard_Unknown;
+    return LCEVC_ColorPrimaries_Unspecified;
 }
 
-ColorTransfer fromLCEVCColorTransfer(int32_t lcevcColorTransfer)
+MatrixCoefficients fromLCEVCMatrixCoefficients(int32_t lcevcMatrixCoefficients)
 {
-    auto safeLcevcColorTransfer = static_cast<LCEVC_ColorTransfer>(lcevcColorTransfer);
-
-    switch (safeLcevcColorTransfer) {
-        case LCEVC_ColorTransfer_Linear: return ColorTransfer::Linear;
-        case LCEVC_ColorTransfer_SDR: return ColorTransfer::SDR;
-        case LCEVC_ColorTransfer_ST2084: return ColorTransfer::ST2084;
-        case LCEVC_ColorTransfer_HLG: return ColorTransfer::HLG;
-
-        case LCEVC_ColorTransfer_Unknown:
-        case LCEVC_ColorTransfer_ForceInt32: break;
+    auto safeLcevcMatrixCoefficients = static_cast<LCEVC_MatrixCoefficients>(lcevcMatrixCoefficients);
+    switch (safeLcevcMatrixCoefficients) {
+        case LCEVC_MatrixCoefficients_IDENTITY: return MatrixCoefficients::Identity;
+        case LCEVC_MatrixCoefficients_BT709: return MatrixCoefficients::BT709;
+        case LCEVC_MatrixCoefficients_Unspecified: return MatrixCoefficients::Unspecified;
+        case LCEVC_MatrixCoefficients_Reserved_3: return MatrixCoefficients::Reserved3;
+        case LCEVC_MatrixCoefficients_USFCC: return MatrixCoefficients::USFCC;
+        case LCEVC_MatrixCoefficients_BT470_BG: return MatrixCoefficients::BT470BG;
+        case LCEVC_MatrixCoefficients_BT601_NTSC: return MatrixCoefficients::BT601NTSC;
+        case LCEVC_MatrixCoefficients_SMPTE240: return MatrixCoefficients::SMPTE240;
+        case LCEVC_MatrixCoefficients_YCGCO: return MatrixCoefficients::YCgCo;
+        case LCEVC_MatrixCoefficients_BT2020_NCL: return MatrixCoefficients::BT2020NCL;
+        case LCEVC_MatrixCoefficients_BT2020_CL: return MatrixCoefficients::BT2020CL;
+        case LCEVC_MatrixCoefficients_SMPTE2085: return MatrixCoefficients::SMPTE2085;
+        case LCEVC_MatrixCoefficients_CHROMATICITY_NCL: return MatrixCoefficients::ChromaticityNCL;
+        case LCEVC_MatrixCoefficients_CHROMATICITY_CL: return MatrixCoefficients::ChromaticityCL;
+        case LCEVC_MatrixCoefficients_ICTCP: return MatrixCoefficients::ICTCP;
+        default: break;
     }
-    return ColorTransfer::Unknown;
+    return MatrixCoefficients::Unknown;
 }
 
-int32_t toLCEVCColorTransfer(ColorTransfer colorRange)
+int32_t toLCEVCMatrixCoefficients(MatrixCoefficients matrixCoefficients)
 {
-    switch (colorRange) {
-        case ColorTransfer::Linear: return LCEVC_ColorTransfer_Linear;
-        case ColorTransfer::SDR: return LCEVC_ColorTransfer_SDR;
-        case ColorTransfer::ST2084: return LCEVC_ColorTransfer_ST2084;
-        case ColorTransfer::HLG: return LCEVC_ColorTransfer_HLG;
+    switch (matrixCoefficients) {
+        case MatrixCoefficients::Identity: return LCEVC_MatrixCoefficients_IDENTITY;
+        case MatrixCoefficients::BT709: return LCEVC_MatrixCoefficients_BT709;
+        case MatrixCoefficients::Unspecified: return LCEVC_MatrixCoefficients_Unspecified;
+        case MatrixCoefficients::Reserved3: return LCEVC_MatrixCoefficients_Reserved_3;
+        case MatrixCoefficients::USFCC: return LCEVC_MatrixCoefficients_USFCC;
+        case MatrixCoefficients::BT470BG: return LCEVC_MatrixCoefficients_BT470_BG;
+        case MatrixCoefficients::BT601NTSC: return LCEVC_MatrixCoefficients_BT601_NTSC;
+        case MatrixCoefficients::SMPTE240: return LCEVC_MatrixCoefficients_SMPTE240;
+        case MatrixCoefficients::YCgCo: return LCEVC_MatrixCoefficients_YCGCO;
+        case MatrixCoefficients::BT2020NCL: return LCEVC_MatrixCoefficients_BT2020_NCL;
+        case MatrixCoefficients::BT2020CL: return LCEVC_MatrixCoefficients_BT2020_CL;
+        case MatrixCoefficients::SMPTE2085: return LCEVC_MatrixCoefficients_SMPTE2085;
+        case MatrixCoefficients::ChromaticityNCL: return LCEVC_MatrixCoefficients_CHROMATICITY_NCL;
+        case MatrixCoefficients::ChromaticityCL: return LCEVC_MatrixCoefficients_CHROMATICITY_CL;
+        case MatrixCoefficients::ICTCP: return LCEVC_MatrixCoefficients_ICTCP;
 
-        case ColorTransfer::Unknown: break;
+        case MatrixCoefficients::Unknown: break;
     }
-    return LCEVC_ColorTransfer_Unknown;
+    // Note: this isn't exactly one-to-one. Unknown and Unspecified BOTH produce "unspecified" as
+    // output, but technically unknown is distinct (it might just mean WE don't know it).
+    return LCEVC_MatrixCoefficients_Unspecified;
+}
+
+TransferCharacteristics fromLCEVCTransferCharacteristics(int32_t lcevcTransferCharacteristics)
+{
+    auto safeLcevcTransferCharacteristics =
+        static_cast<LCEVC_TransferCharacteristics>(lcevcTransferCharacteristics);
+
+    switch (safeLcevcTransferCharacteristics) {
+        case LCEVC_TransferCharacteristics_Reserved_0: return TransferCharacteristics::Reserved0;
+        case LCEVC_TransferCharacteristics_BT709: return TransferCharacteristics::BT709;
+        case LCEVC_TransferCharacteristics_Unspecified: return TransferCharacteristics::Unspecified;
+        case LCEVC_TransferCharacteristics_Reserved_3: return TransferCharacteristics::Reserved3;
+        case LCEVC_TransferCharacteristics_GAMMA22: return TransferCharacteristics::Gamma22;
+        case LCEVC_TransferCharacteristics_GAMMA28: return TransferCharacteristics::Gamma28;
+        case LCEVC_TransferCharacteristics_BT601: return TransferCharacteristics::BT601;
+        case LCEVC_TransferCharacteristics_SMPTE240: return TransferCharacteristics::SMPTE240;
+        case LCEVC_TransferCharacteristics_LINEAR: return TransferCharacteristics::Linear;
+        case LCEVC_TransferCharacteristics_LOG100: return TransferCharacteristics::Log100;
+        case LCEVC_TransferCharacteristics_LOG100_SQRT10:
+            return TransferCharacteristics::Log100Sqrt10;
+        case LCEVC_TransferCharacteristics_IEC61966: return TransferCharacteristics::IEC61966;
+        case LCEVC_TransferCharacteristics_BT1361: return TransferCharacteristics::BT1361;
+        case LCEVC_TransferCharacteristics_SRGB_SYCC: return TransferCharacteristics::SRGBsYCC;
+        case LCEVC_TransferCharacteristics_BT2020_10BIT:
+            return TransferCharacteristics::BT202010Bit;
+        case LCEVC_TransferCharacteristics_BT2020_12BIT:
+            return TransferCharacteristics::BT202012Bit;
+        case LCEVC_TransferCharacteristics_PQ: return TransferCharacteristics::PQ;
+        case LCEVC_TransferCharacteristics_SMPTE428: return TransferCharacteristics::SMPTE428;
+        case LCEVC_TransferCharacteristics_HLG: return TransferCharacteristics::HLG;
+
+        case LCEVC_TransferCharacteristics_ForceInt32: break;
+    }
+    return TransferCharacteristics::Unknown;
+}
+
+int32_t toLCEVCTransferCharacteristics(TransferCharacteristics transferCharacteristics)
+{
+    switch (transferCharacteristics) {
+        case TransferCharacteristics::Reserved0: return LCEVC_TransferCharacteristics_Reserved_0;
+        case TransferCharacteristics::BT709: return LCEVC_TransferCharacteristics_BT709;
+        case TransferCharacteristics::Unspecified: return LCEVC_TransferCharacteristics_Unspecified;
+        case TransferCharacteristics::Reserved3: return LCEVC_TransferCharacteristics_Reserved_3;
+        case TransferCharacteristics::Gamma22: return LCEVC_TransferCharacteristics_GAMMA22;
+        case TransferCharacteristics::Gamma28: return LCEVC_TransferCharacteristics_GAMMA28;
+        case TransferCharacteristics::BT601: return LCEVC_TransferCharacteristics_BT601;
+        case TransferCharacteristics::SMPTE240: return LCEVC_TransferCharacteristics_SMPTE240;
+        case TransferCharacteristics::Linear: return LCEVC_TransferCharacteristics_LINEAR;
+        case TransferCharacteristics::Log100: return LCEVC_TransferCharacteristics_LOG100;
+        case TransferCharacteristics::Log100Sqrt10:
+            return LCEVC_TransferCharacteristics_LOG100_SQRT10;
+        case TransferCharacteristics::IEC61966: return LCEVC_TransferCharacteristics_IEC61966;
+        case TransferCharacteristics::BT1361: return LCEVC_TransferCharacteristics_BT1361;
+        case TransferCharacteristics::SRGBsYCC: return LCEVC_TransferCharacteristics_SRGB_SYCC;
+        case TransferCharacteristics::BT202010Bit:
+            return LCEVC_TransferCharacteristics_BT2020_10BIT;
+        case TransferCharacteristics::BT202012Bit:
+            return LCEVC_TransferCharacteristics_BT2020_12BIT;
+        case TransferCharacteristics::PQ: return LCEVC_TransferCharacteristics_PQ;
+        case TransferCharacteristics::SMPTE428: return LCEVC_TransferCharacteristics_SMPTE428;
+        case TransferCharacteristics::HLG: return LCEVC_TransferCharacteristics_HLG;
+
+        case TransferCharacteristics::Unknown: break;
+    }
+    // Note: this isn't exactly one-to-one. Unknown and Unspecified BOTH produce "unspecified" as
+    // output, but technically unknown is distinct (it might just mean WE don't know it).
+    return LCEVC_TransferCharacteristics_Unspecified;
 }
 
 PictureFormat::Enum fromLCEVCDescColorFormat(int32_t descColorFormat)
@@ -290,18 +409,13 @@ LCEVC_ColorRange getColorRangeFromStream(uint32_t vuiFlags)
                                                             : LCEVC_ColorRange_Limited;
 }
 
-LCEVC_ColorStandard getColorStandardFromStream(uint8_t vuiMatrixCoefficients)
+LCEVC_ColorPrimaries getColorPrimariesFromStream(uint8_t vuiColorPrimaries)
 {
-    switch (vuiMatrixCoefficients) {
-        case 1: return LCEVC_ColorStandard_BT709;
-        case 5: return LCEVC_ColorStandard_BT601_PAL;
-        case 6: return LCEVC_ColorStandard_BT601_NTSC;
-        case 9: return LCEVC_ColorStandard_BT2020;
-    }
-    return LCEVC_ColorStandard_Unknown;
+    // Enum values strictly match the ITU-T/ISO VUI constants so we can safely cast
+    return static_cast<LCEVC_ColorPrimaries>(vuiColorPrimaries);
 }
 
-LCEVC_ColorTransfer getColorTransferFromStream(uint8_t vuiTransferCharacteristics)
+LCEVC_TransferCharacteristics getTransferCharacteristicsFromStream(uint8_t vuiTransferCharacteristics)
 {
     switch (vuiTransferCharacteristics) {
         // From ITU-T Series H Supplement 18: Signalling, backward compatibility and display
@@ -309,11 +423,11 @@ LCEVC_ColorTransfer getColorTransferFromStream(uint8_t vuiTransferCharacteristic
         case 1:
         case 6:
         case 14:
-        case 15: return LCEVC_ColorTransfer_SDR;
-        case 16: return LCEVC_ColorTransfer_ST2084;
-        case 18: return LCEVC_ColorTransfer_HLG;
+        case 15: return LCEVC_TransferCharacteristics_BT709;
+        case 16: return LCEVC_TransferCharacteristics_PQ;
+        case 18: return LCEVC_TransferCharacteristics_HLG;
     }
-    return LCEVC_ColorTransfer_Unknown;
+    return LCEVC_TransferCharacteristics_Unspecified;
 }
 
 void getHdrStaticInfoFromStream(LCEVC_HDRStaticInfo& dest, const lcevc_hdr_info& hdrInfo)
@@ -404,13 +518,16 @@ ChromaSamplingType::Enum fromCoreChromaSubsamplingType(int32_t coreChromaSubsamp
 
 bool equals(const LCEVC_PictureDesc& lhs, const LCEVC_PictureDesc& rhs)
 {
-    return (lhs.colorFormat == rhs.colorFormat) && (lhs.colorRange == rhs.colorRange) &&
-           (lhs.colorStandard == rhs.colorStandard) && (lhs.colorTransfer == rhs.colorTransfer) &&
-           (lhs.cropBottom == rhs.cropBottom) && (lhs.cropLeft == rhs.cropLeft) &&
-           (lhs.cropRight == rhs.cropRight) && (lhs.cropTop == rhs.cropTop) &&
-           equals(lhs.hdrStaticInfo, rhs.hdrStaticInfo) && (lhs.height == rhs.height) &&
+    return (lhs.width == rhs.width) && (lhs.height == rhs.height) &&
+           (lhs.colorFormat == rhs.colorFormat) && (lhs.colorRange == rhs.colorRange) &&
+           (lhs.colorPrimaries == rhs.colorPrimaries) &&
+           (lhs.matrixCoefficients == rhs.matrixCoefficients) &&
+           (lhs.transferCharacteristics == rhs.transferCharacteristics) &&
+           equals(lhs.hdrStaticInfo, rhs.hdrStaticInfo) &&
            (lhs.sampleAspectRatioDen == rhs.sampleAspectRatioDen) &&
-           (lhs.sampleAspectRatioNum == rhs.sampleAspectRatioNum) && (lhs.width == rhs.width);
+           (lhs.sampleAspectRatioNum == rhs.sampleAspectRatioNum) &&
+           (lhs.cropBottom == rhs.cropBottom) && (lhs.cropLeft == rhs.cropLeft) &&
+           (lhs.cropRight == rhs.cropRight) && (lhs.cropTop == rhs.cropTop);
 }
 
 bool coreFormatToLCEVCPictureDesc(const perseus_decoder_stream& coreFormat, LCEVC_PictureDesc& picDescOut)
@@ -437,8 +554,9 @@ bool coreFormatToLCEVCPictureDesc(const perseus_decoder_stream& coreFormat, LCEV
     }
 
     picDescOut.colorRange = getColorRangeFromStream(coreFormat.vui_info.flags);
-    picDescOut.colorStandard = getColorStandardFromStream(coreFormat.vui_info.matrix_coefficients);
-    picDescOut.colorTransfer = getColorTransferFromStream(coreFormat.vui_info.transfer_characteristics);
+    picDescOut.colorPrimaries = getColorPrimariesFromStream(coreFormat.vui_info.colour_primaries);
+    picDescOut.transferCharacteristics =
+        getTransferCharacteristicsFromStream(coreFormat.vui_info.transfer_characteristics);
     getHdrStaticInfoFromStream(picDescOut.hdrStaticInfo, coreFormat.hdr_info);
 
     const AspectRatio newSar = getSampleAspectRatioFromStream(coreFormat.vui_info);
@@ -452,6 +570,12 @@ bool coreFormatToLCEVCPictureDesc(const perseus_decoder_stream& coreFormat, LCEV
     picDescOut.cropTop = newCrop.top;
 
     return true;
+}
+
+bool equals(const LCEVC_PictureBufferDesc& lhs, const LCEVC_PictureBufferDesc& rhs)
+{
+    return (lhs.data == rhs.data) && (lhs.byteSize == rhs.byteSize) &&
+           (lhs.accelBuffer.hdl == rhs.accelBuffer.hdl) && (lhs.access == rhs.access);
 }
 
 void fromLCEVCPictureBufferDesc(const LCEVC_PictureBufferDesc& lcevcPictureBufferDesc,
@@ -471,16 +595,16 @@ void toLCEVCPictureBufferDesc(const PictureBufferDesc& pictureBufferDesc,
     lcevcPictureBufferDescOut.access = static_cast<LCEVC_Access>(pictureBufferDesc.access);
 }
 
+bool equals(const LCEVC_PicturePlaneDesc& lhs, const LCEVC_PicturePlaneDesc& rhs)
+{
+    return (lhs.firstSample == rhs.firstSample) && (lhs.rowByteStride == rhs.rowByteStride);
+}
+
 void fromLCEVCPicturePlaneDesc(const LCEVC_PicturePlaneDesc& lcevcPicturePlaneDesc,
                                PicturePlaneDesc& picturePlaneDescOut)
 {
     picturePlaneDescOut.firstSample = lcevcPicturePlaneDesc.firstSample;
     picturePlaneDescOut.rowByteStride = lcevcPicturePlaneDesc.rowByteStride;
-    picturePlaneDescOut.sampleByteStride = lcevcPicturePlaneDesc.sampleByteStride;
-    picturePlaneDescOut.sampleByteSize = lcevcPicturePlaneDesc.sampleByteSize;
-    picturePlaneDescOut.rowByteSize = lcevcPicturePlaneDesc.rowByteSize;
-    picturePlaneDescOut.width = lcevcPicturePlaneDesc.width;
-    picturePlaneDescOut.height = lcevcPicturePlaneDesc.height;
 }
 
 void toLCEVCPicturePlaneDesc(const PicturePlaneDesc& picturePlaneDesc,
@@ -488,15 +612,10 @@ void toLCEVCPicturePlaneDesc(const PicturePlaneDesc& picturePlaneDesc,
 {
     lcevcPicturePlaneDescOut.firstSample = picturePlaneDesc.firstSample;
     lcevcPicturePlaneDescOut.rowByteStride = picturePlaneDesc.rowByteStride;
-    lcevcPicturePlaneDescOut.sampleByteStride = picturePlaneDesc.sampleByteStride;
-    lcevcPicturePlaneDescOut.sampleByteSize = picturePlaneDesc.sampleByteSize;
-    lcevcPicturePlaneDescOut.rowByteSize = picturePlaneDesc.rowByteSize;
-    lcevcPicturePlaneDescOut.width = picturePlaneDesc.width;
-    lcevcPicturePlaneDescOut.height = picturePlaneDesc.height;
 }
 
-bool toCoreInterleaving(const lcevc_dec::utility::PictureFormat::Enum& format,
-                        const lcevc_dec::utility::PictureInterleaving::Enum& interleaving,
+bool toCoreInterleaving(const lcevc_dec::api_utility::PictureFormat::Enum& format,
+                        const lcevc_dec::api_utility::PictureInterleaving::Enum& interleaving,
                         int32_t& interleavingOut)
 {
     if (PictureFormat::IsRGB(format)) {

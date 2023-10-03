@@ -1,6 +1,8 @@
 # Copyright 2023 - V-Nova Ltd.
 #
 set(SOURCES
+	"src/test_api_events.cpp"
+	"src/test_api_bad_streams.cpp"
     "src/test_decoder.cpp"
     "src/test_event_manager.cpp"
     "src/test_picture.cpp"
@@ -10,8 +12,10 @@ set(SOURCES
 )
 
 set(HEADERS
+	"src/test_api_events.h"
 	"src/test_decoder.h"
 	"src/utils.h"
+	"src/data.h"
 )
 
 # Convenience

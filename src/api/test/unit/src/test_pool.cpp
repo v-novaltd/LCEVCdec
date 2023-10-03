@@ -90,13 +90,14 @@ TEST(PoolTest, DeleteValid)
     }
 }
 
-TEST_F(PoolFixture, ReleaseValid)
+using PoolFixtureDeathTest = PoolFixture;
+TEST_F(PoolFixtureDeathTest, ReleaseValid)
 {
     std::unique_ptr<TestClass> ptr = std::make_unique<TestClass>(kTestIdentifier, destroyedObjs);
     uintptr_t handle = pool.allocate(std::move(ptr)).handle;
     pool.release(handle);
     EXPECT_EQ(pool.isValid(handle), false);
-    VN_EXPECT_DEATH(pool.lookup(handle), "Assertion * failed", nullptr);
+    VN_EXPECT_DEATH(pool.lookup(handle), "Assertion .* failed", nullptr);
     EXPECT_EQ(destroyedObjs.size(), 1);
     if (!destroyedObjs.empty()) {
         EXPECT_EQ(destroyedObjs[0], kTestIdentifier);

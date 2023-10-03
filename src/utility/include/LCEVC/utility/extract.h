@@ -10,8 +10,8 @@
 extern "C"
 {
 #else
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #endif
 
 /*!
@@ -32,7 +32,7 @@ typedef enum LCEVC_NALFormat // NOLINT
 {
     LCEVC_NALFormat_Unknown = 0,
     LCEVC_NALFormat_LengthPrefix = 1,
-    LCEVC_NALFormat_AnnexeB = 2,
+    LCEVC_NALFormat_AnnexB = 2,
 } LCEVC_NALFormat;
 
 /*!

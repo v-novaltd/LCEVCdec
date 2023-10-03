@@ -97,9 +97,9 @@ def compile(input_file, output_file, functions, workerjs, prejs, licensejs,
         '-s', 'ENVIRONMENT=web,worker',
         '-s', f'DEMANGLE_SUPPORT={"0" if debug else "1"}',
         '-s', 'ALLOW_MEMORY_GROWTH=1',
-        #'-s', 'SHARED_MEMORY=1',
-        #'-pthread',
-        #'-sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency',
+        # '-s', 'SHARED_MEMORY=1',
+        # '-pthread',
+        # '-sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency',
         '-msimd128',
         '-msse4.1'
     ]

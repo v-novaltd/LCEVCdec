@@ -4,7 +4,7 @@
 
 #include "uEnumMap.h"
 
-namespace lcevc_dec::utility { // NOLINT(modernize-concat-nested-namespaces)
+namespace lcevc_dec::api_utility {
 
 enum class DILPassthroughPolicy : int32_t
 {
@@ -33,6 +33,6 @@ static constexpr EnumMapArr<PredictedAverageMethod, static_cast<size_t>(Predicte
 static_assert(kPredictedAverageMethodDesc.size == kPredictedAverageMethodDesc.capacity(),
               "kPredictedAverageMethodDesc has too many or too few entries.");
 
-} // namespace lcevc_dec::utility
+} // namespace lcevc_dec::api_utility
 
 #endif // VN_UTIL_ENUMS_H_

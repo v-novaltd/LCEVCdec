@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2023. All rights reserved. */
 #pragma once
 
 #define __STDC_LIMIT_MACROS
@@ -59,33 +59,33 @@
 #endif
 #endif
 
-namespace lcevc_dec { namespace utility { // NOLINT(modernize-concat-nested-namespaces)
+namespace lcevc_dec::api_utility {
 
-    // - Using declarations -----------------------------------------------------------------------
+// - Using declarations -----------------------------------------------------------------------
 
-    using DataBuffer = std::vector<uint8_t>;
+using DataBuffer = std::vector<uint8_t>;
 
-    // - Callback ---------------------------------------------------------------------------------
+// - Callback ---------------------------------------------------------------------------------
 
-    template <typename T>
-    class Callback
-    {
-    public:
-        Callback()
-            : m_callback(nullptr)
-            , m_data(nullptr){};
-        T m_callback;
-        void* m_data;
-    };
+template <typename T>
+class Callback
+{
+public:
+    Callback()
+        : m_callback(nullptr)
+        , m_data(nullptr){};
+    T m_callback;
+    void* m_data;
+};
 
-    // - Margins ----------------------------------------------------------------------------------
+// - Margins ----------------------------------------------------------------------------------
 
-    struct Margins
-    {
-        uint32_t left;
-        uint32_t top;
-        uint32_t right;
-        uint32_t bottom;
-    };
+struct Margins
+{
+    uint32_t left;
+    uint32_t top;
+    uint32_t right;
+    uint32_t bottom;
+};
 
-}} // namespace lcevc_dec::utility
+} // namespace lcevc_dec::api_utility

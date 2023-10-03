@@ -6,7 +6,6 @@
 #define VN_LCEVC_UTILITY_BASE_DECODER_H
 
 #include "LCEVC/lcevc_dec.h"
-
 #include "LCEVC/utility/picture_layout.h"
 
 #include <memory>
@@ -54,7 +53,7 @@ public:
 
     // Return true if there is a decoded image ready to get
     virtual bool hasImage() const = 0;
-    // Move image pointer, size & timestamp - pointer will be valid until next update()
+    // Copy image pointer, size & timestamp - pointer will be valid until next update()
     virtual bool getImage(Data& packet) const = 0;
     // Image data has been consumed
     virtual void clearImage() = 0;
@@ -66,7 +65,7 @@ public:
     // Enhancement data has been consumed
     virtual void clearEnhancement() = 0;
 
-    // Advance decoder - replacing image and/or enhancement state
+    // Advance decoder - Update image and/or enhancement state
     // Returns true if the decoder is at end of stream.
     virtual bool update() = 0;
 };
@@ -77,10 +76,11 @@ public:
  * @param[in]       source          The source stream, passed to avformat_open_input()
  * @param[in]       baseFormat      Optional output format for decoded base images.
  *
- * @return                          Unique point to a new base Decoder, or nullptr if failed.
+ * @return                          Unique pointer to a new base Decoder, or nullptr if failed.
  */
-std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view source,
-                                                    LCEVC_ColorFormat baseFormat = LCEVC_ColorFormat_Unknown);
+std::unique_ptr<BaseDecoder>
+createBaseDecoderLibAV(std::string_view source, std::string_view sourceFormat = std::string_view(),
+                       LCEVC_ColorFormat baseFormat = LCEVC_ColorFormat_Unknown);
 
 /*!
  * \brief Create a base video stream decoder that reads LCEVC bin files and raw base frames
@@ -88,10 +88,10 @@ std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view source,
  * @param[in]       rawFile         The raw file with base pictures - the base format and size is parsed from this name.
  * @param[in]        binFile        The LCEVC bin file with enhancement data.
  *
- * @return                          Unique point to a new base Decoder, or nullptr if failed.
+ * @return                          Unique pointer to a new base Decoder, or nullptr if failed.
  */
 std::unique_ptr<BaseDecoder> createBaseDecoderBin(std::string_view rawFile, std::string_view binFile);
 
-} // namespace lcevc_dec::utility::base
+} // namespace lcevc_dec::utility
 
 #endif

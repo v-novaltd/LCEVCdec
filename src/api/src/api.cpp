@@ -64,9 +64,10 @@ LCEVC_API LCEVC_ReturnCode LCEVC_DefaultPictureDesc(LCEVC_PictureDesc* pictureDe
     pictureDesc->width = width;
     pictureDesc->height = height;
     pictureDesc->colorFormat = format;
-    pictureDesc->colorRange = LCEVC_ColorRange_Full;
-    pictureDesc->colorStandard = LCEVC_ColorStandard_BT709;
-    pictureDesc->colorTransfer = LCEVC_ColorTransfer_Linear;
+    pictureDesc->colorRange = LCEVC_ColorRange_Unknown;
+    pictureDesc->colorPrimaries = LCEVC_ColorPrimaries_Unspecified;
+    pictureDesc->matrixCoefficients = LCEVC_MatrixCoefficients_Unspecified;
+    pictureDesc->transferCharacteristics = LCEVC_TransferCharacteristics_Unspecified;
     pictureDesc->hdrStaticInfo = {};
     pictureDesc->sampleAspectRatioNum = 1;
     pictureDesc->sampleAspectRatioDen = 1;
@@ -82,7 +83,12 @@ LCEVC_API LCEVC_ReturnCode LCEVC_AllocPicture(LCEVC_DecoderHandle decHandle,
                                               const LCEVC_PictureDesc* pictureDesc,
                                               LCEVC_PictureHandle* picHandle)
 {
-    if ((pictureDesc == nullptr) || (picHandle == nullptr)) {
+    if (picHandle == nullptr) {
+        return LCEVC_InvalidParam;
+    }
+    picHandle->hdl = 0;
+
+    if (pictureDesc == nullptr) {
         return LCEVC_InvalidParam;
     }
 
@@ -98,11 +104,15 @@ LCEVC_API LCEVC_ReturnCode LCEVC_AllocPicture(LCEVC_DecoderHandle decHandle,
 
 LCEVC_API LCEVC_ReturnCode LCEVC_AllocPictureExternal(LCEVC_DecoderHandle decHandle,
                                                       const LCEVC_PictureDesc* pictureDesc,
-                                                      uint32_t bufferCount,
-                                                      const LCEVC_PictureBufferDesc* buffers,
+                                                      const LCEVC_PictureBufferDesc* buffer,
+                                                      const LCEVC_PicturePlaneDesc* planes,
                                                       LCEVC_PictureHandle* picHandle)
 {
-    if ((pictureDesc == nullptr) || (bufferCount == 0) || (buffers == nullptr) || (picHandle == nullptr)) {
+    if (picHandle == nullptr) {
+        return LCEVC_InvalidParam;
+    }
+    picHandle->hdl = 0;
+    if (pictureDesc == nullptr || (buffer == nullptr && planes == nullptr)) {
         return LCEVC_InvalidParam;
     }
 
@@ -113,8 +123,8 @@ LCEVC_API LCEVC_ReturnCode LCEVC_AllocPictureExternal(LCEVC_DecoderHandle decHan
         return getDecResult;
     }
 
-    return (decoder->allocPictureExternal(*pictureDesc, *picHandle, bufferCount, buffers) ? LCEVC_Success
-                                                                                          : LCEVC_Error);
+    return (decoder->allocPictureExternal(*pictureDesc, *picHandle, planes, buffer) ? LCEVC_Success
+                                                                                    : LCEVC_Error);
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_FreePicture(LCEVC_DecoderHandle decHandle, LCEVC_PictureHandle picHandle)
@@ -133,31 +143,8 @@ LCEVC_API LCEVC_ReturnCode LCEVC_FreePicture(LCEVC_DecoderHandle decHandle, LCEV
     return (decoder->releasePicture(picHandle.hdl) ? LCEVC_Success : LCEVC_Error);
 }
 
-LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureBufferCount(LCEVC_DecoderHandle decHandle,
-                                                       LCEVC_PictureHandle picHandle, uint32_t* bufferCount)
-{
-    if ((picHandle.hdl == kInvalidHandle) || (bufferCount == nullptr)) {
-        return LCEVC_InvalidParam;
-    }
-
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    const Picture* pic = decoder->getPicture(picHandle.hdl);
-    if (pic == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-
-    *bufferCount = pic->getBufferCount();
-    return LCEVC_Success;
-}
-
 LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureBuffer(LCEVC_DecoderHandle decHandle,
-                                                  LCEVC_PictureHandle picHandle, uint32_t bufferIndex,
+                                                  LCEVC_PictureHandle picHandle,
                                                   LCEVC_PictureBufferDesc* bufferDesc)
 {
     if ((picHandle.hdl == kInvalidHandle) || (bufferDesc == nullptr)) {
@@ -176,7 +163,7 @@ LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureBuffer(LCEVC_DecoderHandle decHandle,
         return LCEVC_InvalidParam;
     }
 
-    return (pic->getBufferDesc(bufferIndex, *bufferDesc) ? LCEVC_Success : LCEVC_Error);
+    return (pic->getBufferDesc(*bufferDesc) ? LCEVC_Success : LCEVC_Error);
 }
 
 LCEVC_ReturnCode LCEVC_GetPicturePlaneCount(LCEVC_DecoderHandle decHandle,
@@ -370,7 +357,6 @@ LCEVC_API LCEVC_ReturnCode LCEVC_LockPicture(LCEVC_DecoderHandle decHandle,
 
 LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureLockBufferDesc(LCEVC_DecoderHandle decHandle,
                                                           LCEVC_PictureLockHandle pictureLockHandle,
-                                                          uint32_t bufferIndex,
                                                           LCEVC_PictureBufferDesc* bufferDesc)
 {
     if ((pictureLockHandle.hdl == kInvalidHandle) || (bufferDesc == nullptr)) {
@@ -385,7 +371,11 @@ LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureLockBufferDesc(LCEVC_DecoderHandle de
     }
 
     PictureLock* picLock = decoder->getPictureLock(pictureLockHandle.hdl);
-    toLCEVCPictureBufferDesc(picLock->getBufferDesc(bufferIndex), *bufferDesc);
+    if (picLock->getBufferDesc() == nullptr) {
+        return LCEVC_Error;
+    }
+
+    toLCEVCPictureBufferDesc(*(picLock->getBufferDesc()), *bufferDesc);
 
     return LCEVC_Success;
 }
@@ -407,7 +397,11 @@ LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureLockPlaneDesc(LCEVC_DecoderHandle dec
     }
 
     PictureLock* picLock = decoder->getPictureLock(pictureLockHandle.hdl);
-    toLCEVCPicturePlaneDesc(picLock->getPlaneDesc(planeIndex), *planeDesc);
+    if (picLock->getPlaneDescArr() == nullptr) {
+        return LCEVC_Error;
+    }
+
+    toLCEVCPicturePlaneDesc((*picLock->getPlaneDescArr())[planeIndex], *planeDesc);
 
     return LCEVC_Success;
 }
@@ -626,8 +620,8 @@ LCEVC_API LCEVC_ReturnCode LCEVC_SkipDecoder(LCEVC_DecoderHandle decHandle, int6
 {
     std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
     Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
+    if (const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
+        getDecResult != LCEVC_Success) {
         return getDecResult;
     }
 
@@ -638,8 +632,8 @@ LCEVC_API LCEVC_ReturnCode LCEVC_SynchronizeDecoder(LCEVC_DecoderHandle decHandl
 {
     std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
     Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
+    if (const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
+        getDecResult != LCEVC_Success) {
         return getDecResult;
     }
 
@@ -650,8 +644,8 @@ LCEVC_API LCEVC_ReturnCode LCEVC_FlushDecoder(LCEVC_DecoderHandle decHandle)
 {
     std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
     Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
+    if (const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
+        getDecResult != LCEVC_Success) {
         return getDecResult;
     }
 
@@ -664,8 +658,8 @@ LCEVC_ReturnCode LCEVC_SetDecoderEventCallback(LCEVC_DecoderHandle decHandle,
 {
     std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
     Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
+    if (const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(false, decHandle.hdl, decoder, lock);
+        getDecResult != LCEVC_Success) {
         return getDecResult;
     }
 

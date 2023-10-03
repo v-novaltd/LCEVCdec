@@ -8,7 +8,7 @@
 
 // This is a class with a few functions to aid copying from one buffer to another.
 
-namespace lcevc_dec::utility {
+namespace lcevc_dec::api_utility {
 
 // fastCopy is just an optimised memcpy (which, it turns out, isn't all that optimised).
 void* fastCopy(void* dest, const void* src, size_t size)
@@ -161,6 +161,6 @@ void copyNV12ToI420Buffers(std::array<const uint8_t*, 2> srcBufs, std::array<uin
     }
 }
 
-} // namespace lcevc_dec::utility
+} // namespace lcevc_dec::api_utility
 
 #endif // VN_UTIL_PICTURE_COPY_H_

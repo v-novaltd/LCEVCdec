@@ -7,6 +7,7 @@
 #include <LCEVC/lcevc_dec.h>
 #include <LCEVC/utility/check.h>
 #include <LCEVC/utility/picture_layout.h>
+#include <LCEVC/utility/picture_lock.h>
 #include <LCEVC/utility/raw_reader.h>
 #include <LCEVC/utility/raw_writer.h>
 #include <fmt/core.h>
@@ -81,8 +82,9 @@ void dumpPicture(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture, std::
     std::string fullName(layout.makeRawFilename(baseName));
 
     // Open file - append if it has been seen already, otherwise truncate
-    const std::ios_base::openmode mode{dumpNames.count(fullName) ? (std::ios_base::out | std::ios_base::app)
-                                                                 : (std::ios_base::out | std::ios_base::trunc)};
+    const std::ios_base::openmode mode{(std::ios_base::binary | std::ios_base::out) |
+        dumpNames.count(fullName) ?  std::ios_base::app : std::ios_base::trunc};
+
     dumpNames.insert(fullName);
 
     auto stream = std::make_unique<std::ofstream>(fullName, mode);
@@ -95,6 +97,50 @@ void dumpPicture(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture, std::
     VN_LCEVC_CHECK(LCEVC_GetPictureDesc(decoder, picture, &description));
     auto rawWriter = createRawWriter(description, std::move(stream));
     rawWriter->write(decoder, picture);
+}
+
+LCEVC_ReturnCode copyPictureFromMemory(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture, const uint8_t *data, uint32_t size)
+{
+    PictureLock lock(decoder, picture, LCEVC_Access_Write);
+    const uint8_t *const limit = data + size;
+
+    for (uint32_t plane = 0; plane < lock.numPlanes(); ++plane) {
+        const uint32_t rowSize = lock.rowSize(plane);
+        const uint32_t height = lock.height(plane);
+
+        if(data + static_cast<size_t>(height * rowSize) > limit) {
+            return LCEVC_InvalidParam;
+        }
+
+        for (unsigned row = 0; row < lock.height(plane); ++row) {
+            memcpy(lock.rowData<char>(plane,row), data, rowSize);
+            data += rowSize;
+        }
+    }
+
+    return LCEVC_Success;
+}
+
+LCEVC_ReturnCode copyPictureToMemory(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture, uint8_t *data, uint32_t size)
+{
+    PictureLock lock(decoder, picture, LCEVC_Access_Read);
+    uint8_t *const limit = data + size;
+
+    for (uint32_t plane = 0; plane < lock.numPlanes(); ++plane) {
+        const uint32_t rowSize = lock.rowSize(plane);
+        const uint32_t height = lock.height(plane);
+
+        if(data + static_cast<size_t>(height * rowSize) > limit) {
+            return LCEVC_InvalidParam;
+        }
+
+        for (unsigned row = 0; row < lock.height(plane); ++row) {
+            memcpy(data, lock.rowData<char>(plane,row), rowSize);
+            data += rowSize;
+        }
+    }
+
+    return LCEVC_Success;
 }
 
 } // namespace lcevc_dec::utility

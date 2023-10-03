@@ -92,36 +92,110 @@ typedef enum LCEVC_ColorRange
 } LCEVC_ColorRange;
 
 /*!
- * This enum represents the color primaries as defined in Table 2 of Rec. ITU-T H.273.
+ * This enum represents the colour primaries with values as defined in Table 2 of ITU-T Rec. H.273 v2 (07/2021) and ISO/IEC TR 23091-4:2021 (twinned doc).
+ * https://www.itu.int/ITU-T/recommendations/rec.aspx?id=14661&lang=en
+ * Note: these enumerated values can be safely cast to and from integers when interoperating with the above standard.
+ * ColourPrimaries indicates the chromaticity coordinates of the source colour primaries in terms of the CIE 1931 definition of x and y as specified by ISO 11664-1
  */
-typedef enum LCEVC_ColorStandard
+typedef enum LCEVC_ColorPrimaries
 {
-    LCEVC_ColorStandard_Unknown    = 2,  /**< As required by ITU-T H.273, 0 is reserved. 2 is for unknown. */
-
-    LCEVC_ColorStandard_BT709      = 1,  /**< BT.709 color chromacity coordinates with KR = 0.2126, KB = 0.0722 */
-    LCEVC_ColorStandard_BT601_PAL  = 5,  /**< BT.601 625 color chromacity coordinates with KR = 0.299, KB = 0.114 */
-    LCEVC_ColorStandard_BT601_NTSC = 6,  /**< BT.601 525 color chromacity coordinates with KR = 0.299, KB = 0.114 */
-    LCEVC_ColorStandard_BT2020     = 9,  /**< BT.2020 color chromacity coordinates with KR = 0.2627, KB = 0.0593 */
-
-    LCEVC_ColorStandard_ForceInt32 = 0x7fffffff
-} LCEVC_ColorStandard;
+    LCEVC_ColorPrimaries_Reserved_0    =  0,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_BT709         =  1,  /**< Rec. ITU-R BT.709-6, Rec. ITU-R BT.1361-0, IEC 61966-2-1 sRGB or sYCC, IEC 61966-2-4, SMPTE RP 177 (1993) Annex B */
+    LCEVC_ColorPrimaries_Unspecified   =  2,  /**< Image characteristics are unknown or are determined by the application */
+    LCEVC_ColorPrimaries_Reserved_3    =  3,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_BT470_M       =  4,  /**< Rec. ITU-R BT.470-6 System M (historical), USNTSC 1953 USFCC Title 47 Code of Federal Regulations 73.682 (a) (20) */
+    LCEVC_ColorPrimaries_BT470_BG      =  5,  /**< Rec. ITU-R BT.470-6 System B, G (historical), Rec. ITU-R BT.601-7 625, Rec. ITU-R BT.1358-0 625 (historical), Rec. ITU-R BT.1700-0 625 PAL and 625 SECAM */
+    LCEVC_ColorPrimaries_BT601_NTSC    =  6,  /**< Rec. ITU-R BT.601-7 525, Rec. ITU-R BT.1358-1 525 or 625 (historical), Rec. ITU-R BT.1700-0 NTSC, SMPTE ST 170 (2004), functionally the same as the value 7 */
+    LCEVC_ColorPrimaries_SMPTE240      =  7,  /**< SMPTE ST 240 (1999), functionally the same as the value 6 */
+    LCEVC_ColorPrimaries_GENERIC_FILM  =  8,  /**< Generic film (colour filters using Illuminant C) */
+    LCEVC_ColorPrimaries_BT2020        =  9,  /**< Rec. ITU-R BT.2020-2, Rec. ITU-R BT.2100-2 */
+    LCEVC_ColorPrimaries_XYZ           = 10,  /**< SMPTE ST 428-1 (2019), (CIE 1931 XYZ as in ISO 11664-1) */
+    LCEVC_ColorPrimaries_SMPTE431      = 11,  /**< SMPTE RP 431-2 (2011) */
+    LCEVC_ColorPrimaries_SMPTE432      = 12,  /**< SMPTE EG 432-1 (2010) */
+    LCEVC_ColorPrimaries_Reserved_13   = 13,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_Reserved_14   = 14,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_Reserved_15   = 15,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_Reserved_16   = 16,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_Reserved_17   = 17,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_Reserved_18   = 18,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_Reserved_19   = 19,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_Reserved_20   = 20,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_Reserved_21   = 21,  /**< Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_P22           = 22,  /**< No corresponding industry specification identified */
+                                      /* 23-255, Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_ForceInt32 = 0x7fffffff
+} LCEVC_ColorPrimaries;
 
 /*!
- * This enum represents the color transfer characteristics as defined in Table 3, Rec. ITU-T H.273.
- * Note that SDR (colorTransfer 1) is mathematically equivalent to SMPTE 170 (colorTransfer 6), and
- * ITU-R BT.2020-2 (colorTransfers 14 and 15).
+ * This enum represents the colour transfer characteristics with values as defined in Table 3 of ITU-T Rec. H.273 v2 (07/2021) and ISO/IEC TR 23091-4:2021 (twinned doc).
+ * Note: these enumerated values can be safely cast to and from integers when interoperating with the above standard.
  */
-typedef enum LCEVC_ColorTransfer
+typedef enum LCEVC_TransferCharacteristics
 {
-    LCEVC_ColorTransfer_Unknown = 2,   /**< As required by ITU-T H.273, 0 is reserved. 2 is for unknown. */
+    LCEVC_TransferCharacteristics_Reserved_0     =  0,  /*  Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_TransferCharacteristics_BT709          =  1,  /**< Rec. ITU-R BT.709-6, Rec. ITU-R BT.1361-0 conventional colour gamut system (historical), functionally the same as the values 6, 14 and 15 */
+    LCEVC_TransferCharacteristics_Unspecified    =  2,  /**< Image characteristics are unknown or are determined by the application */
+    LCEVC_TransferCharacteristics_Reserved_3     =  3,  /*  Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_TransferCharacteristics_GAMMA22        =  4,  /**< Assumed display gamma 2.2: Rec. ITU-R BT.470-6 System M (historical), USNTSC 1953 USFCC Title 47 Code of Federal Regulations 73.682 (a) (20), Rec. ITU-R BT.1700-0 625 PAL and 625 SECAM */
+    LCEVC_TransferCharacteristics_GAMMA28        =  5,  /**< Assumed display gamma 2.8: Rec. ITU-R BT.470-6 System B, G (historical) */
+    LCEVC_TransferCharacteristics_BT601          =  6,  /**< Rec. ITU-R BT.601-7 525 or 625, Rec. ITU-R BT.1358-1 525 or 625 (historical), Rec. ITU-R BT.1700-0 NTSC, SMPTE ST 170 (2004) */
+    LCEVC_TransferCharacteristics_SMPTE240       =  7,  /**< SMPTE ST 240 (1999) */
+    LCEVC_TransferCharacteristics_LINEAR         =  8,  /**< Linear transfer characteristics */
+    LCEVC_TransferCharacteristics_LOG100         =  9,  /**< Logarithmic transfer characteristic (100:1 range) */
+    LCEVC_TransferCharacteristics_LOG100_SQRT10  = 10,  /**< Logarithmic transfer characteristic (100 * Sqrt( 10 ) : 1 range) */
+    LCEVC_TransferCharacteristics_IEC61966       = 11,  /**< IEC 61966-2-4 */
+    LCEVC_TransferCharacteristics_BT1361         = 12,  /**< Rec. ITU-R BT.1361-0 extended colour gamut system (historical) */
+    LCEVC_TransferCharacteristics_SRGB_SYCC      = 13,  /**< IEC 61966-2-1 sRGB (with MatrixCoefficients equal to 0), IEC 61966-2-1 sYCC (with MatrixCoefficients equal to 5) */
+    LCEVC_TransferCharacteristics_BT2020_10BIT   = 14,  /**< Rec. ITU-R BT.2020-2 (10-bit system), functionally the same as the values 1, 6 and 15 */
+    LCEVC_TransferCharacteristics_BT2020_12BIT   = 15,  /**< Rec. ITU-R BT.2020-2 (12-bit system), functionally the same as the values 1, 6 and 14 */
+    LCEVC_TransferCharacteristics_PQ             = 16,  /**< SMPTE ST 2084 (2014) for 10-, 12-, 14- and 16-bit systems, Rec. ITU-R BT.2100-2 perceptual quantization (PQ) system */
+    LCEVC_TransferCharacteristics_SMPTE428       = 17,  /**< SMPTE ST 428-1 (2019) */
+    LCEVC_TransferCharacteristics_HLG            = 18,  /**< ARIB STD-B67 (2015), Rec. ITU-R BT.2100-2 hybrid log-gamma (HLG) system */
+                                      /* 19-255, Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_TransferCharacteristics_ForceInt32 = 0x7fffffff
+} LCEVC_TransferCharacteristics;
 
-    LCEVC_ColorTransfer_SDR     = 1,   /**< ITU-R BT.709-6, "conventional colour gamut system" */
-    LCEVC_ColorTransfer_Linear  = 8,   /**< Linear transfer characteristic curve */
-    LCEVC_ColorTransfer_ST2084  = 16,  /**< SMPTE ST 2084 transfer function. Also called PQ */
-    LCEVC_ColorTransfer_HLG     = 18,  /**< ARIB STD-B67 hybrid-log-gamma transfer function */
-
-    LCEVC_ColorTransfer_ForceInt32 = 0x7fffffff
-} LCEVC_ColorTransfer;
+/*!
+ * This enum represents the matrix coefficients with values as defined in Table 4 of ITU-T Rec. H.273 v2 (07/2021) and ISO/IEC TR 23091-4:2021 (twinned doc).
+ * https://www.itu.int/ITU-T/recommendations/rec.aspx?id=14661&lang=en
+ * Note: these enumerated values can be safely cast to and from integers when interoperating with the above standard.
+ * MatrixCoefficients describes the matrix coefficients used in deriving luma and chroma signals from the green, blue and red or X, Y and Z primaries, as specified in Table 4 and equations 11 to 77 of ITU-T Rec. H.273 v2 (07/2021).
+ * Equations referenced from enum values are equations found in Section 8.3 of ITU-T Rec. H.273 v2 (07/2021).
+ */
+typedef enum LCEVC_MatrixCoefficients
+{
+    LCEVC_MatrixCoefficients_IDENTITY            = 0,    /**< Identity;
+                                                         The identity matrix. Typically used for GBR (often referred to as RGB); however, may also be used for YZX (often referred to as XYZ); IEC 61966-2-1 sRGB, SMPTE ST 428-1 (2019), See equations 41 to 43 */
+    LCEVC_MatrixCoefficients_BT709               = 1,    /**< KR = 0.2126; KB = 0.0722;
+                                                         Rec. ITU-R BT.709-6, Rec. ITU-R BT.1361-0 conventional colour gamut system and extended colour gamut system (historical), IEC 61966-2-4 xvYCC709, SMPTE RP 177 (1993) Annex B, See equations 38 to 40 */
+    LCEVC_MatrixCoefficients_Unspecified         = 2,    /**< Unspecified;
+                                                         Image characteristics are unknown or are determined by the application */
+    LCEVC_MatrixCoefficients_Reserved_3          = 3,    /**< Reserved;
+                                                         For future use by ITU-T | ISO/IEC */
+    LCEVC_MatrixCoefficients_USFCC               = 4,    /**< KR = 0.30; KB = 0.11;
+                                                         United States Federal Communications Commission (2003) Title 47 Code of Federal Regulations 73.682 (a) (20), See equations 38 to 40 */
+    LCEVC_MatrixCoefficients_BT470_BG            = 5,    /**< KR = 0.299; KB = 0.114;
+                                                         Rec. ITU-R BT.470-6 System B, G (historical), Rec. ITU-R BT.601-7 625, Rec. ITU-R BT.1358-0 625 (historical), Rec. ITU-R BT.1700-0 625 PAL and 625 SECAM, IEC 61966-2-1 sYCC, IEC 61966-2-4 xvYCC601 (functionally the same as the value 6), See equations 38 to 40 */
+    LCEVC_MatrixCoefficients_BT601_NTSC          = 6,    /**< KR = 0.299; KB = 0.114;
+                                                         Rec. ITU-R BT.601-7 525, Rec. ITU-R BT.1358-1 525 or 625 (historical), Rec. ITU-R BT.1700-0 NTSC, SMPTE ST 170 (2004), (functionally the same as the value 5), See equations 38 to 40 */
+    LCEVC_MatrixCoefficients_SMPTE240            = 7,    /**< KR = 0.212; KB = 0.087;
+                                                         SMPTE ST 240 (1999), See equations 38 to 40 */
+    LCEVC_MatrixCoefficients_YCGCO               = 8,    /**< YCgCo;
+                                                         See equations 44 to 58 */
+    LCEVC_MatrixCoefficients_BT2020_NCL          = 9,    /**< KR = 0.2627; KB = 0.0593;
+                                                         Rec. ITU-R BT.2020-2 (non-constant luminance), Rec. ITU-R BT.2100-2 Y'CbCr, See equations 38 to 40 */
+    LCEVC_MatrixCoefficients_BT2020_CL           = 10,   /**< KR = 0.2627; KB = 0.0593;
+                                                         Rec. ITU-R BT.2020-2 (constant luminance), See equations 59 to 68 */
+    LCEVC_MatrixCoefficients_SMPTE2085           = 11,   /**< Y'D'ZD'X;
+                                                         SMPTE ST 2085 (2015), See equations 69 to 71 */
+    LCEVC_MatrixCoefficients_CHROMATICITY_NCL    = 12,   /**< See equations 32 to 37;
+                                                         Chromaticity-derived non-constant luminance system, See equations 38 to 40 */
+    LCEVC_MatrixCoefficients_CHROMATICITY_CL     = 13,   /**< See equations 32 to 37;
+                                                         Chromaticity-derived non-constant luminance system, See equations 59 to 68 */
+    LCEVC_MatrixCoefficients_ICTCP               = 14,   /**< ICTCP;
+                                                         Rec. ITU-R BT.2100-2 ICTCP, See equations 72 to 74 for TransferCharacteristics value 16 (PQ), See equations 75 to 77 for TransferCharacteristics value 18 (HLG) */
+                                                /* 15-255, Reserved For future use by ITU-T | ISO/IEC */
+} LCEVC_MatrixCoefficients;
 
 /*!
  * Identifies per picture metadata items.
@@ -223,21 +297,21 @@ typedef enum LCEVC_ColorFormat
  */
 typedef struct LCEVC_PictureDesc
 {
-    uint32_t              width;                    /**< Nominal net width of the picture in luma samples, i.e. no alignment to macroblocks or striding */
-    uint32_t              height;                   /**< Nominal net height of the picture in luma samples, i.e. no sliceheight or padding */
-    LCEVC_ColorFormat     colorFormat;              /**< Color format of the picture */
-    LCEVC_ColorRange      colorRange;               /**< Color range of the picture */
-    LCEVC_ColorStandard   colorStandard;            /**< Color standard of the picture */
-    LCEVC_ColorTransfer   colorTransfer;            /**< Color transfer to use to display picture */
-    LCEVC_HDRStaticInfo   hdrStaticInfo;            /**< Hdr static metadata for custom color primaries */
-    uint32_t              sampleAspectRatioNum;     /**< Sample Aspect Ratio of width to height, this is the numerator, sar = (sample_aspect_ratio_num)/(sample_aspect_ratio_den) */
-    uint32_t              sampleAspectRatioDen;     /**< Sample Aspect Ratio of width to height, this is the denominator, sar = (sample_aspect_ratio_num)/(sample_aspect_ratio_den) */
+    uint32_t                        width;                    /**< Nominal net width of the picture in luma samples, i.e. no alignment to macroblocks or striding */
+    uint32_t                        height;                   /**< Nominal net height of the picture in luma samples, i.e. no sliceheight or padding */
+    LCEVC_ColorFormat               colorFormat;              /**< Color format of the picture */
+    LCEVC_ColorRange                colorRange;               /**< Color range of the picture */
+    LCEVC_ColorPrimaries            colorPrimaries;           /**< Color primaries of the picture */
+    LCEVC_MatrixCoefficients        matrixCoefficients;       /**< Color matrix coefficients of the picture */
+    LCEVC_TransferCharacteristics   transferCharacteristics;  /**< Color transfer characteristics to use to display the picture */
+    LCEVC_HDRStaticInfo             hdrStaticInfo;            /**< Hdr static metadata to use to display the picture */
+    uint32_t                        sampleAspectRatioNum;     /**< Sample Aspect Ratio of width to height, this is the numerator, sar = (sample_aspect_ratio_num)/(sample_aspect_ratio_den) */
+    uint32_t                        sampleAspectRatioDen;     /**< Sample Aspect Ratio of width to height, this is the denominator, sar = (sample_aspect_ratio_num)/(sample_aspect_ratio_den) */
 
-    uint32_t              cropTop;                  /**< Vertical top offset of the crop area, aka active area, where the Image samples are to be found. NOTE: crop size might differ from sample size */
-    uint32_t              cropBottom;               /**< Vertical bottom offset of the crop area, aka active area, where the Image samples are to be found. NOTE: crop size might differ from sample size */
-    uint32_t              cropLeft;                 /**< Horizontal left offset of the crop area, aka active area, where the Image samples are to be found. NOTE: crop size might differ from sample size */
-    uint32_t              cropRight;                /**< Horizontal right offset of the crop area, aka active area, where the Image samples are to be found. NOTE: crop size might differ from sample size */
-
+    uint32_t                        cropTop;                  /**< Vertical top offset of the crop area, aka active area, where the Image samples are to be found. NOTE: crop size might differ from sample size */
+    uint32_t                        cropBottom;               /**< Vertical bottom offset of the crop area, aka active area, where the Image samples are to be found. NOTE: crop size might differ from sample size */
+    uint32_t                        cropLeft;                 /**< Horizontal left offset of the crop area, aka active area, where the Image samples are to be found. NOTE: crop size might differ from sample size */
+    uint32_t                        cropRight;                /**< Horizontal right offset of the crop area, aka active area, where the Image samples are to be found. NOTE: crop size might differ from sample size */
 } LCEVC_PictureDesc;
 
 /*!
@@ -256,6 +330,7 @@ typedef enum LCEVC_Access
 
 /*!
  * Describes a picture buffer, as used when allocating an external picture
+ *
  */
 typedef struct LCEVC_PictureBufferDesc
 {
@@ -267,18 +342,14 @@ typedef struct LCEVC_PictureBufferDesc
 } LCEVC_PictureBufferDesc;
 
 /*!
- * This struct describes the layout of a locked plane.
+ * This struct describes the location of a plane within the Picture's buffer. If colour components
+ * are interleaved, they are considered to be sharing one plane.
+ *
  */
 typedef struct LCEVC_PicturePlaneDesc
 {
-    uint8_t* firstSample;         /**< Pointer to first byte of the first active sample of plane within buffer, NOTE: active means no cropping, the active origin is 0,0 */
-    uint32_t sampleByteStride;    /**< Distance in bytes between consecutive sample values of the same channel, for ex. this will be 2 for the UV plane in LCEVC_NV12_8 and LCEVC_NV21_8. Note: 0 means to use default sample_stride relative to LCEVC_PictureDesc.color_format */
-    uint32_t rowByteStride;       /**< Distance in bytes between the first sample of two consecutive rows, including any trailing pading */
-    uint32_t sampleByteSize;      /**< Size of sample in bytes: eg:   LCEVC_I420_8 will be 1, and LCEVC_I420_10_LE will be 2 */
-    uint32_t rowByteSize;         /**< Size of row in bytes - including sample stride, not including row padding */
-    uint32_t width;               /**< Width of this plane in samples - will be equal to rowByteSize / sampleByteStride */
-    uint32_t height;              /**< Height of this plane in rows */
-
+    uint8_t* firstSample;   /**< Pointer to first byte of the first active sample of plane within buffer, NOTE: active means no cropping, the active origin is 0,0. */
+    uint32_t rowByteStride; /**< Distance in bytes between the first sample of two consecutive rows, including any trailing pading */
 } LCEVC_PicturePlaneDesc;
 
 /*!
@@ -317,18 +388,23 @@ LCEVC_ReturnCode LCEVC_AllocPicture( LCEVC_DecoderHandle decHandle,
  *
  * @param[in]    decHandle           LCEVC Decoder handle
  * @param[in]    pictureDesc         Describing picture format and dimensions
- * @param[in]    bufferCount         Number of underlying buffers (must match format requirements)
- * @param[in]    buffers             Underlying pixel buffer(s)
- * @param[out]   picture             Result LCEVC_PictureHandle if creation is successful,
+ * @param[in]    buffer              Optional: Underlying pixel buffer. If null, then planes is
+ *                                   required. It will also be impossible to get the buffer desc
+ *                                   for this image (since you haven't told it to us).
+ * @param[in]    planes              Optional: Description for each plane of picture - first 
+ *                                   sample and byte stride. If null, then buffer is required. It
+ *                                   will also be impossible to get the plane desc for this image
+ *                                   (since you haven't told it to us).
+ * @param[out]   picHandle           Result LCEVC_PictureHandle if creation is successful,
  *                                   otherwise NULL
  * @return                           LCEVC_Error if pictureDesc contains incompatible values
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_AllocPictureExternal( LCEVC_DecoderHandle decHandle,
                                              const LCEVC_PictureDesc* pictureDesc,
-                                             uint32_t bufferCount,
-                                             const LCEVC_PictureBufferDesc* buffers,
-                                             LCEVC_PictureHandle* picture );
+                                             const LCEVC_PictureBufferDesc* buffer,
+                                             const LCEVC_PicturePlaneDesc* planes,
+                                             LCEVC_PictureHandle* picHandle );
 
 /*!
  * Releases a picture instance.
@@ -394,9 +470,9 @@ LCEVC_ReturnCode LCEVC_GetPictureDesc( LCEVC_DecoderHandle decHandle,
 /*!
  * Update the description of a picture instance, and potentially reallocate memory.
  * 
- * When using a decoder-managed picture (created by LCEVC_AllocPicture) the underlying
- * memory will be released and re-allocated automatically. Otherwise,
- * memory reallocation will not be handled by this function.
+ * When using a decoder-managed picture (created by LCEVC_AllocPicture) the underlying memory will
+ * be released and re-allocated automatically. Otherwise, memory reallocation will not be handled
+ * by this function: the original memory will be reused.
  *
  * @param[in]    decHandle           LCEVC Decoder handle
  * @param[in]    picHandle           Handle to picture instance to be adjusted
@@ -410,33 +486,20 @@ LCEVC_ReturnCode LCEVC_SetPictureDesc( LCEVC_DecoderHandle decHandle,
                                        const LCEVC_PictureDesc* desc );
 
 /*!
- * Get the number of buffers from a picture instance.
+ * Get a description of the buffer from a picture instance.
  *
  * @param[in]    decHandle           LCEVC Decoder handle
  * @param[in]    picHandle           Handle to picture instance to be queried
- * @param[out]   bufferCount         Will be filled with number of buffers
- * @return                           LCEVC_InvalidParam for an invalid picHandle, otherwise
- *                                   LCEVC_Success
- */
-LCEVC_API
-LCEVC_ReturnCode LCEVC_GetPictureBufferCount( LCEVC_DecoderHandle decHandle,
-                                              LCEVC_PictureHandle picHandle,
-                                              uint32_t* bufferCount );
-
-/*!
- * Get a description of a buffer from a picture instance.
- *
- * @param[in]    decHandle           LCEVC Decoder handle
- * @param[in]    picHandle           Handle to picture instance to be queried
- * @param[in]    bufferIndex         Index of buffer to be queried
  * @param[out]   bufferDesc          Destination for buffer description
- * @return                           LCEVC_InvalidParam for an invalid picHandle or bufferDesc,
- *                                   otherwise LCEVC_Success
+ * @return                           LCEVC_InvalidParam for an invalid picHandle or bufferDesc.
+ *                                   LCEVC_Error if the picture was allocated without a buffer desc
+ *                                   in AllocPicExternal. Such pictures must be accessed per-plane,
+ *                                   after being locked.
+ *                                   LCEVC_Success otherwise.
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_GetPictureBuffer( LCEVC_DecoderHandle decHandle,
                                          LCEVC_PictureHandle picHandle,
-                                         uint32_t bufferIndex,
                                          LCEVC_PictureBufferDesc* bufferDesc );
 
 /*!
@@ -505,15 +568,16 @@ LCEVC_ReturnCode LCEVC_LockPicture( LCEVC_DecoderHandle decHandle,
  *
  * @param[in]    decHandle           LCEVC Decoder handle
  * @param[in]    pictureLock         Lock instance to query
- * @param[in]    bufferIndex         Index of buffer within locked picture to query
  * @param[out]   bufferDesc          Destination PictureBufferDesc describing locked memory layout
- * @return                           LCEVC_InvalidParam if the lock is invalid, LCEVC_Success
- *                                   otherwise
+ * @return                           LCEVC_InvalidParam if the lock is invalid.
+ *                                   LCEVC_Error if the picture was allocated without a buffer desc
+ *                                   in AllocPicExternal. Such pictures must be accessed via plane
+ *                                   desc.
+ *                                   LCEVC_Success otherwise.
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_GetPictureLockBufferDesc( LCEVC_DecoderHandle decHandle,
                                                  LCEVC_PictureLockHandle pictureLock,
-                                                 uint32_t bufferIndex,
                                                  LCEVC_PictureBufferDesc* bufferDesc );
 
 /*!
@@ -523,8 +587,11 @@ LCEVC_ReturnCode LCEVC_GetPictureLockBufferDesc( LCEVC_DecoderHandle decHandle,
  * @param[in]    pictureLock         pictureLock instance to query
  * @param[in]    planeIndex          Index of plane within locked picture to query
  * @param[out]   planeDesc           Destination PicturePlaneDesc describing locked memory layout
- * @return                           LCEVC_InvalidParam if the lock is invalid, LCEVC_Success
- *                                   otherwise
+ * @return                           LCEVC_InvalidParam if the lock is invalid.
+ *                                   LCEVC_Error if the picture was allocated without a plane desc
+ *                                   array in AllocPicExternal. Such pictures must be accessed via
+ *                                   buffer desc.
+ *                                   LCEVC_Success otherwise.
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_GetPictureLockPlaneDesc( LCEVC_DecoderHandle decHandle,
@@ -798,7 +865,7 @@ typedef enum LCEVC_Event {
 
     LCEVC_EventCount,
 
-    LCEVC_Event_ForceInt32 = 0x7fffffff
+    LCEVC_Event_ForceUInt8 = 0xff  /**< Ensures this is at least a uint8_t (but may be larger).*/
 } LCEVC_Event;
 
 /*!

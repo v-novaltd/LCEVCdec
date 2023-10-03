@@ -40,17 +40,17 @@ bool lexical_cast(const std::string& input, LCEVC_ColorRange& v) // NOLINT
     return true;
 }
 
-bool lexical_cast(const std::string& input, LCEVC_ColorStandard& v) // NOLINT
+bool lexical_cast(const std::string& input, LCEVC_ColorPrimaries& v) // NOLINT
 {
     if (!fromString(input, v)) {
-        fmt::print(stderr, "Not a valid ColorStandard: '{}'\n", input);
+        fmt::print(stderr, "Not a valid ColorPrimaries: '{}'\n", input);
         std::exit(EXIT_FAILURE);
     }
 
     return true;
 }
 
-bool lexical_cast(const std::string& input, LCEVC_ColorTransfer& v) // NOLINT
+bool lexical_cast(const std::string& input, LCEVC_TransferCharacteristics& v) // NOLINT
 {
     if (!fromString(input, v)) {
         fmt::print(stderr, "Not a valid ColorTransfer: '{}'\n", input);

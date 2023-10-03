@@ -21,7 +21,7 @@ The decoder object's state progresses as the integration calls the ``LCEVC_Send.
 Decoder
 -------
 
-Each decoder object manages the decoding of one **LCEVC** enhanced video stream. THe new decoder is created using :cpp:func:`LCEVC_CreateDecoder` which outputs an opaque :cpp:type:`LCEVC_DecoderHandle` value.
+Each decoder object manages the decoding of one **LCEVC** enhanced video stream. The new decoder is created using :cpp:func:`LCEVC_CreateDecoder` which outputs an opaque :cpp:type:`LCEVC_DecoderHandle` value.
 The decoder is created in a *Configuration* state, optionally configured, then initialised for use. After use, decoders are destroyed using :cpp:func:`LCEVC_DestroyDecoder`.
 
 Creation and Configuration
@@ -232,7 +232,8 @@ The external details of a picture are carried by the :cpp:struct:`LCEVC_PictureD
 * Components and sampling: :cpp:member:`~LCEVC_PictureDesc::colorFormat`.
 * Sample aspect ratio:  :cpp:member:`~LCEVC_PictureDesc::sampleAspectRatioNum` and :cpp:member:`~LCEVC_PictureDesc::sampleAspectRatioDen`.
 * Color range (e.g. *Full* or *Limited*): :cpp:member:`~LCEVC_PictureDesc::colorRange`.
-* Color standard: (e.g. *BT601*, *BT709* or *BT2020*) :cpp:member:`~LCEVC_PictureDesc::colorStandard`.
+* Color primaries: (e.g. *BT601_NTSC*, *BT709* or *BT2020*) :cpp:member:`~LCEVC_PictureDesc::colorPrimaries`.
+* Transfer characteristics (e.g. *PQ*, *LINEAR*, or *HLG*) :cpp:member:`~LCEVC_PictureDesc::transferCharacteristics`.
 * Static High Dynamic Range metadata:  :cpp:member:`~LCEVC_PictureDesc::hdrStaticInfo`.
 * Picture cropping :cpp:member:`~LCEVC_PictureDesc::cropTop`, :cpp:member:`~LCEVC_PictureDesc::cropBottom`, :cpp:member:`~LCEVC_PictureDesc::cropLeft` and :cpp:member:`~LCEVC_PictureDesc::cropRight`.
 

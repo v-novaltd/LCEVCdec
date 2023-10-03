@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2023. All rights reserved. */
 #include "common/cmdbuffer.h"
 
 #include "common/memory.h"
@@ -12,7 +12,7 @@
 enum CmdBufferConstants
 {
     CBCStoreGrowFactor = 2, /**< The factory multiply current capacity by when growing the buffer. */
-    CBCDefaultInitialCapacity = 1 * 1024 * 1024, /**< The default initial capacity of a cmdbuffer in bytes.. */
+    CBCDefaultInitialCapacity = 1024, /**< The default initial capacity of a cmdbuffer. */
 };
 
 /*! \brief Dynamically growing managing the memory for a command buffer instance.

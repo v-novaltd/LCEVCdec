@@ -7,22 +7,23 @@
 
 #include "LCEVC/lcevc_dec.h"
 
-#include <string>
 #include <memory>
+#include <string>
 
 // Hashing utility class
 //
-class Hash {
+class Hash
+{
 public:
     Hash() = default;
 
-    Hash(const Hash &) = delete;
-    Hash& operator=(const Hash &) = delete;
-    Hash(Hash &&) = delete;
-    Hash& operator=(Hash &&) = delete;
+    Hash(const Hash&) = delete;
+    Hash& operator=(const Hash&) = delete;
+    Hash(Hash&&) = delete;
+    Hash& operator=(Hash&&) = delete;
 
     virtual ~Hash() = 0;
-    virtual void update(const uint8_t *data, uint32_t size) = 0;
+    virtual void update(const uint8_t* data, uint32_t size) = 0;
     virtual std::string hexDigest() = 0;
 
     void updatePicture(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture);

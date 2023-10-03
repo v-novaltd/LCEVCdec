@@ -25,12 +25,15 @@ class Decoder;
 class Picture;
 class PictureLock;
 
-using PictureBuffer = lcevc_dec::utility::DataBuffer;
+using PictureBuffer = lcevc_dec::api_utility::DataBuffer;
 
 // - Picture --------------------------------------------------------------------------------------
 
 class Picture
 {
+protected:
+    static constexpr uint8_t kMaxNumPlanes = lcevc_dec::api_utility::PictureFormatDesc::kMaxNumPlanes;
+
 public:
     Picture() = default;
     virtual ~Picture() = 0;
@@ -47,8 +50,9 @@ public:
 
     virtual bool isManaged() const = 0;
 
-    // Getters and setters.
-    // clang-format off: Want inline getters, but they bloat the header if they take multiple lines
+    // Getters and setters. We want inline getters, but they bloat the header if they take multiple
+    // lines, hence format disabling here.
+    // clang-format off
 
     std::string getShortDbgString() const;
     std::string toString() const;
@@ -56,21 +60,29 @@ public:
     bool getPublicFlag(uint8_t flag) const;
     void setPublicFlag(uint8_t flag, bool value);
 
-    // setDesc is lazy: does nothing if requested desc equals new desc
+    // The base implementation of setDesc is not lazy (i.e. it will not check whether descriptions
+    // have changed before setting). However, ALL CHILD IMPLEMENTATIONS should be lazy-setters.
     void getDesc(LCEVC_PictureDesc& descOut) const;
-    bool setDesc(const LCEVC_PictureDesc& newDesc);
+    virtual bool setDesc(const LCEVC_PictureDesc& newDesc);
 
+    // Note: All widths and heights are always post-cropping (whereas strides and memory sizes are
+    // independent from cropping).
     uint32_t getWidth() const { return m_desc.GetWidth() - (m_crop.left + m_crop.right); }
     uint32_t getHeight() const { return m_desc.GetHeight() - (m_crop.top + m_crop.bottom); }
     uint32_t getBitdepth() const { return m_desc.GetBitDepth(); }
     uint32_t getBytedepth() const { return m_desc.GetByteDepth(); }
     uint32_t getNumPlanes() const { return m_desc.GetPlaneCount(); }
-    uint32_t getPlaneWidth(uint32_t planeIndex) const { return m_desc.GetPlaneWidth(planeIndex); }
-    uint32_t getPlaneHeight(uint32_t planeIndex) const { return m_desc.GetPlaneHeight(planeIndex); }
-    uint32_t getPlaneWidthBytes(uint32_t planeIndex) const
+    uint32_t getPlaneWidth(uint32_t planeIndex) const
     {
-        return m_desc.GetPlaneWidthBytes(planeIndex);
+        return m_desc.GetPlaneWidth(planeIndex) -
+               ((m_crop.left + m_crop.right) >> planeHorizontalShift(m_desc.GetFormat(), planeIndex));
     }
+    uint32_t getPlaneHeight(uint32_t planeIndex) const
+    {
+        return m_desc.GetPlaneHeight(planeIndex) -
+               ((m_crop.top + m_crop.bottom) >> planeVerticalShift(m_desc.GetFormat(), planeIndex));
+    }
+    uint32_t getPlaneWidthBytes(uint32_t planeIndex) const { return getPlaneWidth(planeIndex) * getBytedepth(); }
     uint32_t getPlaneBytesPerPixel(uint32_t planeIndex) const
     {
         // Bytes per pixel, where "UVUVUV" is considered 3 pixels wide. So, that's samples per
@@ -90,16 +102,12 @@ public:
         // return m_pictureDesc.GetPlaneStridePixels(i) * m_pictureDesc.GetPlanePixelStride(i);
         return m_desc.GetPlaneStrideBytes(planeIndex) / m_desc.GetByteDepth();
     }
-    uint32_t getPlaneMemorySize(uint32_t planeIndex) const
-    {
-        return m_desc.GetPlaneMemorySize(planeIndex);
-    }
+    uint32_t getPlaneMemorySize(uint32_t planeIndex) const { return m_desc.GetPlaneMemorySize(planeIndex); }
+    uint8_t* getPlaneFirstSample(uint32_t planeIdx) { return internalGetPlaneFirstSample(planeIdx); }
+    const uint8_t* getPlaneFirstSample(uint32_t planeIdx) const { return internalGetPlaneFirstSample(planeIdx); }
 
-    uint8_t* getPlaneFirstSample(uint32_t planeIdx);
-    const uint8_t* getPlaneFirstSample(uint32_t planeIdx) const;
-
-    virtual uint32_t getBufferCount() const = 0;
-    virtual bool getBufferDesc(uint32_t bufferIndex, LCEVC_PictureBufferDesc& bufferDescOut) const = 0;
+    virtual bool getBufferDesc(LCEVC_PictureBufferDesc& bufferDescOut) const = 0;
+    virtual bool getPlaneDescArr(PicturePlaneDesc planeDescArrOut [kMaxNumPlanes]) const = 0;
 
     void* getUserData() const { return m_userData; }
     void setUserData(void* userData) { m_userData = userData; }
@@ -114,40 +122,52 @@ public:
     virtual bool canModify() const { return !isLocked(); }
 
     // Memory allocation
-
+    // TODO: During DEC-363, make it so that "unbind" is the first step of "bind", since we're
+    // currently doing this manually, for both Picture types.
     virtual bool bindMemory();
     virtual bool unbindMemory();
 
 protected:
     void setName(const std::string& name);
 
+    virtual bool
+    setDesc(const LCEVC_PictureDesc& newDesc,
+            const uint32_t planeStridesBytes[lcevc_dec::api_utility::PictureFormatDesc::kMaxNumPlanes]);
+
     bool isLocked() const { return m_lock != kInvalidHandle; }
 
-    virtual bool setDesc(const LCEVC_PictureDesc& newDesc, bool& descChangedOut);
-
     // These are strictly internal, so it's fine to return non-const data of a const Picture.
-    uint8_t* internalGetPlaneFirstSample(uint32_t planeIdx) const;
-    virtual uint8_t* getBuffer(uint32_t bufferIdx = 0) const = 0;
+    virtual uint8_t* internalGetPlaneFirstSample(uint32_t planeIdx) const;
+    virtual uint8_t* getBuffer() const = 0;
 
     uint32_t getRequiredSize() const;
 
-    lcevc_dec::utility::PictureFormatDesc m_desc = {};
+    static uint32_t planeHorizontalShift(lcevc_dec::api_utility::PictureFormat::Enum format,
+                                         uint32_t planeIndex);
+    static uint32_t planeVerticalShift(lcevc_dec::api_utility::PictureFormat::Enum format,
+                                       uint32_t planeIndex);
+
+    lcevc_dec::api_utility::PictureFormatDesc m_desc = {};
 
 private:
-    bool initializeDesc(const LCEVC_PictureDesc& desc, bool& descChangedOut);
+    // This initializer is NOT lazy: it will set the desc without checking if it's changed or not.
+    bool initializeDesc(
+        const LCEVC_PictureDesc& desc,
+        const uint32_t planeStridesPixels[lcevc_dec::api_utility::PictureFormatDesc::kMaxNumPlanes] = nullptr);
 
     // Identifying data
-    uint64_t m_timehandle = lcevc_dec::utility::kInvalidTimehandle;
+    uint64_t m_timehandle = lcevc_dec::api_utility::kInvalidTimehandle;
     void* m_userData = nullptr;
     std::string m_name = "unknown";
 
     // Format information
     ColorRange m_colorRange = ColorRange::Unknown;
-    ColorTransfer m_colorTransfer = ColorTransfer::Unknown;
+    MatrixCoefficients m_matrixCoefficients = MatrixCoefficients::Unknown;
+    TransferCharacteristics m_transferCharacteristics = TransferCharacteristics::Unknown;
     uint8_t m_publicFlags = 0;
     HDRStaticInfo m_hdrStaticInfo = {};
     AspectRatio m_sampleAspectRatio = {1, 1};
-    lcevc_dec::utility::Margins m_crop = {};
+    lcevc_dec::api_utility::Margins m_crop = {};
 
     // State
     Handle<PictureLock> m_lock = kInvalidHandle;
@@ -166,27 +186,30 @@ public:
     PictureExternal(PictureExternal&&) = delete;
 
     bool isManaged() const final { return false; }
-    bool setDesc(const LCEVC_PictureDesc& newDesc) { return BaseClass::setDesc(newDesc); }
+    bool setDesc(const LCEVC_PictureDesc& newDesc) override;
+    bool setDescExternal(const LCEVC_PictureDesc& newDesc, const LCEVC_PicturePlaneDesc* newPlaneDescArr,
+                         const LCEVC_PictureBufferDesc* newBufferDesc);
 
-    uint32_t getBufferCount() const final { return m_bufferCount; }
-    bool getBufferDesc(uint32_t bufferIndex, LCEVC_PictureBufferDesc& bufferDescOut) const final;
-
-    // It is technically possibly to set individual buffers as modifiable/unmodifiable, so we may
-    // eventually want to allow this function to test on a per-buffer basis.
-    bool canModify() const final;
-
-    bool bindMemoryBuffers(uint32_t bufferCount, const LCEVC_PictureBufferDesc* bufferDescArr);
+    bool getBufferDesc(LCEVC_PictureBufferDesc& bufferDescOut) const final;
+    bool getPlaneDescArr(PicturePlaneDesc planeDescArrOut[kMaxNumPlanes]) const final;
 
 protected:
-    bool setDesc(const LCEVC_PictureDesc& newDesc, bool& descChangedOut) final;
-
-    uint8_t* getBuffer(uint32_t bufferIdx) const final { return m_bufferDescs[bufferIdx].data; }
-
+    bool bindMemoryBufferAndPlanes(uint32_t numPlanes, const LCEVC_PicturePlaneDesc* planeDescArr,
+                                   const LCEVC_PictureBufferDesc* bufferDesc);
     bool unbindMemory() final;
 
+    bool descsMatch(const LCEVC_PictureDesc& newDesc, const LCEVC_PicturePlaneDesc* newPlaneDescArr,
+                    const LCEVC_PictureBufferDesc* newBufferDesc);
+
+    bool setDesc(const LCEVC_PictureDesc& newDesc,
+                 const uint32_t planeStridesPixels[lcevc_dec::api_utility::PictureFormatDesc::kMaxNumPlanes]) override;
+
+    uint8_t* getBuffer() const final { return (m_bufferDesc ? m_bufferDesc->data : nullptr); }
+    uint8_t* internalGetPlaneFirstSample(uint32_t planeIdx) const final;
+
 private:
-    std::array<PictureBufferDesc, lcevc_dec::utility::PictureFormatDesc::kMaxNumPlanes> m_bufferDescs = {};
-    uint32_t m_bufferCount = 0;
+    std::unique_ptr<PictureBufferDesc> m_bufferDesc = nullptr;
+    std::unique_ptr<std::array<PicturePlaneDesc, kMaxNumPlanes>> m_planeDescs = nullptr;
 };
 
 class PictureManaged : public Picture
@@ -204,18 +227,19 @@ public:
     PictureManaged(PictureManaged&&) = delete;
 
     bool isManaged() const final { return true; }
-    bool setDesc(const LCEVC_PictureDesc& newDesc) { return BaseClass::setDesc(newDesc); }
 
-    uint32_t getBufferCount() const final { return (m_buffer == nullptr ? 0 : 1); }
-    bool getBufferDesc(uint32_t bufferIndex, LCEVC_PictureBufferDesc& bufferDescOut) const final;
+    bool setDesc(const LCEVC_PictureDesc& newDesc) override;
+
+    bool getBufferDesc(LCEVC_PictureBufferDesc& bufferDescOut) const final;
+    bool getPlaneDescArr(PicturePlaneDesc planeDescArrOut[kMaxNumPlanes]) const final;
 
 protected:
-    bool bindMemory() final; // hide this away (managed pictures bind memory in setDesc)
+    bool bindMemory() final;
     bool unbindMemory() final;
-    bool setDesc(const LCEVC_PictureDesc& newDesc, bool& descChangedOut) final;
 
-    // BufferIdx unused because managed images only have 1 buffer.
-    uint8_t* getBuffer(uint32_t) const final { return (m_buffer ? m_buffer->data() : nullptr); }
+    bool descsMatch(const LCEVC_PictureDesc& newDesc);
+
+    uint8_t* getBuffer() const final { return (m_buffer ? m_buffer->data() : nullptr); }
 
 private:
     // This is a reference to the BufferManager which we want to manage our buffers for us.

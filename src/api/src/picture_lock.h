@@ -6,6 +6,7 @@
 #include "uPictureFormatDesc.h"
 
 #include <array>
+#include <memory>
 
 namespace lcevc_dec::decoder {
 
@@ -13,7 +14,7 @@ class Picture;
 
 class PictureLock
 {
-    static constexpr uint8_t arrSize = lcevc_dec::utility::PictureFormatDesc::kMaxNumPlanes;
+    static constexpr uint8_t arrSize = lcevc_dec::api_utility::PictureFormatDesc::kMaxNumPlanes;
 
 public:
     PictureLock(Picture& src, Access access);
@@ -23,14 +24,17 @@ public:
     PictureLock(PictureLock&& moveSrc) = delete;
     PictureLock(const PictureLock& copySrc) = delete;
 
-    const PictureBufferDesc& getBufferDesc(size_t bufIdx) const { return m_bufferDescs[bufIdx]; }
-    const PicturePlaneDesc& getPlaneDesc(size_t planeIdx) const { return m_planeDescs[planeIdx]; }
+    const PictureBufferDesc* getBufferDesc() const { return m_bufferDesc.get(); }
+    const std::array<PicturePlaneDesc, arrSize>* getPlaneDescArr() const
+    {
+        return m_planeDescs.get();
+    }
 
 protected:
     bool unlock() const;
 
-    std::array<PictureBufferDesc, arrSize> m_bufferDescs;
-    std::array<PicturePlaneDesc, arrSize> m_planeDescs;
+    std::unique_ptr<PictureBufferDesc> m_bufferDesc = nullptr;
+    std::unique_ptr<std::array<PicturePlaneDesc, arrSize>> m_planeDescs = nullptr;
 
     Picture& m_owner;
 };

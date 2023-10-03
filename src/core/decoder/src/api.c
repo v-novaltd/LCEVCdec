@@ -157,6 +157,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_config_init(perseus_decoder_conf
     cfg->debug_config_path = NULL;
     cfg->s_strength = -1.0f;
     cfg->dither_seed = 0;
+    cfg->dither_override_strength = -1;
     cfg->generate_cmdbuffers = 0;
     cfg->logo_overlay_position_x = LOGO_OVERLAY_POSITION_X_DEFAULT;
     cfg->logo_overlay_position_y = LOGO_OVERLAY_POSITION_Y_DEFAULT;
@@ -285,7 +286,8 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_open(perseus_decoder* pp,
 
     /* @todo: Proper clean-up. */
 
-    if (!ditherInitialize(ctx->memory, &ctx->dither, cfg->dither_seed, !cfg->disable_dithering)) {
+    if (!ditherInitialize(ctx->memory, &ctx->dither, cfg->dither_seed, !cfg->disable_dithering,
+                          cfg->dither_override_strength)) {
         return -1;
     }
 

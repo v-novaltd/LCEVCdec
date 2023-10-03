@@ -1,11 +1,9 @@
 // Copyright (c) V-Nova International Limited 2023. All rights reserved.
 //
 #include "LCEVC/utility/base_decoder.h"
-
 #include "bin_reader.h"
-#include "find_assets_dir.h"
-
 #include "filesystem.h"
+#include "find_assets_dir.h"
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>
@@ -66,6 +64,8 @@ TEST(BaseDecoder, BinMatchesLibAV)
             int64_t pts = 0;
             std::vector<uint8_t> payload;
             EXPECT_TRUE(binReader->read(dts, pts, payload));
+
+            EXPECT_EQ(enhancement.size, payload.size());
 
             EXPECT_EQ(XXH64(enhancement.ptr, enhancement.size, 0),
                       XXH64(payload.data(), payload.size(), 0));

@@ -4,6 +4,7 @@
 
 #include "test_decoder.h"
 
+#include "data.h"
 #include "utils.h"
 
 #include <decoder.h>
@@ -66,8 +67,15 @@ public:
         VNUnused(lcevcDecInfo);
 
         auto* ptrToCaller = static_cast<DecoderFixtureUninitialised*>(userData);
-        if (ptrToCaller->m_expectedCallbackResults[event] != CallbackData(kInvalidHandle, kInvalidHandle)) {
-            EXPECT_EQ(ptrToCaller->m_expectedCallbackResults[event], CallbackData(decHandle, picHandle));
+        if (!ptrToCaller->m_expectedCallbackResults[event].empty()) {
+            CallbackData expectedResult = ptrToCaller->m_expectedCallbackResults[event].front();
+            EXPECT_EQ(expectedResult, CallbackData(decHandle, picHandle))
+                << "Callback data (event " << event << ", count "
+                << ptrToCaller->m_callbackCounts[event] << ") was not as expected. Expected decoder "
+                << expectedResult.decHandle.handle << " and picture "
+                << expectedResult.picHandle.handle << ", but instead received decoder "
+                << decHandle.handle << " and picture " << picHandle.handle;
+            ptrToCaller->m_expectedCallbackResults[event].pop();
         }
         ptrToCaller->m_callbackCounts[event]++;
     }
@@ -86,7 +94,11 @@ protected:
     // This is an array of atomic lists (one for each event type), containing the data that was
     // fed to the callback. We can then check, on the other end of the wait, if they match.
     EventCountArr m_callbackCounts = {};
-    std::array<CallbackData, LCEVC_EventCount> m_expectedCallbackResults = {};
+
+    // This is an array of queues of callback expectations. This allows us to check that the params
+    // of the callback are correct. Note that we may send multiple base images before any are done,
+    // so we have to queue them up and check that they come out in order.
+    std::array<std::queue<CallbackData>, LCEVC_EventCount> m_expectedCallbackResults = {};
 };
 
 // DecoderFixture
@@ -115,20 +127,18 @@ struct SmartPictureBufferDesc
 
 struct BaseWithData
 {
-    BaseWithData(Handle<Picture> handleIn,
-                 std::array<SmartPictureBufferDesc, kI420NumPlanes>&& buffersMovedIn, uint64_t idIn)
+    BaseWithData(Handle<Picture> handleIn, SmartPictureBufferDesc&& bufferMovedIn, uint64_t idIn)
         : handle(handleIn)
-        , buffers(buffersMovedIn)
+        , buffer(bufferMovedIn)
         /* NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)*/
         , id(reinterpret_cast<void*>(idIn))
     {}
     Handle<Picture> handle = kInvalidHandle;
-    std::array<SmartPictureBufferDesc, kI420NumPlanes> buffers = {};
+    SmartPictureBufferDesc buffer = {};
     void* id = nullptr;
 };
 
-using OutputWithData = std::pair<LCEVC_PictureHandle, std::array<SmartPictureBufferDesc, kI420NumPlanes>>;
-using EnhancementWithData = std::pair<const uint8_t*, uint32_t>;
+using OutputWithData = std::pair<LCEVC_PictureHandle, SmartPictureBufferDesc>;
 
 class DecoderFixtureWithData : public DecoderFixture
 {
@@ -156,62 +166,30 @@ protected:
     {
         LCEVC_PictureHandle managedPicture{kInvalidHandle};
         m_decoder.allocPictureManaged(m_inputDesc, managedPicture);
-        m_bases.emplace_back(Handle<Picture>(managedPicture.hdl),
-                             std::array<SmartPictureBufferDesc, kI420NumPlanes>{}, baseId);
+        m_bases.emplace_back(Handle<Picture>(managedPicture.hdl), SmartPictureBufferDesc{}, baseId);
     }
 
     void allocOutputManaged()
     {
         LCEVC_PictureHandle managedPicture{kInvalidHandle};
         m_decoder.allocPictureManaged(m_outputDesc, managedPicture);
-        m_outputs.emplace_back(managedPicture, std::array<SmartPictureBufferDesc, kI420NumPlanes>{});
-    }
-
-    void allocPicExternal(bool base, uint64_t baseId)
-    {
-        static const uint32_t res[2] = {(base ? 540U : 1080U), (base ? 960U : 1920U)};
-
-        // alloc
-        LCEVC_PictureHandle externalPicture{kInvalidHandle};
-        std::shared_ptr<uint8_t> dataBuffers[kI420NumPlanes] = {
-            std::make_shared<uint8_t>(res[0] * res[1]),
-            std::make_shared<uint8_t>(res[0] * res[1] / 4),
-            std::make_shared<uint8_t>(res[0] * res[1] / 4),
-        };
-        const LCEVC_PictureBufferDesc i420In3Planes[kI420NumPlanes] = {
-            {dataBuffers[0].get(), res[0] * res[1], {kInvalidHandle}, LCEVC_Access_Modify},
-            {dataBuffers[1].get(), res[0] * res[1] / 4, {kInvalidHandle}, LCEVC_Access_Modify},
-            {dataBuffers[2].get(), res[0] * res[1] / 4, {kInvalidHandle}, LCEVC_Access_Modify},
-        };
-        m_decoder.allocPictureExternal(m_inputDesc, externalPicture, kI420NumPlanes, i420In3Planes);
-
-        // emplace back
-        std::array<SmartPictureBufferDesc, kI420NumPlanes> smartBuffers = {
-            SmartPictureBufferDesc{dataBuffers[0], res[0] * res[1], kInvalidHandle, LCEVC_Access_Modify},
-            SmartPictureBufferDesc{dataBuffers[1], res[0] * res[1] / 4, kInvalidHandle, LCEVC_Access_Modify},
-            SmartPictureBufferDesc{dataBuffers[2], res[0] * res[1] / 4, kInvalidHandle, LCEVC_Access_Modify},
-        };
-
-        if (base) {
-            m_bases.emplace_back(externalPicture.hdl, std::move(smartBuffers), baseId);
-        } else {
-            m_outputs.emplace_back(externalPicture, std::move(smartBuffers));
-        }
+        m_outputs.emplace_back(managedPicture, SmartPictureBufferDesc{});
     }
 
     // No memory allocated, just generates sized-pointers to existing data.
     static EnhancementWithData getEnhancement(int64_t pts)
     {
-        const size_t idx =
-            pts % (sizeof(kArbitraryEnhancementSizes) / sizeof(kArbitraryEnhancementSizes[0]));
-        const auto size = static_cast<uint32_t>(kArbitraryEnhancementSizes[idx]);
-        return EnhancementWithData(kEnhancements[idx].data(), size);
+        const size_t idx = pts % (sizeof(kEnhancementSizes) / sizeof(kEnhancementSizes[0]));
+        const auto size = static_cast<uint32_t>(kEnhancementSizes[idx]);
+        return EnhancementWithData(kValidEnhancements[idx].data(), size);
     }
 
+    // Sends an output, enhancement, and base, and sets expected callback results for "canReceive"
+    // (i.e. can receive decoded output) and "basePictureDone".
     void sendOneOfEach(int64_t pts, LCEVC_ReturnCode& outputResult,
                        LCEVC_ReturnCode& enhancedResult, LCEVC_ReturnCode& baseResult)
     {
-        m_expectedCallbackResults[LCEVC_CanReceive] = CallbackData(m_pretendDecoderHdl.hdl);
+        m_expectedCallbackResults[LCEVC_CanReceive].push(CallbackData(m_pretendDecoderHdl.hdl));
 
         allocOutputManaged();
         outputResult = m_decoder.feedOutputPicture(m_outputs.back().first.hdl);
@@ -220,8 +198,8 @@ protected:
         enhancedResult = m_decoder.feedEnhancementData(pts, false, enhancement.first, enhancement.second);
 
         allocBaseManaged(pts);
-        m_expectedCallbackResults[LCEVC_BasePictureDone] =
-            CallbackData(m_pretendDecoderHdl.hdl, m_bases.back().handle.handle);
+        m_expectedCallbackResults[LCEVC_BasePictureDone].push(
+            CallbackData(m_pretendDecoderHdl.hdl, m_bases.back().handle.handle));
         baseResult = m_decoder.feedBase(pts, false, m_bases.back().handle, UINT32_MAX, nullptr);
     }
 
@@ -369,8 +347,9 @@ TEST_F(DecoderFixtureUninitialised, initEvents)
     EXPECT_TRUE(m_decoder.setConfig("events", kAllEvents));
 
     // Set expected callback results:
-    m_expectedCallbackResults[LCEVC_CanSendBase] = m_expectedCallbackResults[LCEVC_CanSendEnhancement] =
-        m_expectedCallbackResults[LCEVC_CanSendPicture] = CallbackData(m_pretendDecoderHdl.hdl);
+    m_expectedCallbackResults[LCEVC_CanSendBase].push(CallbackData(m_pretendDecoderHdl.hdl));
+    m_expectedCallbackResults[LCEVC_CanSendEnhancement].push(CallbackData(m_pretendDecoderHdl.hdl));
+    m_expectedCallbackResults[LCEVC_CanSendPicture].push(CallbackData(m_pretendDecoderHdl.hdl));
 
     m_decoder.initialize();
 
@@ -412,7 +391,7 @@ TEST_F(DecoderFixtureDeathTest, picturePoolInterfaceManaged)
     LCEVC_PictureHandle managedPicture{kInvalidHandle};
     // getting a picture that hasn't been allocated should cause an assert, hence "death". However,
     // we don't care what the assert message says, hence "Assertion [anything] failed".
-    VN_EXPECT_DEATH(m_decoder.getPicture(managedPicture.hdl), "Assertion * failed", nullptr);
+    VN_EXPECT_DEATH(m_decoder.getPicture(managedPicture.hdl), "Assertion .* failed", nullptr);
 
     EXPECT_TRUE(m_decoder.allocPictureManaged(desc, managedPicture));
     ASSERT_NE(m_decoder.getPicture(managedPicture.hdl), nullptr);
@@ -421,7 +400,7 @@ TEST_F(DecoderFixtureDeathTest, picturePoolInterfaceManaged)
     EXPECT_TRUE(equals(desc, descThatWeActuallyGot));
     EXPECT_TRUE(m_decoder.releasePicture(managedPicture.hdl));
 
-    VN_EXPECT_DEATH(m_decoder.getPicture(managedPicture.hdl), "Assertion * failed", nullptr);
+    VN_EXPECT_DEATH(m_decoder.getPicture(managedPicture.hdl), "Assertion .* failed", nullptr);
 }
 
 TEST_F(DecoderFixtureDeathTest, picturePoolInterfaceExternal)
@@ -431,23 +410,23 @@ TEST_F(DecoderFixtureDeathTest, picturePoolInterfaceExternal)
     ASSERT_EQ(LCEVC_DefaultPictureDesc(&desc, LCEVC_I420_8, 1920, 1080), LCEVC_Success);
 
     LCEVC_PictureHandle externalPicture{kInvalidHandle};
-    VN_EXPECT_DEATH(m_decoder.getPicture(externalPicture.hdl), "Assertion * failed", nullptr);
+    VN_EXPECT_DEATH(m_decoder.getPicture(externalPicture.hdl), "Assertion .* failed", nullptr);
 
-    std::unique_ptr<uint8_t[]> dataBuffers[kI420NumPlanes] = {
-        std::make_unique<uint8_t[]>(1920 * 1080),
-        std::make_unique<uint8_t[]>(960 * 540),
-        std::make_unique<uint8_t[]>(960 * 540),
+    std::unique_ptr<uint8_t[]> overallBuffer = std::make_unique<uint8_t[]>(1920 * 1080 * 3 / 2);
+    const LCEVC_PictureBufferDesc bufferDesc = {overallBuffer.get(),
+                                                1920 * 1080 * 3 / 2,
+                                                {kInvalidHandle},
+                                                LCEVC_Access_Modify};
+    const LCEVC_PicturePlaneDesc i420In3Planes[kI420NumPlanes] = {
+        {overallBuffer.get(), 1920},
+        {overallBuffer.get() + 1920 * 1080, 960},
+        {overallBuffer.get() + 1920 * 1080 + 960 * 540, 960},
     };
-    const LCEVC_PictureBufferDesc i420In3Planes[kI420NumPlanes] = {
-        {dataBuffers[0].get(), 1920 * 1080, {kInvalidHandle}, LCEVC_Access_Modify},
-        {dataBuffers[1].get(), 960 * 540, {kInvalidHandle}, LCEVC_Access_Modify},
-        {dataBuffers[2].get(), 960 * 540, {kInvalidHandle}, LCEVC_Access_Modify},
-    };
-    EXPECT_TRUE(m_decoder.allocPictureExternal(desc, externalPicture, kI420NumPlanes, i420In3Planes));
+    EXPECT_TRUE(m_decoder.allocPictureExternal(desc, externalPicture, i420In3Planes, &bufferDesc));
     EXPECT_NE(m_decoder.getPicture(externalPicture.hdl), nullptr);
     EXPECT_TRUE(m_decoder.releasePicture(externalPicture.hdl));
 
-    VN_EXPECT_DEATH(m_decoder.getPicture(externalPicture.hdl), "Assertion * failed", nullptr);
+    VN_EXPECT_DEATH(m_decoder.getPicture(externalPicture.hdl), "Assertion .* failed", nullptr);
 }
 
 // - DecoderFixtureWithData ---------------------
@@ -458,7 +437,7 @@ TEST_F(DecoderFixtureWithDataDeathTest, pictureLockPoolInterface)
 {
     // Like picture pool tests, but even lighter.
 
-    VN_EXPECT_DEATH(m_decoder.getPictureLock(kInvalidHandle), "Assertion * failed", nullptr);
+    VN_EXPECT_DEATH(m_decoder.getPictureLock(kInvalidHandle), "Assertion .* failed", nullptr);
     EXPECT_FALSE(m_decoder.unlockPicture(kInvalidHandle));
 
     allocBaseManaged(0); // ID literally does not matter here.
@@ -475,7 +454,7 @@ TEST_F(DecoderFixtureWithDataDeathTest, pictureLockPoolInterface)
     // Don't worry about the lock actually working (that'll be tested in picture.h unit tests).
 
     EXPECT_TRUE(m_decoder.unlockPicture(lockHandle.hdl));
-    VN_EXPECT_DEATH(m_decoder.getPictureLock(lockHandle.hdl), "Assertion * failed", nullptr);
+    VN_EXPECT_DEATH(m_decoder.getPictureLock(lockHandle.hdl), "Assertion .* failed", nullptr);
     EXPECT_FALSE(m_decoder.unlockPicture(lockHandle.hdl));
 }
 
@@ -510,7 +489,7 @@ TEST_F(DecoderFixtureWithDataDeathTest, sendBase)
     int64_t pts = 0;
 
     VN_EXPECT_DEATH(m_decoder.feedBase(0, false, kInvalidHandle, UINT32_MAX, nullptr),
-                    "Assertion * failed", LCEVC_Error);
+                    "Assertion .* failed", LCEVC_Error);
     allocBaseManaged(pts);
     EXPECT_EQ(m_decoder.feedBase(pts++, false, m_bases.back().handle, UINT32_MAX, nullptr), LCEVC_Success);
 
@@ -526,7 +505,7 @@ TEST_F(DecoderFixtureWithDataDeathTest, sendBase)
 
 TEST_F(DecoderFixtureWithDataDeathTest, sendOutputPicture)
 {
-    VN_EXPECT_DEATH(m_decoder.feedOutputPicture(kInvalidHandle), "Assertion * failed", LCEVC_Error);
+    VN_EXPECT_DEATH(m_decoder.feedOutputPicture(kInvalidHandle), "Assertion .* failed", LCEVC_Error);
     allocOutputManaged();
     EXPECT_EQ(m_decoder.feedOutputPicture(m_outputs.back().first.hdl), LCEVC_Success);
 
@@ -589,7 +568,23 @@ TEST_F(DecoderFixtureWithData, sendAllUntilAllFull)
 
     std::map<LCEVC_Event, uint32_t> successes;
 
-    // First fill up the outputs (to avoid premature failures of the send functions).
+    // Wait for the first events to come through, to isolate the following tests (assert, because
+    // we already confirmed this behaviour in TEST_F(DecoderFixtureUninitialised, initEvents).
+    bool didTimeout = false;
+    ASSERT_TRUE(atomicWaitUntil(didTimeout, equal, m_callbackCounts[LCEVC_CanSendEnhancement], 1));
+    ASSERT_FALSE(didTimeout);
+    ASSERT_TRUE(atomicWaitUntil(didTimeout, equal, m_callbackCounts[LCEVC_CanSendBase], 1));
+    ASSERT_FALSE(didTimeout);
+    ASSERT_TRUE(atomicWaitUntil(didTimeout, equal, m_callbackCounts[LCEVC_CanSendPicture], 1));
+    ASSERT_FALSE(didTimeout);
+
+    // Gather the initial counts
+    std::array<uint32_t, LCEVC_EventCount> oldCounts = {};
+    for (size_t event = 0; event < m_callbackCounts.size(); event++) {
+        oldCounts[event] = m_callbackCounts[event];
+    }
+
+    // Fill up the outputs (to avoid premature failures of the send functions).
     while (true) {
         allocOutputManaged();
         if (m_decoder.feedOutputPicture(m_outputs.back().first.hdl) == LCEVC_Success) {
@@ -599,36 +594,29 @@ TEST_F(DecoderFixtureWithData, sendAllUntilAllFull)
         }
     }
 
-    bool lastSendSucceeded = true;
-    static const LCEVC_Event kSendTypes[3] = {LCEVC_CanSendPicture, LCEVC_CanSendEnhancement,
-                                              LCEVC_CanSendBase};
-    std::map<LCEVC_Event, LCEVC_ReturnCode> lastSendResults;
-    std::map<LCEVC_Event, LCEVC_ReturnCode> newSendResults;
-    std::array<uint32_t, LCEVC_EventCount> oldCounts = {};
-    for (size_t event = 0; event < m_callbackCounts.size(); event++) {
-        oldCounts[event] = m_callbackCounts[event];
-    }
-
-    // Double check that feeding JUST output hasn't somehow triggered these.
+    // Make sure that sending the outputs DIDN'T triger any events, i.e. they're STILL 1.
     EXPECT_EQ(oldCounts[LCEVC_CanSendEnhancement], 1);
     EXPECT_EQ(oldCounts[LCEVC_CanSendBase], 1);
     EXPECT_EQ(oldCounts[LCEVC_CanSendPicture], 1);
 
-    // Now, cycle through enhancements, bases, and outputs, until they ALL fail. Also, set up
-    // expectation for the LCEVC_CanReceive callback
-    bool didTimeout = false;
+    // Now, cycle through enhancements, bases, and outputs, until they ALL fail.
+    bool lastSendSucceeded = true;
+    static const LCEVC_Event sendTypes[3] = {LCEVC_CanSendPicture, LCEVC_CanSendEnhancement,
+                                             LCEVC_CanSendBase};
+    std::map<LCEVC_Event, LCEVC_ReturnCode> lastSendResults;
+    std::map<LCEVC_Event, LCEVC_ReturnCode> newSendResults;
     int64_t pts = 0;
     for (; lastSendSucceeded; pts++) {
         // Do this right before sending, to make sure we've finished waiting for all callbacks from
         // the last loop.
-        for (LCEVC_Event sendType : kSendTypes) {
+        for (LCEVC_Event sendType : sendTypes) {
             oldCounts[sendType] = m_callbackCounts[sendType];
         }
 
         sendOneOfEach(pts, newSendResults[LCEVC_CanSendPicture],
                       newSendResults[LCEVC_CanSendEnhancement], newSendResults[LCEVC_CanSendBase]);
 
-        for (LCEVC_Event sendType : kSendTypes) {
+        for (LCEVC_Event sendType : sendTypes) {
             switch (newSendResults[sendType]) {
                 case LCEVC_Again: break;
                 case LCEVC_Success:
@@ -636,7 +624,7 @@ TEST_F(DecoderFixtureWithData, sendAllUntilAllFull)
                     // fallthrough for all non-"again" results
                 default: {
                     if (lastSendResults[sendType] == LCEVC_Again) {
-                        // We can't know exactkly how many decodes occurred, so we can't know how
+                        // We can't know exactly how many decodes occurred, so we can't know how
                         // many "canSend" callbacks we got. Just expect that it increased.
                         EXPECT_TRUE(atomicWaitUntil(didTimeout, greaterThan,
                                                     m_callbackCounts[sendType], oldCounts[sendType]));
@@ -787,7 +775,7 @@ TEST_F(DecoderFixturePreFilled, skipDecodesAfterSkippedFrames)
         }
         nextExpectedBase = m_decoder.getPicture(m_bases.front().handle);
         EXPECT_EQ(infoOut.timestamp,
-                  lcevc_dec::utility::timehandleGetTimestamp(nextExpectedBase->getTimehandle()));
+                  lcevc_dec::api_utility::timehandleGetTimestamp(nextExpectedBase->getTimehandle()));
 
         m_bases.pop_front();
     }
@@ -825,8 +813,8 @@ TEST_F(DecoderFixturePreFilled, receiveOneOutputFromFullDecoder)
 
     // Check decode info
     {
-        m_expectedCallbackResults[LCEVC_OutputPictureDone] =
-            CallbackData(m_pretendDecoderHdl.hdl, m_outputs.front().first.hdl);
+        m_expectedCallbackResults[LCEVC_OutputPictureDone].push(
+            CallbackData(m_pretendDecoderHdl.hdl, m_outputs.front().first.hdl));
 
         LCEVC_DecodeInformation infoOut;
         LCEVC_PictureHandle outputHdl;
@@ -891,8 +879,8 @@ TEST_F(DecoderFixturePreFilled, receiveAllOutputFromFullDecoder)
     LCEVC_PictureHandle outputHdlOut = {};
     LCEVC_DecodeInformation infoOut;
     uint32_t numOutputsProduced = 0;
-    m_expectedCallbackResults[LCEVC_OutputPictureDone] =
-        CallbackData(m_pretendDecoderHdl.hdl, m_outputs.front().first.hdl);
+    m_expectedCallbackResults[LCEVC_OutputPictureDone].push(
+        CallbackData(m_pretendDecoderHdl.hdl, m_outputs.front().first.hdl));
 
     for (uint64_t pts = firstBase->getTimehandle();
          m_decoder.produceOutputPicture(outputHdlOut, infoOut) == LCEVC_Success; pts++) {
@@ -913,8 +901,8 @@ TEST_F(DecoderFixturePreFilled, receiveAllOutputFromFullDecoder)
             << "Count was " << m_callbackCounts[LCEVC_OutputPictureDone].load()
             << " but we expected " << numOutputsProduced << std::endl;
         ASSERT_FALSE(didTimeout);
-        m_expectedCallbackResults[LCEVC_OutputPictureDone].picHandle =
-            (m_outputs.empty() ? kInvalidHandle : m_outputs.front().first.hdl);
+        m_expectedCallbackResults[LCEVC_OutputPictureDone].push(CallbackData(
+            m_pretendDecoderHdl.hdl, (m_outputs.empty() ? kInvalidHandle : m_outputs.front().first.hdl)));
     }
 
     // Confirm that, once you empty out the decoded outputs, you get "LCEVC_Again" (as in "try

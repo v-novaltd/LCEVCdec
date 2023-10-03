@@ -126,32 +126,66 @@ template <typename T>
 bool readBigEndian(std::istream& stream, T& val)
 {
     T tmp;
-    if (stream.read(static_cast<char*>(static_cast<void*>(&tmp)), sizeof(T))) {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-        val = swapByteOrder(tmp);
-#else
-        val = tmp;
-#endif
-        return true;
+    if (!stream.read(static_cast<char*>(static_cast<void*>(&tmp)), sizeof(T))) {
+        return false;
     }
 
-    return false;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    val = swapByteOrder(tmp);
+#else
+    val = tmp;
+#endif
+    return true;
 }
 
 template <typename T>
 bool readLittleEndian(std::istream& stream, T& val)
 {
     T tmp;
-    if (stream.read(static_cast<char*>(static_cast<void*>(&tmp)), sizeof(T))) {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-        val = tmp;
-#else
-        val = swapByteOrder(tmp);
-#endif
-        return true;
+    if (!stream.read(static_cast<char*>(static_cast<void*>(&tmp)), sizeof(T))) {
+        return false;
     }
 
-    return false;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    val = tmp;
+#else
+    val = swapByteOrder(tmp);
+#endif
+    return true;
+}
+
+template <typename T>
+bool writeBigEndian(std::ostream& stream, T val)
+{
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    if (T tmp = swapByteOrder(val);
+        !stream.write(static_cast<char*>(static_cast<void*>(&tmp)), sizeof(T))) {
+        return false;
+    }
+#else
+    if (!stream.write(static_cast<char*>(static_cast<void*>(&val)), sizeof(T))) {
+        return false;
+    }
+#endif
+
+    return true;
+}
+
+template <typename T>
+bool writeLittleEndian(std::ostream& stream, T val)
+{
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    if (T tmp = swapByteOrder(val);
+        !stream.write(static_cast<char*>(static_cast<void*>(&tmp)), sizeof(T))) {
+        return false;
+    }
+#else
+    if (!stream.write(static_cast<char*>(static_cast<void*>(&val)), sizeof(T))) {
+        return false;
+    }
+#endif
+
+    return true;
 }
 
 } // namespace lcevc_dec::utility

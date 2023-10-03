@@ -43,7 +43,7 @@ typedef struct TimehandlePredictor TimehandlePredictor_t;
 
 typedef const char* (*thPrinter)(char* dest, size_t destSize, uint64_t timehandle);
 
-TimehandlePredictor_t* timehandlePredictorCreate();
+TimehandlePredictor_t* timehandlePredictorCreate(void);
 void timehandlePredictorDestroy(TimehandlePredictor_t* predictor);
 
 /// Feed timehandles in DECODE order. In other words, these are presentation-timehandles
@@ -66,7 +66,7 @@ bool timehandlePredictorIsNext(const TimehandlePredictor_t* predictor, uint64_t 
 /// out-of-order, before you've sent 1 full contiguous block of frames). Setting this resets the
 /// predictor, since it invalidates the prediction algorithm for the existing timehandles.
 void timehandlePredictorSetMaxNumReorderFrames(TimehandlePredictor_t* predictor,
-                                               uint64_t maxNumReorderFrames);
+                                               uint32_t maxNumReorderFrames);
 
 /// Sets the timehandle predictor's timehandle printer (the function it will use when logging
 /// timehandles).

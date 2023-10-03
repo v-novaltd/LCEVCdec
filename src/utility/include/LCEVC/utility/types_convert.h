@@ -20,11 +20,11 @@ bool fromString(std::string_view str, LCEVC_ReturnCode& out);
 std::string_view toString(LCEVC_ColorRange colorRange);
 bool fromString(std::string_view str, LCEVC_ColorRange& out);
 
-std::string_view toString(LCEVC_ColorStandard colorStandard);
-bool fromString(std::string_view str, LCEVC_ColorStandard& out);
+std::string_view toString(LCEVC_ColorPrimaries colorPrimaries);
+bool fromString(std::string_view str, LCEVC_ColorPrimaries& out);
 
-std::string_view toString(LCEVC_ColorTransfer colorTransfer);
-bool fromString(std::string_view str, LCEVC_ColorTransfer& out);
+std::string_view toString(LCEVC_TransferCharacteristics transferCharacteristics);
+bool fromString(std::string_view str, LCEVC_TransferCharacteristics& out);
 
 std::string_view toString(LCEVC_PictureFlag pictureFlag);
 bool fromString(std::string_view str, LCEVC_PictureFlag& out);

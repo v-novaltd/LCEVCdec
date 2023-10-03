@@ -27,7 +27,7 @@ void ContextWrapper::initialize()
     loggerSettings.callback = &logCallback;
     logInitialize(ctx.memory, &ctx.log, &loggerSettings);
 
-    ditherInitialize(ctx.memory, &ctx.dither, 0, true);
+    ditherInitialize(ctx.memory, &ctx.dither, 0, true, -1);
 
     sharpenInitialize(&ctx, &ctx.sharpen, -1.0f);
 

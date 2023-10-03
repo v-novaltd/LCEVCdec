@@ -15,7 +15,7 @@
 
 // ------------------------------------------------------------------------------------------------
 
-using namespace lcevc_dec::utility;
+using namespace lcevc_dec::api_utility;
 
 namespace lcevc_dec::decoder {
 
@@ -62,20 +62,12 @@ static bool copyNV12ToI420Picture(const Picture& src, Picture& dest)
 
 static bool copyPictureToPicture(const Picture& src, Picture& dest)
 {
-    uint32_t numBuffers = std::min(src.getBufferCount(), dest.getBufferCount());
-    for (uint32_t i = 0; i < numBuffers; ++i) {
-        LCEVC_PictureBufferDesc srcBufDesc;
-        LCEVC_PictureBufferDesc destBufDesc;
-        if (!src.getBufferDesc(i, srcBufDesc) || !dest.getBufferDesc(i, destBufDesc)) {
-            VNLogError("CC %u, PTS %" PRId64
-                       ": Failed to get buffer desc while copying one buffer to another\n",
-                       timehandleGetCC(src.getTimehandle()),
-                       timehandleGetTimestamp(src.getTimehandle()));
-            return false;
-        }
-
-        simpleCopyPlaneBuffer(srcBufDesc.data, src.getPlaneByteStride(i), src.getPlaneWidthBytes(i),
-                              src.getPlaneHeight(i), src.getPlaneMemorySize(i), destBufDesc.data,
+    // We copy 1 plane at a time, in case the images have matching formats but mismatching layouts.
+    uint32_t numPlanes = std::min(src.getNumPlanes(), dest.getNumPlanes());
+    for (uint32_t i = 0; i < numPlanes; ++i) {
+        simpleCopyPlaneBuffer(src.getPlaneFirstSample(i), src.getPlaneByteStride(i),
+                              src.getPlaneWidthBytes(i), src.getPlaneHeight(i),
+                              src.getPlaneMemorySize(i), dest.getPlaneFirstSample(i),
                               dest.getPlaneByteStride(i), dest.getPlaneWidthBytes(i),
                               dest.getPlaneHeight(i), dest.getPlaneMemorySize(i));
     }
@@ -109,7 +101,8 @@ bool Picture::copyMetadata(const Picture& source)
     }
 
     m_colorRange = source.m_colorRange;
-    m_colorTransfer = source.m_colorTransfer;
+    m_matrixCoefficients = source.m_matrixCoefficients;
+    m_transferCharacteristics = source.m_transferCharacteristics;
     m_publicFlags = source.m_publicFlags;
     m_hdrStaticInfo = source.m_hdrStaticInfo;
     m_sampleAspectRatio = source.m_sampleAspectRatio;
@@ -202,10 +195,8 @@ bool Picture::isValid() const
     if (m_desc.GetFormat() == PictureFormat::Invalid) {
         return false;
     }
-    for (uint32_t bufferIdx = 0; bufferIdx < getBufferCount(); bufferIdx++) {
-        if (getBuffer(bufferIdx) == nullptr) {
-            return false;
-        }
+    if (getPlaneFirstSample(0) == nullptr) {
+        return false;
     }
     return true;
 }
@@ -231,13 +222,17 @@ void Picture::getDesc(LCEVC_PictureDesc& desc) const
         toLCEVCDescColorFormat(m_desc.GetFormat(), m_desc.GetInterleaving()));
 
     desc.colorRange = static_cast<LCEVC_ColorRange>(toLCEVCColorRange(m_colorRange));
-    desc.colorStandard = static_cast<LCEVC_ColorStandard>(toLCEVCColorStandard(m_desc.GetColorspace()));
-    desc.colorTransfer = static_cast<LCEVC_ColorTransfer>(toLCEVCColorTransfer(m_colorTransfer));
+    desc.colorPrimaries =
+        static_cast<LCEVC_ColorPrimaries>(toLCEVCColorPrimaries(m_desc.GetColorspace()));
+    desc.matrixCoefficients =
+        static_cast<LCEVC_MatrixCoefficients>(toLCEVCMatrixCoefficients(m_matrixCoefficients));
+    desc.transferCharacteristics = static_cast<LCEVC_TransferCharacteristics>(
+        toLCEVCTransferCharacteristics(m_transferCharacteristics));
     memcpy(&desc.hdrStaticInfo, &m_hdrStaticInfo, sizeof(HDRStaticInfo));
     desc.sampleAspectRatioDen = m_sampleAspectRatio.denominator;
     desc.sampleAspectRatioNum = m_sampleAspectRatio.numerator;
-    desc.width = m_desc.GetWidth();
-    desc.height = m_desc.GetHeight();
+    desc.width = getWidth();
+    desc.height = getHeight();
     desc.cropTop = m_crop.top;
     desc.cropBottom = m_crop.bottom;
     desc.cropLeft = m_crop.left;
@@ -246,31 +241,17 @@ void Picture::getDesc(LCEVC_PictureDesc& desc) const
 
 uint8_t* Picture::internalGetPlaneFirstSample(uint32_t planeIdx) const
 {
-    // This only works if planes are either all in one buffer, or all in different buffers.
-    // TODO: Implement properly when PictureLayout struct is introduced
-    uint32_t bufferIdx = 0;
-    if (getBufferCount() > 1) {
-        bufferIdx = std::min(planeIdx, getBufferCount() - 1);
+    // This is the default behaviour: pictures are presumed to have 1 buffer with at least 1 plane,
+    // but child classes may override this behaviour.
+    uint8_t* out = getBuffer();
+    if (out == nullptr) {
+        return nullptr;
     }
-    uint8_t* out = getBuffer(bufferIdx);
-    uint32_t firstPlaneInBuffer = bufferIdx; // just assume
-    uint32_t numPrevPlanesInThisBuffer = planeIdx - firstPlaneInBuffer;
-    if (numPrevPlanesInThisBuffer > 0) {
-        for (uint32_t prevPlane = firstPlaneInBuffer; prevPlane < planeIdx; prevPlane++) {
-            out += getPlaneMemorySize(prevPlane);
-        }
+
+    for (uint32_t prevPlane = 0; prevPlane < planeIdx; prevPlane++) {
+        out += getPlaneMemorySize(prevPlane);
     }
     return out;
-}
-
-uint8_t* Picture::getPlaneFirstSample(uint32_t planeIdx)
-{
-    return internalGetPlaneFirstSample(planeIdx);
-}
-
-const uint8_t* Picture::getPlaneFirstSample(uint32_t planeIdx) const
-{
-    return internalGetPlaneFirstSample(planeIdx);
 }
 
 bool Picture::lock(Access access, Handle<PictureLock> newLock)
@@ -299,15 +280,19 @@ bool Picture::unlock()
     return true;
 }
 
-bool Picture::setDesc(const LCEVC_PictureDesc& newDesc)
-{
-    bool dummyDescChanged = false;
-    return setDesc(newDesc, dummyDescChanged);
-}
+bool Picture::setDesc(const LCEVC_PictureDesc& newDesc) { return setDesc(newDesc, nullptr); }
 
-bool Picture::setDesc(const LCEVC_PictureDesc& newDesc, bool& descChangedOut)
+// Private functions:
+
+void Picture::setName(const std::string& name) { m_name = "Picture:" + name; }
+
+bool Picture::setDesc(const LCEVC_PictureDesc& newDesc,
+                      const uint32_t planeStridesBytes[PictureFormatDesc::kMaxNumPlanes])
 {
-    if (!initializeDesc(newDesc, descChangedOut)) {
+    // This is either called via setDescExternal (in which case planeStridesBytes is set from the
+    // plane descs, if provide), or else via the normal public setDesc function (in which case
+    // planeStridesBytes is NEVER set).
+    if (!initializeDesc(newDesc, planeStridesBytes)) {
         VNLogError("CC %u, PTS %" PRId64 ": Invalid new desc for Picture <%s>.\n",
                    timehandleGetCC(getTimehandle()), timehandleGetTimestamp(getTimehandle()),
                    m_name.c_str());
@@ -316,10 +301,6 @@ bool Picture::setDesc(const LCEVC_PictureDesc& newDesc, bool& descChangedOut)
 
     return true;
 }
-
-// Private functions:
-
-void Picture::setName(const std::string& name) { m_name = "Picture:" + name; }
 
 std::string Picture::getShortDbgString() const
 {
@@ -349,18 +330,12 @@ std::string Picture::toString() const
     return result;
 }
 
-bool Picture::initializeDesc(const LCEVC_PictureDesc& desc, bool& descChangedOut)
+bool Picture::initializeDesc(const LCEVC_PictureDesc& desc,
+                             const uint32_t planeStridesBytes[PictureFormatDesc::kMaxNumPlanes])
 {
     // Note that error messages in this function just uses the name, rather than the full debug
     // string. This is because the debug string reports format data that isn't meaningful until
     // AFTER initializeDesc succeeds.
-    LCEVC_PictureDesc curDesc;
-    getDesc(curDesc);
-    if (equals(desc, curDesc)) {
-        descChangedOut = false;
-        return true;
-    }
-    descChangedOut = true;
 
     if (!canModify()) {
         VNLogError("CC %u, PTS %" PRId64
@@ -388,13 +363,15 @@ bool Picture::initializeDesc(const LCEVC_PictureDesc& desc, bool& descChangedOut
     }
 
     m_colorRange = fromLCEVCColorRange(desc.colorRange);
-    m_colorTransfer = fromLCEVCColorTransfer(desc.colorTransfer);
+    m_matrixCoefficients = fromLCEVCMatrixCoefficients(desc.matrixCoefficients);
+    m_transferCharacteristics = fromLCEVCTransferCharacteristics(desc.transferCharacteristics);
     memcpy(&m_hdrStaticInfo, &desc.hdrStaticInfo, sizeof(LCEVC_HDRStaticInfo));
     m_sampleAspectRatio = {desc.sampleAspectRatioNum, desc.sampleAspectRatioDen};
 
-    const Colorspace::Enum colorspace = fromLCEVCColorStandard(desc.colorStandard);
+    const Colorspace::Enum colorspace = fromLCEVCColorPrimaries(desc.colorPrimaries);
     const uint32_t bitdepth = bitdepthFromLCEVCDescColorFormat(desc.colorFormat);
-    if (!m_desc.Initialise(format, desc.width, desc.height, interleaving, colorspace, bitdepth)) {
+    if (!m_desc.Initialise(format, desc.width, desc.height, interleaving, colorspace, bitdepth,
+                           planeStridesBytes)) {
         VNLogError("CC %u, PTS %" PRId64
                    ": Couldn't initialise pictureFormatDesc with format %d:%d, size %dx%d.\n",
                    timehandleGetCC(getTimehandle()), timehandleGetTimestamp(getTimehandle()),
@@ -415,6 +392,16 @@ bool Picture::initializeDesc(const LCEVC_PictureDesc& desc, bool& descChangedOut
     m_crop = {desc.cropLeft, desc.cropTop, desc.cropRight, desc.cropBottom};
 
     return true;
+}
+
+uint32_t Picture::planeHorizontalShift(PictureFormat::Enum format, uint32_t planeIndex)
+{
+    return planeIndex > 0 ? ChromaSamplingType::GetHorizontalShift(format) : 0;
+}
+
+uint32_t Picture::planeVerticalShift(PictureFormat::Enum format, uint32_t planeIndex)
+{
+    return planeIndex > 0 ? ChromaSamplingType::GetVerticalShift(format) : 0;
 }
 
 bool Picture::bindMemory()
@@ -448,10 +435,10 @@ uint32_t Picture::getRequiredSize() const
     for (uint32_t i = 0; i < planesCount; i++) {
         totalSize += m_desc.GetPlaneMemorySize(i);
         VNLogVerbose("CC %u, PTS %" PRId64
-                     ": [%d] S %dx%d size %d, Total Size: %d (buffer loc: %p)\n",
+                     ": [%d] S %dx%d size %d, Total Size: %d (plane loc: %p)\n",
                      timehandleGetCC(getTimehandle()), timehandleGetTimestamp(getTimehandle()), i,
                      m_desc.GetPlaneWidth(i), m_desc.GetPlaneHeight(i),
-                     m_desc.GetPlaneMemorySize(i), totalSize, getBuffer());
+                     m_desc.GetPlaneMemorySize(i), totalSize, getPlaneFirstSample(i));
     }
     return totalSize;
 }
@@ -464,42 +451,71 @@ PictureExternal::~PictureExternal()
     unbindMemory();
 }
 
-bool PictureExternal::canModify() const
+bool PictureExternal::descsMatch(const LCEVC_PictureDesc& newDesc,
+                                 const LCEVC_PicturePlaneDesc* newPlaneDescArr,
+                                 const LCEVC_PictureBufferDesc* newBufferDesc)
 {
-    if (!BaseClass::canModify()) {
+    LCEVC_PictureDesc curDesc;
+    getDesc(curDesc);
+    if (!equals(newDesc, curDesc)) {
         return false;
     }
 
-    for (uint32_t bufIdx = 0; bufIdx < m_bufferCount; bufIdx++) {
-        if (m_bufferDescs[bufIdx].access == LCEVC_Access_Read) {
+    // If one's null and the other's not, they mismatch
+    if ((m_bufferDesc == nullptr) != (newBufferDesc == nullptr)) {
+        return false;
+    }
+
+    if (m_bufferDesc != nullptr) {
+        // We're here so they're both NOT null
+        LCEVC_PictureBufferDesc curBufferDesc = {};
+        toLCEVCPictureBufferDesc(*m_bufferDesc, curBufferDesc);
+        if (!equals(curBufferDesc, *newBufferDesc)) {
             return false;
+        }
+    }
+
+    // If one's null and the other's not, they mismatch
+    if ((m_planeDescs == nullptr) != (newPlaneDescArr == nullptr)) {
+        return false;
+    }
+
+    if (m_planeDescs != nullptr) {
+        LCEVC_PicturePlaneDesc reusablePlaneDesc = {};
+        const PictureInterleaving::Enum ilv = fromLCEVCDescInterleaving(newDesc.colorFormat);
+        const PictureFormat::Enum fmt = fromLCEVCDescColorFormat(newDesc.colorFormat);
+        const uint32_t numPlanes = PictureFormat::NumPlanes(fmt, ilv);
+        for (uint32_t planeIdx = 0; planeIdx < numPlanes; planeIdx++) {
+            toLCEVCPicturePlaneDesc((*m_planeDescs)[planeIdx], reusablePlaneDesc);
+            if (!equals(reusablePlaneDesc, newPlaneDescArr[planeIdx])) {
+                return false;
+            }
         }
     }
 
     return true;
 }
 
-bool PictureExternal::setDesc(const LCEVC_PictureDesc& newDesc, bool& descChangedOut)
+bool PictureExternal::setDesc(const LCEVC_PictureDesc& newDesc,
+                              const uint32_t planeStridesBytes[PictureFormatDesc::kMaxNumPlanes])
 {
-    if (!BaseClass::setDesc(newDesc, descChangedOut)) {
+    if (!BaseClass::setDesc(newDesc, planeStridesBytes)) {
         return false;
     }
-    if (!descChangedOut) {
-        return true;
-    }
 
-    // We need to configure our picture desc to work with our buffer sizes. In particular, if the
-    // buffer is SMALLER than the new desc, then we need to whine and fail. Meanwhile, if the
-    // buffer is BIGGER than the new desc, we SHOULD keep track of that "padding" (although we
-    // don't currently know the shape of the padding, so just emit an info).
-    // TODO: track padding once PictureLayout struct is introduced
+    // When both are provided, bufferDesc is the authority on allocation size, while planeDesc is
+    // authority on memory locations.
     uint32_t totalAllocatedBytes = 0;
-    for (uint32_t bufIdx = 0; bufIdx < getBufferCount(); bufIdx++) {
-        LCEVC_PictureBufferDesc bufDesc;
-        getBufferDesc(bufIdx, bufDesc);
-        totalAllocatedBytes += bufDesc.byteSize;
+    if (m_bufferDesc != nullptr) {
+        totalAllocatedBytes = m_bufferDesc->byteSize;
+    } else {
+        for (uint32_t planeIdx = 0; planeIdx < getNumPlanes(); planeIdx++) {
+            totalAllocatedBytes += getPlaneMemorySize(planeIdx);
+        }
     }
 
+    // If planeDesc was provided, then it will dictate getRequiredSize. In other words, when both
+    // are provided, this checks that planeDesc doesn't exceed bufferDesc (smaller is fine though).
     if (getRequiredSize() > totalAllocatedBytes) {
         VNLogWarning(
             "CC %u, PTS %" PRId64
@@ -511,41 +527,133 @@ bool PictureExternal::setDesc(const LCEVC_PictureDesc& newDesc, bool& descChange
         return false;
     }
 
-    if (getRequiredSize() < totalAllocatedBytes) {
-        VNLogInfo(
-            "CC %u, PTS %" PRId64
-            ": This picture has more space allocated than the description requires. Allocated %u "
-            "but desc only requires %u. This will work, but padding hasn't yet been implemented: "
-            "it is not currently possible to specify WHERE the unused memory is. Picture: <%s>.\n",
-            timehandleGetCC(getTimehandle()), timehandleGetTimestamp(getTimehandle()),
-            totalAllocatedBytes, getRequiredSize(), getShortDbgString().c_str());
-    }
-
     return true;
 }
 
-bool PictureExternal::getBufferDesc(uint32_t bufferIndex, LCEVC_PictureBufferDesc& bufferDescOut) const
+bool PictureExternal::setDesc(const LCEVC_PictureDesc& newDesc)
 {
-    if (bufferIndex >= getBufferCount()) {
+    // This is only used to RE-set an external picture's plane desc. So use the existing plane and
+    // buffer descs and pass it on to the normal setDescExternal function (which checks for changes
+    // before doing anything).
+
+    std::unique_ptr<LCEVC_PictureBufferDesc> curBufferDesc = nullptr;
+    if (m_bufferDesc != nullptr) {
+        curBufferDesc = std::make_unique<LCEVC_PictureBufferDesc>();
+        toLCEVCPictureBufferDesc(*m_bufferDesc, *curBufferDesc);
+    }
+
+    std::unique_ptr<LCEVC_PicturePlaneDesc[]> planeDescArr = nullptr;
+    if (m_planeDescs != nullptr) {
+        planeDescArr = std::make_unique<LCEVC_PicturePlaneDesc[]>(getNumPlanes());
+        const PictureInterleaving::Enum ilv = fromLCEVCDescInterleaving(newDesc.colorFormat);
+        const PictureFormat::Enum fmt = fromLCEVCDescColorFormat(newDesc.colorFormat);
+        const uint32_t numPlanes = PictureFormat::NumPlanes(fmt, ilv);
+        for (uint32_t planeIdx = 0; planeIdx < numPlanes; planeIdx++) {
+            toLCEVCPicturePlaneDesc((*m_planeDescs)[planeIdx], planeDescArr[planeIdx]);
+        }
+    }
+
+    return setDescExternal(newDesc, planeDescArr.get(), curBufferDesc.get());
+}
+
+bool PictureExternal::setDescExternal(const LCEVC_PictureDesc& newDesc,
+                                      const LCEVC_PicturePlaneDesc* newPlaneDescArr,
+                                      const LCEVC_PictureBufferDesc* newBufferDesc)
+{
+    // Check for changes, then bind, THEN set desc.
+
+    if (descsMatch(newDesc, newPlaneDescArr, newBufferDesc)) {
+        return true;
+    }
+
+    const PictureInterleaving::Enum ilv = fromLCEVCDescInterleaving(newDesc.colorFormat);
+    const PictureFormat::Enum fmt = fromLCEVCDescColorFormat(newDesc.colorFormat);
+    const uint32_t numPlanes = PictureFormat::NumPlanes(fmt, ilv);
+    if (!bindMemoryBufferAndPlanes(numPlanes, newPlaneDescArr, newBufferDesc)) {
+        VNLogError("Failed to bind memory for external picture at %p\n", this);
         return false;
     }
 
-    const PictureBufferDesc& desc = m_bufferDescs[bufferIndex];
+    // If there's a manual stride, set it up:
+    std::unique_ptr<uint32_t[]> planeStridesBytes = nullptr;
+    if (newPlaneDescArr != nullptr) {
+        planeStridesBytes = std::make_unique<uint32_t[]>(PictureFormatDesc::kMaxNumPlanes);
+        for (uint32_t planeIdx = 0; planeIdx < numPlanes; planeIdx++) {
+            planeStridesBytes[planeIdx] = newPlaneDescArr[planeIdx].rowByteStride;
+        }
+    }
+
+    return setDesc(newDesc, planeStridesBytes.get());
+}
+
+uint8_t* PictureExternal::internalGetPlaneFirstSample(uint32_t planeIdx) const
+{
+    if (m_planeDescs != nullptr) {
+        return (*m_planeDescs)[planeIdx].firstSample;
+    }
+
+    return BaseClass::internalGetPlaneFirstSample(planeIdx);
+}
+
+bool PictureExternal::getBufferDesc(LCEVC_PictureBufferDesc& bufferDescOut) const
+{
+    if (m_bufferDesc == nullptr) {
+        return false;
+    }
+
+    const PictureBufferDesc& desc = *m_bufferDesc;
     bufferDescOut = {desc.data, desc.byteSize, {desc.accelBuffer.handle}, static_cast<LCEVC_Access>(desc.access)};
     return true;
 }
 
-bool PictureExternal::bindMemoryBuffers(uint32_t bufferCount, const LCEVC_PictureBufferDesc* bufferDescArr)
+bool PictureExternal::getPlaneDescArr(PicturePlaneDesc planeDescArrOut[kMaxNumPlanes]) const
+{
+    if (m_planeDescs == nullptr) {
+        for (uint32_t planeIdx = 0; planeIdx < getNumPlanes(); planeIdx++) {
+            planeDescArrOut[planeIdx].firstSample = internalGetPlaneFirstSample(planeIdx);
+            planeDescArrOut[planeIdx].rowByteStride = getPlaneByteStride(planeIdx);
+        }
+        return true;
+    }
+
+    for (uint32_t planeIdx = 0; planeIdx < getNumPlanes(); planeIdx++) {
+        planeDescArrOut[planeIdx] = (*m_planeDescs)[planeIdx];
+    }
+    return true;
+}
+
+bool PictureExternal::bindMemoryBufferAndPlanes(uint32_t numPlanes,
+                                                const LCEVC_PicturePlaneDesc* planeDescArr,
+                                                const LCEVC_PictureBufferDesc* bufferDesc)
 {
     if (!BaseClass::bindMemory()) {
         return false;
     }
 
-    for (uint32_t idx = 0; idx < bufferCount; idx++) {
-        const LCEVC_PictureBufferDesc& desc = bufferDescArr[idx];
-        m_bufferDescs[idx] = {desc.data, desc.byteSize, {desc.accelBuffer.hdl}, desc.access};
+    // This should have already been validated. Normally, non-null is communicated by references,
+    // so we wouldn't need this assert
+    VNAssert(bufferDesc != nullptr || planeDescArr != nullptr);
+
+    // If we're rebinding, we need to reset our descs (for example, if we used to have a bufferDesc
+    // but the client no longer wants us to know the bufferDesc).
+    m_bufferDesc = nullptr;
+    m_planeDescs = nullptr;
+
+    if (bufferDesc != nullptr) {
+        // Can't use make_unique (before C++20), it doesn't pass brace-initializers to structs.
+        // NOLINTNEXTLINE(modernize-make-unique)
+        m_bufferDesc = std::unique_ptr<PictureBufferDesc>(new PictureBufferDesc{
+            bufferDesc->data, bufferDesc->byteSize, bufferDesc->accelBuffer.hdl, bufferDesc->access});
     }
-    m_bufferCount = bufferCount;
+
+    if (planeDescArr != nullptr) {
+        m_planeDescs = std::make_unique<std::array<PicturePlaneDesc, kMaxNumPlanes>>();
+
+        for (uint32_t planeIdx = 0; planeIdx < numPlanes; planeIdx++) {
+            (*m_planeDescs)[planeIdx] = {planeDescArr[planeIdx].firstSample,
+                                         planeDescArr[planeIdx].rowByteStride};
+        }
+    }
 
     return true;
 }
@@ -556,10 +664,8 @@ bool PictureExternal::unbindMemory()
         return false;
     }
 
-    for (uint32_t idx = 0; idx < m_bufferCount; idx++) {
-        m_bufferDescs[idx] = {};
-    }
-    m_bufferCount = 0;
+    m_bufferDesc = nullptr;
+    m_planeDescs = nullptr;
     return true;
 }
 
@@ -571,28 +677,46 @@ PictureManaged::~PictureManaged()
     unbindMemory();
 }
 
-bool PictureManaged::getBufferDesc(uint32_t bufferIndex, LCEVC_PictureBufferDesc& bufferDescOut) const
+bool PictureManaged::getBufferDesc(LCEVC_PictureBufferDesc& bufferDescOut) const
 {
-    if (bufferIndex >= getBufferCount()) {
+    if (m_buffer == nullptr) {
         return false;
     }
 
-    bufferDescOut.accelBuffer.hdl = kInvalidHandle;
     bufferDescOut.data = m_buffer->data();
     bufferDescOut.byteSize = static_cast<uint32_t>(m_buffer->size() * sizeof((*m_buffer)[0]));
+    bufferDescOut.accelBuffer.hdl = kInvalidHandle;
+    bufferDescOut.access = LCEVC_Access_Unknown;
     return true;
 }
 
-bool PictureManaged::setDesc(const LCEVC_PictureDesc& newDesc, bool& descChangedOut)
+bool PictureManaged::getPlaneDescArr(PicturePlaneDesc planeDescArrOut[kMaxNumPlanes]) const
 {
-    if (!BaseClass::setDesc(newDesc, descChangedOut)) {
-        return false;
+    for (uint32_t planeIdx = 0; planeIdx < getNumPlanes(); planeIdx++) {
+        planeDescArrOut[planeIdx].firstSample = internalGetPlaneFirstSample(planeIdx);
+        planeDescArrOut[planeIdx].rowByteStride = getPlaneByteStride(planeIdx);
     }
-    if (!descChangedOut) {
+    return true;
+}
+
+bool PictureManaged::descsMatch(const LCEVC_PictureDesc& newDesc)
+{
+    LCEVC_PictureDesc curDesc;
+    getDesc(curDesc);
+    return equals(newDesc, curDesc);
+}
+
+bool PictureManaged::setDesc(const LCEVC_PictureDesc& newDesc)
+{
+    // Check for changes, then set descs, THEN bind (based on new descs).
+    if (descsMatch(newDesc)) {
         return true;
     }
 
-    // Managed pictures also need to resize, i.e. unbind and rebind
+    if (!BaseClass::setDesc(newDesc)) {
+        return false;
+    }
+
     if (!unbindMemory()) {
         VNLogError("CC %u, PTS %" PRId64
                    ": Failed to unbind old memory for managed picture <%s>.\n",
@@ -600,7 +724,6 @@ bool PictureManaged::setDesc(const LCEVC_PictureDesc& newDesc, bool& descChanged
                    getShortDbgString().c_str());
         return false;
     }
-
     bindMemory();
     return true;
 }
@@ -616,11 +739,6 @@ bool PictureManaged::bindMemory()
         VNLogError("CC %u, PTS %" PRId64 ": Binding to nothing. Picture: <%s>\n",
                    timehandleGetCC(getTimehandle()), timehandleGetTimestamp(getTimehandle()),
                    getShortDbgString().c_str());
-    }
-
-    const uint32_t planesCount = m_desc.GetPlaneCount();
-    for (uint32_t i = 0; i < planesCount; i++) {
-        m_desc.SetPlaneStrides(i, getPlaneByteStride(i), getPlaneBytesPerPixel(i));
     }
 
     // m_buffer might be set, if we are resizing.

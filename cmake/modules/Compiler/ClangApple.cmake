@@ -13,3 +13,5 @@ target_compile_options(lcevc_dec::compiler INTERFACE
     -Wpointer-arith
     -Wtautological-unsigned-zero-compare
     )
+
+set(CMAKE_MACOSX_BUNDLE NO)

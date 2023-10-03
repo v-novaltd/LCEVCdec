@@ -11,7 +11,7 @@
 
 // ------------------------------------------------------------------------------------------------
 
-using namespace lcevc_dec::utility;
+using namespace lcevc_dec::api_utility;
 
 namespace lcevc_dec::decoder {
 

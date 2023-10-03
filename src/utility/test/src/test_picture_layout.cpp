@@ -18,10 +18,10 @@ TEST(PictureLayout, I420_8_1920x1080)
     EXPECT_EQ(pl.format(), LCEVC_I420_8);
     EXPECT_EQ(pl.width(), 1920);
     EXPECT_EQ(pl.height(), 1080);
-    EXPECT_EQ(pl.width(0), 1920);
-    EXPECT_EQ(pl.width(1), 960);
-    EXPECT_EQ(pl.height(1), 540);
-    EXPECT_EQ(pl.height(2), 540);
+    EXPECT_EQ(pl.planeWidth(0), 1920);
+    EXPECT_EQ(pl.planeWidth(1), 960);
+    EXPECT_EQ(pl.planeHeight(1), 540);
+    EXPECT_EQ(pl.planeHeight(2), 540);
 
     EXPECT_EQ(pl.sampleSize(), 1);
     EXPECT_EQ(pl.sampleBits(), 8);
@@ -65,10 +65,10 @@ TEST(PictureLayout, I420_10_LE_512x512)
     EXPECT_EQ(pl.format(), LCEVC_I420_10_LE);
     EXPECT_EQ(pl.width(), 512);
     EXPECT_EQ(pl.height(), 256);
-    EXPECT_EQ(pl.width(0), 512);
-    EXPECT_EQ(pl.width(1), 256);
-    EXPECT_EQ(pl.height(1), 128);
-    EXPECT_EQ(pl.height(2), 128);
+    EXPECT_EQ(pl.planeWidth(0), 512);
+    EXPECT_EQ(pl.planeWidth(1), 256);
+    EXPECT_EQ(pl.planeHeight(1), 128);
+    EXPECT_EQ(pl.planeHeight(2), 128);
 
     EXPECT_EQ(pl.sampleSize(), 2);
     EXPECT_EQ(pl.sampleBits(), 10);
@@ -112,10 +112,10 @@ TEST(PictureLayout, NV12_720x576)
     EXPECT_EQ(pl.format(), LCEVC_NV12_8);
     EXPECT_EQ(pl.width(), 720);
     EXPECT_EQ(pl.height(), 576);
-    EXPECT_EQ(pl.width(0), 720);
-    EXPECT_EQ(pl.width(1), 360);
-    EXPECT_EQ(pl.height(1), 288);
-    EXPECT_EQ(pl.height(2), 288);
+    EXPECT_EQ(pl.planeWidth(0), 720);
+    EXPECT_EQ(pl.planeWidth(1), 360);
+    EXPECT_EQ(pl.planeHeight(1), 288);
+    EXPECT_EQ(pl.planeHeight(2), 288);
 
     EXPECT_EQ(pl.sampleSize(), 1);
     EXPECT_EQ(pl.sampleBits(), 8);

@@ -60,6 +60,30 @@ void disableDumpPicture();
 LCEVC_ReturnCode readPictureFromRaw(LCEVC_DecoderHandle decoder, std::string_view name,
                                     LCEVC_PictureHandle& picture);
 
+/*!
+ * \brief Copy image data from memory into an existing picture
+ *
+ * @param[in]       decoder     Decoder from which picture was allocated
+ * @param[in]       picture     Handle to destination picture
+ * @param[in]       data        Source of component data
+ * @param[in]       size        Size in bytes of component data
+ *
+ * @return                      LCEVC_Success or LCEVC_InvalidParam
+ */
+LCEVC_ReturnCode copyPictureFromMemory(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture, const uint8_t *data, uint32_t size);
+
+/*!
+ * \brief Copy image data to memory from an existing picture
+ *
+ * @param[in]       decoder     Decoder from which picture will be allocated
+ * @param[in]       picture     Handle to source picture
+ * @param[in]       data        Destination of component data
+ * @param[in]       size        Size in bytes of component data
+ *
+ * @return                      LCEVC_Success or LCEVC_InvalidParam
+ */
+LCEVC_ReturnCode copyPictureToMemory(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture, uint8_t *data, uint32_t size);
+
 } // namespace lcevc_dec::utility
 
 #endif

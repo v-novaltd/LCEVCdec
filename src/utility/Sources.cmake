@@ -5,6 +5,7 @@ list(APPEND SOURCES
 	"src/base_decoder_libav.cpp"
 	"src/base_decoder_bin.cpp"
 	"src/bin_reader.cpp"
+	"src/bin_writer.cpp"
 	"src/check.cpp"
 	"src/configure.cpp"
 	"src/extract.c"
@@ -24,6 +25,8 @@ list(APPEND SOURCES
 
 list(APPEND HEADERS
 	"src/bin_reader.h"
+	"src/bin_writer.h"
+	"src/filesystem.h"
 	"src/parse_raw_name.h"
 	"src/string_utils.h"
 	)

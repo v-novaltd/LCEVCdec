@@ -47,20 +47,20 @@ std::istream& operator>>(std::istream& in, LCEVC_ColorRange& v)
     return in;
 }
 
-std::istream& operator>>(std::istream& in, LCEVC_ColorStandard& v)
+std::istream& operator>>(std::istream& in, LCEVC_ColorPrimaries& v)
 {
     std::string str;
     in >> str;
 
     if (fromString(str.c_str(), v)) {
-        fmt::print(stderr, "Not a valid ColorStandard: '{}'\n", str);
+        fmt::print(stderr, "Not a valid ColorPrimaries: '{}'\n", str);
         std::exit(EXIT_FAILURE);
     }
 
     return in;
 }
 
-std::istream& operator>>(std::istream& in, LCEVC_ColorTransfer& v)
+std::istream& operator>>(std::istream& in, LCEVC_TransferCharacteristics& v)
 {
     std::string str;
     in >> str;
@@ -124,13 +124,13 @@ std::ostream& operator<<(std::ostream& out, const LCEVC_ColorRange& v)
     return out;
 }
 
-std::ostream& operator<<(std::ostream& out, const LCEVC_ColorStandard& v)
+std::ostream& operator<<(std::ostream& out, const LCEVC_ColorPrimaries& v)
 {
     out << toString(v);
     return out;
 }
 
-std::ostream& operator<<(std::ostream& out, const LCEVC_ColorTransfer& v)
+std::ostream& operator<<(std::ostream& out, const LCEVC_TransferCharacteristics& v)
 {
     out << toString(v);
     return out;

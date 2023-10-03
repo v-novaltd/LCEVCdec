@@ -5,6 +5,7 @@ list(APPEND SOURCES
     "src/mock_api.cpp"
     "src/test_base_decoder.cpp"
     "src/test_bin_reader.cpp"
+    "src/test_bin_writer.cpp"
     "src/test_byte_order.cpp"
     "src/test_configure.cpp"
     "src/test_convert.cpp"

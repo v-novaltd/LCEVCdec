@@ -44,7 +44,10 @@ std::vector<std::string> split(std::string_view src, std::string_view seperators
 std::string hexDump(const uint8_t* data, uint32_t size, uint32_t offset)
 {
     const int bytesPerLine = 16;
+    const int outputCharsPerLine = 13;
+    const int outputCharsByte = 4;
     std::string result;
+    result.reserve(size * outputCharsByte + (size / bytesPerLine) * outputCharsPerLine);
 
     for (uint64_t line = 0; line < size; line += bytesPerLine) {
         result += fmt::format("{:#06x} : ", offset + line);

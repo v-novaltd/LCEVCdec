@@ -31,7 +31,7 @@ bool RawReader::read(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture)
 
     for (uint32_t plane = 0; plane < lock.numPlanes(); ++plane) {
         for (unsigned row = 0; row < lock.height(plane); ++row) {
-            m_stream->read(lock.rowData<char>(plane,row), lock.rowSize(plane));
+            m_stream->read(lock.rowData<char>(plane, row), lock.rowSize(plane));
             if (!m_stream->good()) {
                 return false;
             }
@@ -57,7 +57,8 @@ bool RawReader::read(std::vector<uint8_t>& memory)
 std::unique_ptr<RawReader> createRawReader(const LCEVC_PictureDesc& pictureDescription,
                                            std::string_view filename)
 {
-    std::unique_ptr<std::istream> stream = std::make_unique<std::ifstream>(std::string(filename));
+    std::unique_ptr<std::istream> stream =
+        std::make_unique<std::ifstream>(std::string(filename), std::ios::binary);
     return createRawReader(pictureDescription, std::move(stream));
 }
 
