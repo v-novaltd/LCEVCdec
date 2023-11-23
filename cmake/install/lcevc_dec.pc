@@ -5,6 +5,5 @@ includedir=${prefix}/include
 Name: lcevc_dec
 Description: LCEVC Decoder SDK
 Version: 2.0.0
-Libs: -L"${libdir}" -llcevc_dec_api -llcevc_dec_integration -llcevc_dec_core  -lpthread  -Wl,-rpath,"${libdir}"
+Libs: -L"${libdir}" -llcevc_dec_api -llcevc_dec_core  -lpthread  -Wl,-rpath,"${libdir}"
 Cflags: -I"${includedir}"
-Requires: glfw3
