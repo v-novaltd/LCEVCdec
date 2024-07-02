@@ -36,8 +36,8 @@ Or you can build without Conan using:
 ```
 mkdir _build
 cd _build
-cmake  -G Ninja -DCMAKE_BUILD_TYPE=Debug -DVN_SDK_USE_SPAN_LITE=OFF -DVN_SDK_FFMPEG_LIBS_PACKAGE=pkgconfig -DVN_SDK_UNIT_TESTS=OFF  .. # OR
-cmake  -G Ninja -DCMAKE_BUILD_TYPE=Release -DVN_SDK_USE_SPAN_LITE=OFF -DVN_SDK_FFMPEG_LIBS_PACKAGE=pkgconfig -DVN_SDK_UNIT_TESTS=OFF  ..
+cmake  -G Ninja -DCMAKE_BUILD_TYPE=Debug  .. # OR
+cmake  -G Ninja -DCMAKE_BUILD_TYPE=Release ..
 cmake --build .
 ```
 
