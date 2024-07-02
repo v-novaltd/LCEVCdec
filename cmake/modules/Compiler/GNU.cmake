@@ -15,6 +15,5 @@ target_compile_options(lcevc_dec::compiler INTERFACE
 #    -Wshadow
     -Wwrite-strings
     $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>
-    $<$<COMPILE_LANGUAGE:C>:--std=c11>
     $<$<COMPILE_LANGUAGE:CXX>:--std=c++17>
     )

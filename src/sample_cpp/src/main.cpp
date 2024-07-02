@@ -57,7 +57,7 @@ int main(int argc, char** argv)
     }
 
     // Open output file
-    std::unique_ptr<FILE, decltype(&fclose)> output(fopen(outputFile.c_str(), "wb"), fclose);
+    std::unique_ptr<FILE, int (*)(FILE*)> output(fopen(outputFile.c_str(), "wb"), fclose);
     if (!output) {
         fmt::print("Could not open output {}\n", outputFile);
         return EXIT_FAILURE;

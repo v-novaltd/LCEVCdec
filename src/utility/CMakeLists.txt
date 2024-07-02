@@ -4,7 +4,9 @@ include("Sources.cmake")
 
 find_package(RapidJSON NAMES RapidJSON rapidjson REQUIRED)
 find_package(fmt REQUIRED)
-find_package(span-lite REQUIRED)
+if(VN_SDK_USE_SPAN_LITE)
+	find_package(span-lite REQUIRED)
+endif()
 find_package(ffmpeg-libs REQUIRED)
 if(VN_SDK_USE_GHC_FILESYSTEM)
 	find_package(ghc_filesystem REQUIRED)
@@ -22,7 +24,6 @@ target_link_libraries(lcevc_dec_utility
 	lcevc_dec::compiler
 	ffmpeg-libs::ffmpeg-libs
 	PRIVATE
-	nonstd::span-lite
 	fmt::fmt
 	$<TARGET_NAME_IF_EXISTS:rapidjson::rapidjson>
 	$<TARGET_NAME_IF_EXISTS:RapidJSON::RapidJSON>

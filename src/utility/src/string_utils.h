@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <cstdint>
 
 namespace lcevc_dec::utility {
 

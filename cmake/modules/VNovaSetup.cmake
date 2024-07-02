@@ -175,6 +175,7 @@ function(lcevc_set_properties TARGET)
 		PROPERTIES
 		  C_STANDARD 11
 		  CXX_STANDARD 17
+		  C_EXTENSIONS ON
 			VS_GLOBAL_EnableMicrosoftCodeAnalysis false
 			VS_GLOBAL_EnableClangTidyCodeAnalysis true
 	)

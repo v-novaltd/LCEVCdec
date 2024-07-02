@@ -263,7 +263,7 @@ int BaseDecoderLibAV::addFilter(std::string_view filter)
 
     const std::string args =
         fmt::format("width={}:height={}:pix_fmt={}:time_base=1/1:sar={}/{}", m_videoDecCtx->width,
-                    m_videoDecCtx->height, m_videoDecCtx->pix_fmt,
+                    m_videoDecCtx->height, (int) m_videoDecCtx->pix_fmt,
                     m_videoDecCtx->time_base.num ? m_videoDecCtx->time_base.num : 1,
                     m_videoDecCtx->time_base.den, m_videoDecCtx->sample_aspect_ratio.num,
                     m_videoDecCtx->sample_aspect_ratio.den);

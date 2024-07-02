@@ -18,8 +18,8 @@
 #else
 #ifdef __ANDROID__
 #include <android/dlext.h>
-#include <pthread.h>
 #endif
+#include <pthread.h>
 #include <dlfcn.h>
 #include <stdio.h>
 #include <unistd.h>
