@@ -32,6 +32,15 @@ cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
 cmake --build .
 ```
 
+Or you can build without Conan using:
+```
+mkdir _build
+cd _build
+cmake  -G Ninja -DCMAKE_BUILD_TYPE=Debug -DVN_SDK_USE_SPAN_LITE=OFF -DVN_SDK_FFMPEG_LIBS_PACKAGE=pkgconfig -DVN_SDK_UNIT_TESTS=OFF  .. # OR
+cmake  -G Ninja -DCMAKE_BUILD_TYPE=Release -DVN_SDK_USE_SPAN_LITE=OFF -DVN_SDK_FFMPEG_LIBS_PACKAGE=pkgconfig -DVN_SDK_UNIT_TESTS=OFF  ..
+cmake --build .
+```
+
 ## Cross Compiled Build to Android using Ninja
 
 The profiles currently available on conan are: ABIs of `armeabi-v7a`, `arm64-v8a`, `x86`, and `x86_64`; Android APIs of 21 through 30, inclusive; and build types of Release, RelWithDebugInfo, and Debug. Below, we use `armeabi-v7a`, API 30, and Release.
