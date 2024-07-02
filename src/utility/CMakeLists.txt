@@ -32,6 +32,5 @@ target_link_libraries(lcevc_dec_utility
 
 add_library(lcevc_dec::utility ALIAS lcevc_dec_utility)
 
-install(TARGETS lcevc_dec_utility DESTINATION lib)
+install(TARGETS lcevc_dec_utility DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES ${INTERFACES} DESTINATION include/LCEVC/utility)
-install(FILES ${SOURCES} ${HEADERS} DESTINATION src/utility)

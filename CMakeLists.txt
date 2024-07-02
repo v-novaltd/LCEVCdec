@@ -129,20 +129,20 @@ configure_file("cmake/templates/README.md.in" "install_config/README.md")
 
 ## Top level install
 #
-install(FILES "COPYING" DESTINATION "./")
-install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "./")
-install(FILES "cmake/install/conanfile.txt" DESTINATION "./")
-install(FILES "cmake/install/lcevc_dec.pc" DESTINATION "./pkgconfig/")
-install(DIRECTORY "licenses" DESTINATION "./")
+include(GNUInstallDirs)
+
+install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES "cmake/install/lcevc_dec.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
+install(DIRECTORY "licenses" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 
 #
-install(FILES "include/LCEVC/lcevc.h" DESTINATION "./include/LCEVC")
+install(FILES "include/LCEVC/lcevc.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC")
 
 #
 if(VN_SDK_EXECUTABLES)
 	if(WIN32)
 		install(DIRECTORY "${CMAKE_BINARY_DIR}/bin/"
-			DESTINATION "bin"
+			DESTINATION "${CMAKE_INSTALL_BINDIR}"
 			FILES_MATCHING
 			PATTERN "*.dll")
 	endif()
