@@ -145,12 +145,6 @@ if(VN_SDK_EXECUTABLES)
 			DESTINATION "bin"
 			FILES_MATCHING
 			PATTERN "*.dll")
-	else()
-		install(
-			DIRECTORY "${CMAKE_BINARY_DIR}/lib/"
-			DESTINATION "lib"
-			FILES_MATCHING PATTERN "*"
-		)
 	endif()
 endif()
 
