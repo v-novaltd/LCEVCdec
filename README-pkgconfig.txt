@@ -15,12 +15,11 @@ This is the minimal list of required dependencies, with tested version numbers i
 - glad (0.1.33)
 - glfw (3.3.2)
 - gtest (1.12.1)
-- libav (12.3)
+- ffmpeg-libs-minimal (n6.0-vnova-59)
 - opengl (system)
 - range-v3 (0.12.0)
 - rapidjson (v1.1.0-709-g06d5)
 - tclap (1.2.1)
-- xorg (system)
 - xxhash (0.8.1)
 - zlib (1.2.11)
 

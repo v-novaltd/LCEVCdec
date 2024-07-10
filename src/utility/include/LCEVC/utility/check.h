@@ -1,5 +1,14 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 // Helper macros for checking return codes from LCEVC_DEC API functions.
 //
 #ifndef VN_LCEVC_UTILITY_CHECK_H
@@ -37,18 +46,28 @@ extern "C"
  *
  * @param[in]       expr    Some expression that returns LCEVC_ReturnCode
  */
-#define VN_LCEVC_CHECK_RET(expr)         \
+#define VN_LCEVC_CHECK_RET(expr)      \
     do {                              \
         LCEVC_ReturnCode rc = (expr); \
         if (rc != LCEVC_Success)      \
             return rc;                \
     } while (0)
 
+/*!
+ * \brief Check if a utility function returns a true or false
+ *
+ * If there is an error prints summary to `stderr` and exits.
+ *
+ * @param[in]       expr    Some expression that returns LCEVC_ReturnCode
+ */
+#define VN_UTILITY_CHECK(expr) utilityCheckFn(__FILE__, __LINE__, #expr, expr)
+#define VN_UTILITY_CHECK_MSG(expr, msg) utilityCheckFn(__FILE__, __LINE__, #expr, expr, msg)
 
-/* Functions to do the real work of LCEVC_CHECK() and LCEVC_AGAIN()
+/* Functions to do the real work of LCEVC_CHECK(), LCEVC_AGAIN() and UTILITY_CHECK()
  */
 void LCEVC_CheckFn(const char* file, int line, const char* expr, LCEVC_ReturnCode r);
 bool LCEVC_AgainFn(const char* file, int line, const char* expr, LCEVC_ReturnCode r);
+void utilityCheckFn(const char* file, int line, const char* expr, bool r, const char* msg = "");
 
 #ifdef __cplusplus
 }

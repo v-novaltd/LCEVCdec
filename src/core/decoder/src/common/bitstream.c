@@ -1,9 +1,15 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "common/bitstream.h"
-
-/*------------------------------------------------------------------------------*/
-
-static const uint32_t kMaxBitsAtOnce = 31;
 
 /*------------------------------------------------------------------------------*/
 
@@ -45,14 +51,6 @@ static inline int32_t loadWord(BitStream_t* stream)
     return 0;
 }
 
-/*! \brief Helper function to determine if the bitstream is complete. */
-static inline bool streamComplete(const BitStream_t* stream)
-{
-    const bool byteStreamComplete = bytestreamRemaining(&stream->byteStream) == 0;
-    const bool wordComplete = (bool)(stream->nextBit == 32);
-    return byteStreamComplete && wordComplete;
-}
-
 /*! \brief Determines if the next word needs to be loaded and then loads if needed.  */
 static inline int32_t checkLoadNextWord(BitStream_t* stream)
 {
@@ -79,14 +77,10 @@ int32_t bitstreamInitialise(BitStream_t* stream, const uint8_t* data, size_t siz
 
 int32_t bitstreamReadBit(BitStream_t* stream, uint8_t* out)
 {
-    if (streamComplete(stream) || !out || (checkLoadNextWord(stream) != 0)) {
-        return -1;
-    }
+    assert(out);
 
-    if (stream->nextBit == 32) {
-        if (loadWord(stream) != 0) {
-            return -1;
-        }
+    if (streamComplete(stream) || (checkLoadNextWord(stream) != 0)) {
+        return -1;
     }
 
     *out = stream->word >> 31;
@@ -96,28 +90,36 @@ int32_t bitstreamReadBit(BitStream_t* stream, uint8_t* out)
     return 0;
 }
 
+void bitstreamReadBitUnchecked(BitStream_t* stream, uint8_t* out)
+{
+    assert(out && !streamComplete(stream));
+    if (stream->nextBit == 32) {
+        loadWordUnchecked(stream);
+    }
+    *out = stream->word >> 31;
+    stream->word <<= 1;
+    stream->nextBit++;
+}
+
 int32_t bitstreamReadBits(BitStream_t* stream, uint8_t numBits, int32_t* out)
 {
+    assert(out && (numBits <= kMaxBitsAtOnce));
+
     // @todo(bob): handle attempt to read more than is available.
-
-    if (!out || numBits > kMaxBitsAtOnce || streamComplete(stream)) {
-        return -1;
-    }
-
-    if (checkLoadNextWord(stream) != 0) {
+    if (streamComplete(stream) || checkLoadNextWord(stream) != 0) {
         return -1;
     }
 
     /* Load up current word bits. */
-    const uint8_t wordRemanining = 32 - stream->nextBit;
+    const uint8_t wordRemaining = 32 - stream->nextBit;
     *out = (int32_t)(stream->word >> (32 - numBits));
 
-    if (wordRemanining >= numBits) {
+    if (wordRemaining >= numBits) {
         stream->nextBit += numBits;
         stream->word <<= numBits;
     } else {
         /* Handle outstanding bits to be read in. */
-        const uint8_t readRemaining = numBits - wordRemanining;
+        const uint8_t readRemaining = numBits - wordRemaining;
 
         if (loadWord(stream) != 0) {
             return -1;
@@ -159,26 +161,6 @@ int32_t bitstreamReadExpGolomb(BitStream_t* stream, uint32_t* out)
 
     *out = value - 1;
     return 0;
-}
-
-uint64_t bitstreamGetRemainingBits(const BitStream_t* stream)
-{
-    const uint64_t wordBitsRemaining = 32 - stream->nextBit;
-    const uint64_t byteBitsRemaining = (uint64_t)bytestreamRemaining(&stream->byteStream) * 8;
-    return wordBitsRemaining + byteBitsRemaining;
-}
-
-uint64_t bitstreamGetConsumedBits(const BitStream_t* stream)
-{
-    const uint64_t remainingBits = bitstreamGetRemainingBits(stream);
-    const uint64_t overallSize = byteStreamGetSize(&stream->byteStream) * 8;
-    return overallSize - remainingBits;
-}
-
-uint32_t bitstreamGetConsumedBytes(const BitStream_t* stream)
-{
-    const uint64_t consumedBits = bitstreamGetConsumedBits(stream);
-    return (uint32_t)((consumedBits + 7) >> 3);
 }
 
 /*------------------------------------------------------------------------------*/

@@ -1,10 +1,19 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "LCEVC/utility/base_decoder.h"
+#include "LCEVC/utility/bin_reader.h"
 #include "LCEVC/utility/byte_order.h"
 #include "LCEVC/utility/picture_layout.h"
 #include "LCEVC/utility/raw_reader.h"
-#include "bin_reader.h"
 
 #include <fmt/core.h>
 
@@ -22,27 +31,27 @@ class BaseDecoderBin final : public BaseDecoder
 
 public:
     BaseDecoderBin() = default;
-    ~BaseDecoderBin() final;
+    ~BaseDecoderBin() override;
 
     BaseDecoderBin(const BaseDecoderBin&) = delete;
     BaseDecoderBin(BaseDecoderBin&&) = delete;
     BaseDecoderBin& operator=(const BaseDecoderBin&) = delete;
     BaseDecoderBin& operator=(BaseDecoderBin&&) = delete;
 
-    const LCEVC_PictureDesc& description() const final { return m_pictureDesc; }
-    const PictureLayout& layout() const final { return m_pictureLayout; }
+    const LCEVC_PictureDesc& description() const override { return m_pictureDesc; }
+    const PictureLayout& layout() const override { return m_pictureLayout; }
 
-    int maxReorder() const final { return 0; }
+    int maxReorder() const override { return 0; }
 
-    bool hasImage() const final;
-    bool getImage(Data& data) const final;
-    void clearImage() final;
+    bool hasImage() const override;
+    bool getImage(Data& data) const override;
+    void clearImage() override;
 
-    bool hasEnhancement() const final;
-    bool getEnhancement(Data& data) const final;
-    void clearEnhancement() final;
+    bool hasEnhancement() const override;
+    bool getEnhancement(Data& data) const override;
+    void clearEnhancement() override;
 
-    bool update() final;
+    bool update() override;
 
 private:
     friend std::unique_ptr<BaseDecoder> createBaseDecoderBin(std::string_view rawFile,
@@ -139,6 +148,7 @@ bool BaseDecoderBin::update()
             m_enhancementData.ptr = m_enhancement.data();
             m_enhancementData.size = static_cast<uint32_t>(m_enhancement.size());
             m_enhancementData.timestamp = presentationIndex;
+            m_enhancementData.baseDecodeStart = std::chrono::high_resolution_clock::now();
         } else {
             m_binGood = false;
         }
@@ -188,12 +198,12 @@ bool BaseDecoderBin::probe(std::string_view binFile)
     }
 
     if (timestamps.empty()) {
-        fmt::print("base_decoder_bin: probe found empty BIN file.");
+        fmt::print("base_decoder_bin: probe found empty BIN file.\n");
         return false;
     }
 
     if (timestamps.size() != count) {
-        fmt::print("base_decoder_bin: probe found duplicate timestamps in BIN file.");
+        fmt::print("base_decoder_bin: probe found duplicate timestamps in BIN file.\n");
         return false;
     }
 
@@ -210,7 +220,7 @@ bool BaseDecoderBin::probe(std::string_view binFile)
     int64_t testTimestamp = m_timestampStart;
     for (const auto ts : timestamps) {
         if (ts != testTimestamp) {
-            fmt::print("base_decoder_bin: warning: probe found missing timestamp {}.", ts);
+            fmt::print("base_decoder_bin: warning: probe found missing timestamp {}.\n", ts);
             break;
         }
         testTimestamp += m_timestampStep;

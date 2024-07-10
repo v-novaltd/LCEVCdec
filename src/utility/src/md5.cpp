@@ -1,5 +1,14 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 // Compute MD5 checksum
 //
 // See https://en.wikipedia.org/wiki/MD5
@@ -118,7 +127,7 @@ void MD5::update(const uint8_t* data, uint32_t size)
 {
     assert(!m_finished);
 
-    // UPdate bit length
+    // Update bit length
     m_length += static_cast<uint64_t>(size) * 8;
 
     assert(data != nullptr);

@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_DESERIALIZER_H_
 #define VN_DEC_CORE_DESERIALIZER_H_
 
@@ -9,6 +19,8 @@
 /*------------------------------------------------------------------------------*/
 
 typedef struct Context Context_t;
+typedef struct Logger* Logger_t;
+typedef struct Memory* Memory_t;
 
 /*------------------------------------------------------------------------------*/
 
@@ -43,7 +55,7 @@ typedef struct Deblock
 
 typedef struct DeserialisedData
 {
-    Context_t* ctx;
+    Memory_t memory;
     VNConfig_t vnova_config;
 
     NALType_t type;
@@ -120,7 +132,7 @@ typedef struct DeserialisedData
 /*! \brief Initialise deserialised data into a default state.
  *
  *  \param data  deserialised data instance to initialise. */
-void deserialiseInitialise(Context_t* ctx, DeserialisedData_t* data);
+void deserialiseInitialise(Memory_t memory, DeserialisedData_t* data);
 
 /*! \brief Release allocations on deserialised data. This should be called when
  *		   closing the decoder instance.
@@ -130,9 +142,10 @@ void deserialiseRelease(DeserialisedData_t* data);
 
 /*! \brief Dump the deserialised data as json.
  *
- *  \param ctx   Decoder context
- *  \param data  deserialised data to dump. */
-void deserialiseDump(Context_t* ctx, DeserialisedData_t* data);
+ *  \param log              logger.
+ *  \param debugConfigPath  path to dump data in.
+ *  \param data             deserialised data to dump. */
+void deserialiseDump(Logger_t log, const char* debugConfigPath, DeserialisedData_t* data);
 
 /*! \brief Obtain the array of non-temporal (layer) chunk data for a given Plane,
  *         LOQ and tile from the deserialised data.
@@ -149,8 +162,8 @@ void deserialiseDump(Context_t* ctx, DeserialisedData_t* data);
  *                     layer enhancement is currently disabled.
  *
  *  \return Returns 0 on success, otherwise -1. */
-int32_t deserialiseGetTileLayerChunks(DeserialisedData_t* data, int32_t planeIndex, LOQIndex_t loq,
-                                      int32_t tileIndex, Chunk_t** chunks);
+int32_t deserialiseGetTileLayerChunks(const DeserialisedData_t* data, int32_t planeIndex,
+                                      LOQIndex_t loq, int32_t tileIndex, Chunk_t** chunks);
 
 /*! \brief Obtain a pointer to the temporal chunk data for a given plane from the
  *         deserialised data. This function will output NULL chunk data if temporal
@@ -163,7 +176,7 @@ int32_t deserialiseGetTileLayerChunks(DeserialisedData_t* data, int32_t planeInd
  *                    This will be set to NULL if temporal enhancement is disabled.
  *
  * \return Returns 0 on success, otherwise -1. */
-int32_t deserialiseGetTileTemporalChunk(DeserialisedData_t* data, int32_t planeIndex,
+int32_t deserialiseGetTileTemporalChunk(const DeserialisedData_t* data, int32_t planeIndex,
                                         int32_t tileIndex, Chunk_t** chunk);
 
 /*! \brief Calculates the correct width and height of a surface for a given loq and
@@ -181,13 +194,15 @@ void deserialiseCalculateSurfaceProperties(const DeserialisedData_t* data, LOQIn
                                            uint32_t planeIndex, uint32_t* width, uint32_t* height);
 
 /*! \brief Deserialise encoded data from a loaded piece of data.
- *  \param ctx             Decoder context
- *  \param serialised      Serialised data to deserialise.
- *  \param serialisedSize  Byte size of the serialised data.
- *  \param output          Deserialised data instance to deserialise into.
- *  \param parseMode       Specify which blocks to be deserialised. */
-int32_t deserialise(Context_t* ctx, const uint8_t* serialised, uint32_t serialisedSize,
-                    DeserialisedData_t* output, ParseType_t parseMode);
+ *  \param memory           Memory manager
+ *  \param lgo              Logger
+ *  \param serialised       Serialised data to deserialise.
+ *  \param serialisedSize   Byte size of the serialised data.
+ *  \param deserialisedOut  Deserialised data instance to deserialise some stuff into.
+ *  \param ctxOut           Decoder context to deserialise other stuff into.
+ *  \param parseMode        Specify which blocks to be deserialised. */
+int32_t deserialise(Memory_t memory, Logger_t log, const uint8_t* serialised, uint32_t serialisedSize,
+                    DeserialisedData_t* deserialisedOut, Context_t* ctxOut, ParseType_t parseMode);
 
 /*------------------------------------------------------------------------------*/
 

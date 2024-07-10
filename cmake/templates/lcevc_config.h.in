@@ -1,4 +1,13 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef VN_LCEVC_CONFIG_H_
 #define VN_LCEVC_CONFIG_H_
@@ -49,7 +58,6 @@
     Available `VN_SDK_FEATURE` values:
         BASE_DECODER
         USE_GHC_FILESYSTEM
-        USE_SPAN_LITE
 
     Available `VN_CORE_FEATURE` values:
         PROFILER
@@ -131,7 +139,7 @@
 
     If that becomes verbose/long or is required in multiple places there are a couple options:
 
-    1.  New feature flag - it may be desireable to just have a new feature flag declared
+    1.  New feature flag - it may be desirable to just have a new feature flag declared
         within this file. e.g.
 
         #define VN_CORE_FEATURE_PRIVATE_DEF_MY_FEATURE() (VN_OS(LINUX) || VN_OS(ANDROID) || ...)
@@ -165,7 +173,7 @@
 #define VN_TRUE 1
 #define VN_1 1
 
-/* Public macros */
+/* Turn private cmake definitions into public macros */
 #define VN_OS(x)                    VN_OS_PRIVATE_DEF_##x()
 #define VN_ARCH(x)                  VN_ARCH_PRIVATE_DEF_##x()
 #define VN_COMPILER(x)              VN_COMPILER_PRIVATE_DEF_##x()
@@ -173,6 +181,9 @@
 #define VN_CORE_FEATURE(x)          VN_CORE_FEATURE_PRIVATE_DEF_##x()
 #define VN_INTEGRATION_FEATURE(x)   VN_INTEGRATION_FEATURE_PRIVATE_DEF_##x()
 #define VN_SDK_FEATURE(x)           VN_SDK_FEATURE_PRIVATE_DEF_##x()
+
+/* Universal utility macro */
+#define VN_UNUSED(x) (void)(x)
 
 /* OS values */
 #if defined(__linux__) && !defined(__ANDROID__)
@@ -295,7 +306,9 @@
 
 /* Core library feature values */
 #define VN_CORE_FEATURE_PRIVATE_DEF_PROFILER() VN_@VN_CORE_PROFILER@
+#define VN_CORE_FEATURE_PRIVATE_DEF_STATS() VN_@VN_CORE_STATS@
 #define VN_CORE_FEATURE_PRIVATE_DEF_DEBUG_SYNTAX() VN_@VN_CORE_DEBUG_SYNTAX@
+#define VN_CORE_FEATURE_PRIVATE_DEF_OVERLAY_IMAGE() VN_@VN_CORE_OVERLAY_IMAGE@
 #define VN_CORE_FEATURE_PRIVATE_DEF_FORCE_OVERLAY() VN_@VN_CORE_FORCE_OVERLAY@
 #define VN_CORE_FEATURE_PRIVATE_DEF_SIMD() VN_@VN_CORE_SIMD@
 
@@ -351,18 +364,10 @@
 #define VN_CORE_FEATURE_PRIVATE_DEF_VNDK() 0
 #endif
 
-/* Integration library feature values */
-#define VN_INTEGRATION_FEATURE_PRIVATE_DEF_OPENGL() VN_@VN_INTEGRATION_OPENGL@
-#define VN_INTEGRATION_FEATURE_PRIVATE_DEF_WEBM() VN_@VN_INTEGRATION_WEBM@
-
 /* General SDK features */
 #define VN_SDK_FEATURE_PRIVATE_DEF_BASE_DECODER() VN_@VN_SDK_BASE_DECODER@
 #define VN_SDK_FEATURE_PRIVATE_DEF_USE_GHC_FILESYSTEM() VN_@VN_SDK_USE_GHC_FILESYSTEM@
-#define VN_SDK_FEATURE_PRIVATE_DEF_USE_SPAN_LITE() VN_@VN_SDK_USE_SPAN_LITE@
 
 /* clang-format on */
-
-// @todo(bob): Do we really need the ability to toggle this?
-#define VNEnableXXHash 1
 
 #endif /* VN_LCEVC_CONFIG_H_ */

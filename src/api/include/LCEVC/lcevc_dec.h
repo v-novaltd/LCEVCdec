@@ -1,4 +1,13 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef LCEVC_DEC_H
 #define LCEVC_DEC_H
@@ -58,6 +67,34 @@ typedef struct LCEVC_PictureLockHandle
 } LCEVC_PictureLockHandle;
 
 /*!
+ * This enum represents the available log levels
+ */
+typedef enum LCEVC_LogLevel
+{
+    LCEVC_LogDisabled = 0,
+    LCEVC_LogFatal =    1,
+    LCEVC_LogError =    2,
+    LCEVC_LogWarning =  3,
+    LCEVC_LogInfo =     4,
+    LCEVC_LogDebug =    5,
+    LCEVC_LogTrace =    6,
+
+    LCEVC_LogLevelCount
+} LCEVC_LogLevel;
+
+/*!
+ * This enum represents the available precision of log timestamps
+ */
+typedef enum LCEVC_LogPrecision
+{
+    LCEVC_LogNano         = 0,
+    LCEVC_LogMicro        = 1,
+    LCEVC_LogNoTimestamps = 2,
+
+    LCEVC_LogPrecisionCount
+} LCEVC_LogPrecision;
+
+/*!
  * This enum represents the possible API return codes.
  */
 typedef enum LCEVC_ReturnCode
@@ -87,6 +124,8 @@ typedef enum LCEVC_ColorRange
 
     LCEVC_ColorRange_Full      = 1,  /**< Full range. Y, Cr and Cb component values range from 0 to 255 for 8-bit content */
     LCEVC_ColorRange_Limited   = 2,  /**< Limited range. Y component values range from 16 to 235 for 8-bit content. Cr, Cb values range from 16 to 240 for 8-bit content */
+
+    LCEVC_ColorRange_Count,
 
     LCEVC_ColorRange_ForceInt32 = 0x7fffffff
 } LCEVC_ColorRange;
@@ -123,6 +162,8 @@ typedef enum LCEVC_ColorPrimaries
     LCEVC_ColorPrimaries_Reserved_21   = 21,  /**< Reserved For future use by ITU-T | ISO/IEC */
     LCEVC_ColorPrimaries_P22           = 22,  /**< No corresponding industry specification identified */
                                       /* 23-255, Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_ColorPrimaries_Count,
+
     LCEVC_ColorPrimaries_ForceInt32 = 0x7fffffff
 } LCEVC_ColorPrimaries;
 
@@ -152,6 +193,7 @@ typedef enum LCEVC_TransferCharacteristics
     LCEVC_TransferCharacteristics_SMPTE428       = 17,  /**< SMPTE ST 428-1 (2019) */
     LCEVC_TransferCharacteristics_HLG            = 18,  /**< ARIB STD-B67 (2015), Rec. ITU-R BT.2100-2 hybrid log-gamma (HLG) system */
                                       /* 19-255, Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_TransferCharacteristics_Count,
     LCEVC_TransferCharacteristics_ForceInt32 = 0x7fffffff
 } LCEVC_TransferCharacteristics;
 
@@ -198,13 +240,16 @@ typedef enum LCEVC_MatrixCoefficients
 } LCEVC_MatrixCoefficients;
 
 /*!
- * Identifies per picture metadata items.
+ * Identifies per picture metadata items. Note: flag values are simply distinct identifiers, not
+ * "flags" in the strict sense of "powers of 2".
  */
 typedef enum LCEVC_PictureFlag {
     LCEVC_PictureFlag_Unknown    = 0,
 
     LCEVC_PictureFlag_IDR        = 1, /**< Base picture decoded from an IDR frame */
     LCEVC_PictureFlag_Interlaced = 2, /**< Base picture has two interlaced fields */
+
+    LCEVC_PictureFlag_Count,
 
     LCEVC_PictureFlag_ForceInt32 = 0x7fffffff
 } LCEVC_PictureFlag;
@@ -261,33 +306,43 @@ typedef struct LCEVC_DecodeInformation
  */
 typedef enum LCEVC_ColorFormat
 {
-    LCEVC_ColorFormat_Unknown          = 0,
+    LCEVC_ColorFormat_Unknown   = 0,
 
-    LCEVC_I420_8                       = 1001,  /**< 8 bit 4:2:0 YUV Planar color format: Y, U and V on separate planes */
-    LCEVC_I420_10_LE                   = 1002,  /**< 10 bit Little Endian 4:2:0 YUV Planar color format: Y, U and V on separate planes */
-    LCEVC_I420_12_LE                   = 1003,  /**< 12 bit Little Endian 4:2:0 YUV Planar color format: Y, U and V on separate planes */
-    LCEVC_I420_14_LE                   = 1004,  /**< 14 bit Little Endian 4:2:0 YUV Planar color format: Y, U and V on separate planes */
-    LCEVC_I420_16_LE                   = 1005,  /**< 16 bit Little Endian 4:2:0 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I420_8                = 1001, /**< 8 bit 4:2:0 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I420_10_LE            = 1002, /**< 10 bit Little Endian 4:2:0 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I420_12_LE            = 1003, /**< 12 bit Little Endian 4:2:0 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I420_14_LE            = 1004, /**< 14 bit Little Endian 4:2:0 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I420_16_LE            = 1005, /**< 16 bit Little Endian 4:2:0 YUV Planar color format: Y, U and V on separate planes */
 
-    LCEVC_YUV420_RASTER_8              = 1006,  /**< 8bit 4:2:0 YUV raster colour format: Y, U and V on a single plane on three channels, GPU sampler requires GL_EXT_YUV_target extension */
+    LCEVC_I422_8                = 1201, /**< 8 bit 4:2:2 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I422_10_LE            = 1202, /**< 10 bit Little Endian 4:2:2 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I422_12_LE            = 1203, /**< 12 bit Little Endian 4:2:2 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I422_14_LE            = 1204, /**< 14 bit Little Endian 4:2:2 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I422_16_LE            = 1205, /**< 16 bit Little Endian 4:2:2 YUV Planar color format: Y, U and V on separate planes */
 
-    LCEVC_NV12_8                       = 2001,  /**< 8 bit 4:2:0 YUV SemiPlanar color format: Y plane and UV interleaved plane */
-    LCEVC_NV21_8                       = 2002,  /**< 8 bit 4:2:0 YUV SemiPlanar color format: Y plane and VU interleaved plane */
+    LCEVC_I444_8                = 1401, /**< 8 bit 4:4:4 YUV Planar color format: Y, U and V on separate planes. Sometimes used to store rasterized 4:2:0 YUV data. */
+    LCEVC_I444_10_LE            = 1402, /**< 10 bit Little Endian 4:4:4 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I444_12_LE            = 1403, /**< 12 bit Little Endian 4:4:4 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I444_14_LE            = 1404, /**< 14 bit Little Endian 4:4:4 YUV Planar color format: Y, U and V on separate planes */
+    LCEVC_I444_16_LE            = 1405, /**< 16 bit Little Endian 4:4:4 YUV Planar color format: Y, U and V on separate planes */
 
-    LCEVC_RGB_8                        = 3001,  /**< 8 bit Interleaved R, G, B planes 24 bit per sample */
-    LCEVC_BGR_8                        = 3002,  /**< 8 bit Interleaved R, G, B planes 24 bit per sample */
-    LCEVC_RGBA_8                       = 3003,  /**< 8 bit Interleaved R, G, B and A planes 32 bit per sample */
-    LCEVC_BGRA_8                       = 3004,  /**< 8 bit Interleaved R, G, B and A planes 32 bit per sample */
-    LCEVC_ARGB_8                       = 3005,  /**< 8 bit Interleaved R, G, B and A planes 32 bit per sample */
-    LCEVC_ABGR_8                       = 3006,  /**< 8 bit Interleaved R, G, B and A planes 32 bit per sample */
+    LCEVC_NV12_8                = 2001, /**< 8 bit 4:2:0 YUV SemiPlanar color format: Y plane and UV interleaved plane */
+    LCEVC_NV21_8                = 2002, /**< 8 bit 4:2:0 YUV SemiPlanar color format: Y plane and VU interleaved plane */
 
-    LCEVC_RGBA_10_2_LE                 = 4001,  /**< 10 bit Little Endian interleaved R, G, and B channels, with a 2bit A channel. 32 bits per sample. */
+    LCEVC_RGB_8                 = 3001, /**< 8 bit Interleaved R, G, B planes 24 bit per sample */
+    LCEVC_BGR_8                 = 3002, /**< 8 bit Interleaved R, G, B planes 24 bit per sample */
+    LCEVC_RGBA_8                = 3003, /**< 8 bit Interleaved R, G, B and A planes 32 bit per sample */
+    LCEVC_BGRA_8                = 3004, /**< 8 bit Interleaved R, G, B and A planes 32 bit per sample */
+    LCEVC_ARGB_8                = 3005, /**< 8 bit Interleaved R, G, B and A planes 32 bit per sample */
+    LCEVC_ABGR_8                = 3006, /**< 8 bit Interleaved R, G, B and A planes 32 bit per sample */
 
-    LCEVC_GRAY_8                       = 5001,  /**< 8 bit 4:0:0 (Monochrome) YUV Planar color format: U and V planes are unused */
-    LCEVC_GRAY_10_LE                   = 5002,  /**< 10 bit Little Endian 4:0:0 (Monochrome) YUV Planar color format: U and V planes are unused */
-    LCEVC_GRAY_12_LE                   = 5003,  /**< 12 bit Little Endian 4:0:0 (Monochrome) YUV Planar color format: U and V planes are unused */
-    LCEVC_GRAY_14_LE                   = 5004,  /**< 14 bit Little Endian 4:0:0 (Monochrome) YUV Planar color format: U and V planes are unused */
-    LCEVC_GRAY_16_LE                   = 5005,  /**< 16 bit Little Endian 4:0:0 (Monochrome) YUV Planar color format: U and V planes are unused */
+    LCEVC_RGBA_10_2_LE          = 4001, /**< 10 bit Little Endian interleaved R, G, and B channels, with a 2bit A channel. 32 bits per sample. */
+
+    LCEVC_GRAY_8                = 5001, /**< 8 bit 4:0:0 (Monochrome) YUV Planar color format: U and V planes are unused */
+    LCEVC_GRAY_10_LE            = 5002, /**< 10 bit Little Endian 4:0:0 (Monochrome) YUV Planar color format: U and V planes are unused */
+    LCEVC_GRAY_12_LE            = 5003, /**< 12 bit Little Endian 4:0:0 (Monochrome) YUV Planar color format: U and V planes are unused */
+    LCEVC_GRAY_14_LE            = 5004, /**< 14 bit Little Endian 4:0:0 (Monochrome) YUV Planar color format: U and V planes are unused */
+    LCEVC_GRAY_16_LE            = 5005, /**< 16 bit Little Endian 4:0:0 (Monochrome) YUV Planar color format: U and V planes are unused */
 
    LCEVC_ColorFormat_ForceInt32 = 0x7fffffff,
 } LCEVC_ColorFormat;
@@ -325,6 +380,8 @@ typedef enum LCEVC_Access
     LCEVC_Access_Modify  = 2,  /**< Existing plane data will be read and new data written */
     LCEVC_Access_Write   = 3,  /**< New data will be written - all existing data in plane can be dropped */
 
+    LCEVC_Access_Count,
+
     LCEVC_Access_ForceInt32 = 0x7fffffff,
 } LCEVC_Access;
 
@@ -336,7 +393,7 @@ typedef struct LCEVC_PictureBufferDesc
 {
     uint8_t* data;                          /**< Pointer to start of buffer */
     uint32_t byteSize;                      /**< Total size of buffer in bytes */
-    LCEVC_AccelBufferHandle accelBuffer;    /**< Opaque reference to any accleration support for buffer. If this is set, data & size may be zero */
+    LCEVC_AccelBufferHandle accelBuffer;    /**< Opaque reference to any acceleration support for buffer. If this is set, data & size may be zero */
     LCEVC_Access access;                    /**< The permitted access modes for this buffer. */
 
 } LCEVC_PictureBufferDesc;
@@ -349,7 +406,7 @@ typedef struct LCEVC_PictureBufferDesc
 typedef struct LCEVC_PicturePlaneDesc
 {
     uint8_t* firstSample;   /**< Pointer to first byte of the first active sample of plane within buffer, NOTE: active means no cropping, the active origin is 0,0. */
-    uint32_t rowByteStride; /**< Distance in bytes between the first sample of two consecutive rows, including any trailing pading */
+    uint32_t rowByteStride; /**< Distance in bytes between the first sample of two consecutive rows, including any trailing padding */
 } LCEVC_PicturePlaneDesc;
 
 /*!
@@ -613,12 +670,18 @@ LCEVC_ReturnCode LCEVC_UnlockPicture( LCEVC_DecoderHandle decHandle,
 /*!
  * Create an instance of an LCEVC Decoder.
  *
+ * Logging:
+ * This function will only allocate memory for the internal decoder object, and
+ * save any accelContext handle that is passed in. No logging messages will be produced.
+ * If any of the allocations fail LCEVC_Error will be returned.
+ *
  * @param[in]    accelContext        If not null, a handle for connecting to some decoder
  *                                   acceleration mechanism, e.g. GPU/FPGA/other hardware. This
- *                                   handle will be generated by a seperate API specific to the
- *                                   acclerator component.
+ *                                   handle will be generated by a separate API specific to the
+ *                                   accelerator component.
  * @param[out]   decHandle           Created decoder instance
- * @return                           LCEVC_InvalidParam if decHandle is NULL, otherwise
+ * @return                           LCEVC_InvalidParam if decHandle is NULL,
+ *                                   LCEVC_Error if memory could not be allocated, otherwise
  *                                   LCEVC_Success
  */
 LCEVC_API
@@ -646,8 +709,13 @@ LCEVC_API LCEVC_ReturnCode LCEVC_ConfigureDecoderStringArray( LCEVC_DecoderHandl
 /*!
  * Initialize a configured Decoder.
  *
+ * Logging:
+ * As soon as the 'loglevel' configuration parameter is set, log messages may be produced by any
+ * subsequent configuration calls. The decoder initialisation will then produce log message
+ * accordingly.
+ *
  * @param[in]    decHandle           Decoder handle instance returned by CreateDecoder
- * @return                           Returns LCEVC_Success or an appropiate error status
+ * @return                           Returns LCEVC_Success or an appropriate error status
  *                                   if unable to lock and initialise the given instance
  */
 LCEVC_API
@@ -666,14 +734,14 @@ void LCEVC_DestroyDecoder( LCEVC_DecoderHandle decHandle );
  *
  * Feed a buffer of pre-parsed LCEVC payload data for the Access Unit identified by timestamp.
  *
- * Any encapsulation or ecsaping that is part of the overall stream or transport should beremoved
- * befiore the data is passed to this function.
+ * Any encapsulation or escaping that is part of the overall stream or transport should be removed
+ * before the data is passed to this function.
  *
  * @param[in]    decHandle           LCEVC Decoder instance
  * @param[in]    timestamp           Timestamp for the passed LCEVC data
  * @param[in]    discontinuity       Set true if enhancement is not continuous with the last sent
  *                                   enhancement
- * @param[in]    data                pointer to the LCEVC enhancenemtn data buffer
+ * @param[in]    data                pointer to the LCEVC enhancement data buffer
  * @param[in]    byteSize            size of the LCEVC enhancement data buffer
  * @return                           LCEVC_Again if the decoder cannot consume the enhancement
  *                                   data in its current state, but may be able to later
@@ -771,27 +839,32 @@ LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture( LCEVC_DecoderHandle decHandle,
                                               LCEVC_DecodeInformation* decodeInformation );
 
 /*!
- * Get details of a picture within decoder.
+ * Get dimensions of an enhanced picture from the decoder, and predict the eventual return code.
  *
- * Get details of the decoding process for the Access Unit identified by timestamp. Does not
- * generally affect the state of the Decoder.
+ * For accurate results, call this after sending the Base and Enhancement (if available).
+ *
+ * The behavior of this function exactly mirrors the behavior of LCEVC_ReceiveDecoderPicture. For
+ * example, if no Enhancement is available, and passthrough mode is disabled, then this function
+ * returns LCEVC_Error. Likewise, if a Base was sent, but its timeout has expired, then this
+ * function will return LCEVC_Timeout. The dimensions will match the dimensions that you'll need
+ * when using LCEVC_ReceiveDecoderPicture.
  *
  * @param[in]    decHandle           LCEVC Decoder instance
  * @param[in]    timestamp           Time reference of the picture
- * @param[out]   pictureDesc         Where description of frame that will be decoded is written
- * @param[out]   information         pointer to decoder information structure that the LCEVC
-                                     Decoder will fill
- * @return                           LCEVC_Again if the decoder cannot produce a decoded picture in
- *                                   its current state, but may be able to later (typically this 
- *                                   means sending base and/or enhancement data). Returns
- *                                   LCEVC_Flushed if the timestamp was flushed. Returns
- *                                   LCEVC_Success if this timestamp was found.
+ * @param[out]   width               Pointer to width, as output
+ * @param[out]   height              Pointer to height, as output
+ * @return                           LCEVC_NotFound if this timestamp hasn't been sent, or has
+ *                                   already been returned to the user.
+ *                                   Otherwise, the decoder will use the information that it has
+ *                                   about this timestamp to predict the return code that will be
+ *                                   produced by LCEVC_ReceiveDecoderPicture when the decode is
+ *                                   finished.
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_PeekDecoder( LCEVC_DecoderHandle decHandle,
                                     int64_t timestamp,
-                                    LCEVC_PictureDesc* pictureDesc,
-                                    LCEVC_DecodeInformation* information );
+                                    uint32_t* width,
+                                    uint32_t* height );
 
 /*!
  * Tell the decoder that any picture at or earlier than timestamp is not being presented.

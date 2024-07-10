@@ -1,19 +1,41 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 // This tests api/src/decoder.h
 
 #include "test_decoder.h"
 
 #include "data.h"
+#include "lcevc_config.h"
 #include "utils.h"
 
 #include <decoder.h>
 #include <gtest/gtest.h>
+#include <handle.h>
 #include <interface.h>
-#include <uTimestamps.h>
+#include <LCEVC/lcevc_dec.h>
+#include <timestamps.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <deque>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <utility>
 
 using namespace lcevc_dec::decoder;
 
@@ -54,6 +76,10 @@ public:
     {
         m_decoder.setConfig("loq_unprocessed_cap", kUnprocessedCap);
         m_decoder.setConfig("results_queue_cap", kResultsQueueCap);
+
+        // Most of our tests include intentional "check that failure fails" cases. These are
+        // super super verbose if you don't disable logging.
+        m_decoder.setConfig("log_level", 0);
     }
 
     static void callback(Handle<Decoder> decHandle, int32_t event, Handle<Picture> picHandle,
@@ -62,13 +88,13 @@ public:
     {
         // Currently not testing the LCEVC_Log event, so these two params are unused. Not testing
         // that lcevcDecInfo matches, because we already do that outside the callback.
-        VNUnused(data);
-        VNUnused(dataSize);
-        VNUnused(lcevcDecInfo);
+        VN_UNUSED(data);
+        VN_UNUSED(dataSize);
+        VN_UNUSED(lcevcDecInfo);
 
         auto* ptrToCaller = static_cast<DecoderFixtureUninitialised*>(userData);
         if (!ptrToCaller->m_expectedCallbackResults[event].empty()) {
-            CallbackData expectedResult = ptrToCaller->m_expectedCallbackResults[event].front();
+            const CallbackData expectedResult = ptrToCaller->m_expectedCallbackResults[event].front();
             EXPECT_EQ(expectedResult, CallbackData(decHandle, picHandle))
                 << "Callback data (event " << event << ", count "
                 << ptrToCaller->m_callbackCounts[event] << ") was not as expected. Expected decoder "
@@ -109,11 +135,12 @@ protected:
     {
         m_decoder.setEventCallback(DecoderFixtureUninitialised::callback, this);
         m_decoder.setConfig("events", kAllEvents);
+        m_decoder.setConfig("core_threads", 1);
         m_decoder.initialize();
     }
 };
 
-// DecoderFixtureWithData (and helpers). Possible improvement: parameterise formats & resolutions
+// DecoderFixtureWithData (and helpers). Possible improvement: parameterize formats & resolutions
 
 struct SmartPictureBufferDesc
 {
@@ -176,53 +203,9 @@ protected:
         m_outputs.emplace_back(managedPicture, SmartPictureBufferDesc{});
     }
 
-    // No memory allocated, just generates sized-pointers to existing data.
-    static EnhancementWithData getEnhancement(int64_t pts)
+    virtual bool allocFeedBase(int64_t pts, uint64_t baseId = 0)
     {
-        const size_t idx = pts % (sizeof(kEnhancementSizes) / sizeof(kEnhancementSizes[0]));
-        const auto size = static_cast<uint32_t>(kEnhancementSizes[idx]);
-        return EnhancementWithData(kValidEnhancements[idx].data(), size);
-    }
-
-    // Sends an output, enhancement, and base, and sets expected callback results for "canReceive"
-    // (i.e. can receive decoded output) and "basePictureDone".
-    void sendOneOfEach(int64_t pts, LCEVC_ReturnCode& outputResult,
-                       LCEVC_ReturnCode& enhancedResult, LCEVC_ReturnCode& baseResult)
-    {
-        m_expectedCallbackResults[LCEVC_CanReceive].push(CallbackData(m_pretendDecoderHdl.hdl));
-
-        allocOutputManaged();
-        outputResult = m_decoder.feedOutputPicture(m_outputs.back().first.hdl);
-
-        EnhancementWithData enhancement = getEnhancement(pts);
-        enhancedResult = m_decoder.feedEnhancementData(pts, false, enhancement.first, enhancement.second);
-
-        allocBaseManaged(pts);
-        m_expectedCallbackResults[LCEVC_BasePictureDone].push(
-            CallbackData(m_pretendDecoderHdl.hdl, m_bases.back().handle.handle));
-        baseResult = m_decoder.feedBase(pts, false, m_bases.back().handle, UINT32_MAX, nullptr);
-    }
-
-    std::deque<BaseWithData> m_bases;
-    std::deque<OutputWithData> m_outputs;
-
-    LCEVC_PictureDesc m_inputDesc = {};
-    LCEVC_PictureDesc m_outputDesc = {};
-};
-
-// DecoderFixturePreFilled
-class DecoderFixturePreFilled : public DecoderFixtureWithData
-{
-    using BaseClass = DecoderFixtureWithData;
-
-public:
-
-protected:
-    bool allocFeedBase(int64_t pts)
-    {
-        // For user data, we simply use a counter (but, an atomic, so we can be absolutely sure
-        // that it's unique among the base pictures in this fixture).
-        allocBaseManaged(m_baseCount++);
+        allocBaseManaged(baseId);
 
         if (m_decoder.feedBase(pts, false, m_bases.back().handle, UINT32_MAX, m_bases.back().id) ==
             LCEVC_Success) {
@@ -248,9 +231,96 @@ protected:
 
     bool allocFeedEnhancement(int64_t pts)
     {
-        EnhancementWithData enhancement = getEnhancement(pts);
-        return (m_decoder.feedEnhancementData(pts, false, enhancement.first, enhancement.second) ==
-                LCEVC_Success);
+        const auto [enhancementData, enhancementSize] = getEnhancement(pts);
+        return (m_decoder.feedEnhancementData(pts, false, enhancementData, enhancementSize) == LCEVC_Success);
+    }
+
+    // No memory allocated, just generates sized-pointers to existing data.
+    static EnhancementWithData getEnhancement(int64_t pts)
+    {
+        const size_t idx = pts % (sizeof(kEnhancementSizes) / sizeof(kEnhancementSizes[0]));
+        const auto size = static_cast<uint32_t>(kEnhancementSizes[idx]);
+        return {kValidEnhancements[idx].data(), size};
+    }
+
+    // Sends an output, enhancement, and base, and sets expected callback results for "canReceive"
+    // (i.e. can receive decoded output) and "basePictureDone".
+    void sendOneOfEach(int64_t pts, LCEVC_ReturnCode& outputResult, LCEVC_ReturnCode& enhancedResult,
+                       LCEVC_ReturnCode& baseResult, bool withEnhancement = true)
+    {
+        m_expectedCallbackResults[LCEVC_CanReceive].emplace(m_pretendDecoderHdl.hdl);
+
+        allocOutputManaged();
+        outputResult = m_decoder.feedOutputPicture(m_outputs.back().first.hdl);
+
+        if (withEnhancement) {
+            const auto [enhancementData, enhancementSize] = getEnhancement(pts);
+            enhancedResult = m_decoder.feedEnhancementData(pts, false, enhancementData, enhancementSize);
+        }
+
+        allocBaseManaged(pts);
+        m_expectedCallbackResults[LCEVC_BasePictureDone].emplace(m_pretendDecoderHdl.hdl,
+                                                                 m_bases.back().handle.handle);
+        baseResult = m_decoder.feedBase(pts, false, m_bases.back().handle, UINT32_MAX, nullptr);
+    }
+
+    void sendOneOfEach(int64_t pts, bool withEnhancement = true)
+    {
+        LCEVC_ReturnCode outputResult = LCEVC_Error;
+        LCEVC_ReturnCode enhancedResult = LCEVC_Error;
+        LCEVC_ReturnCode baseResult = LCEVC_Error;
+        sendOneOfEach(pts, outputResult, enhancedResult, baseResult, withEnhancement);
+        ASSERT_TRUE(outputResult == LCEVC_Success &&
+                    ((enhancedResult == LCEVC_Success) || !withEnhancement) && baseResult == LCEVC_Success);
+    }
+
+    void receiveOneOfEach(LCEVC_ReturnCode expectedCode, bool expectEnhanced)
+    {
+        LCEVC_PictureHandle outputHandle = {};
+        LCEVC_DecodeInformation decodeInfo = {};
+        EXPECT_EQ(m_decoder.produceOutputPicture(outputHandle, decodeInfo), expectedCode);
+        EXPECT_EQ(decodeInfo.enhanced, expectEnhanced);
+        const Picture* output = m_decoder.getPicture(outputHandle.hdl);
+        const Picture* base = m_decoder.getPicture(m_bases.front().handle);
+        m_bases.pop_front();
+
+        // Double-check the "enhanced" flag using image dimensions (our enhancement data is 2D)
+        LCEVC_PictureDesc outputDesc;
+        output->getDesc(outputDesc);
+        LCEVC_PictureDesc baseDesc;
+        base->getDesc(baseDesc);
+        if (expectEnhanced) {
+            EXPECT_EQ(outputDesc.width, baseDesc.width * 2);
+            EXPECT_EQ(outputDesc.height, baseDesc.height * 2);
+        } else if (expectedCode == LCEVC_Success) {
+            // Note: base should match output IF the decode was a "successful passthrough". For a
+            // non-successful passthrough (i.e. passthrough is not allowed), the output desc can be
+            // anything.
+            EXPECT_EQ(memcmp(&outputDesc, &baseDesc, sizeof(outputDesc)), 0);
+        }
+
+        ASSERT_NE(output, nullptr);
+        ASSERT_NE(base, nullptr);
+    }
+
+    std::deque<BaseWithData> m_bases;
+    std::deque<OutputWithData> m_outputs;
+
+    LCEVC_PictureDesc m_inputDesc = {};
+    LCEVC_PictureDesc m_outputDesc = {};
+};
+
+// DecoderFixturePreFilled
+class DecoderFixturePreFilled : public DecoderFixtureWithData
+{
+    using BaseClass = DecoderFixtureWithData;
+
+public:
+
+protected:
+    bool allocFeedBase(int64_t pts, uint64_t baseId = 0) override
+    {
+        return BaseClass::allocFeedBase(pts, m_baseCount++);
     }
 
     void SetUp() override
@@ -288,7 +358,7 @@ protected:
 TEST(decoderInitRelease, initialiseAndRelease)
 {
     LCEVC_DecoderHandle throwawayDecoderHdl{kInvalidHandle};
-    LCEVC_AccelContextHandle throwawayAccelContextHdl{kInvalidHandle};
+    const LCEVC_AccelContextHandle throwawayAccelContextHdl{kInvalidHandle};
     Decoder dec(throwawayAccelContextHdl, throwawayDecoderHdl);
     EXPECT_FALSE(dec.isInitialized());
     EXPECT_TRUE(dec.initialize());
@@ -300,7 +370,7 @@ TEST(decoderInitRelease, initialiseAndRelease)
 TEST(decoderInitRelease, initAfterValidConfigs)
 {
     LCEVC_DecoderHandle throwawayDecoderHdl{kInvalidHandle};
-    LCEVC_AccelContextHandle throwawayAccelContextHdl{kInvalidHandle};
+    const LCEVC_AccelContextHandle throwawayAccelContextHdl{kInvalidHandle};
     Decoder dec(throwawayAccelContextHdl, throwawayDecoderHdl);
 
     EXPECT_TRUE(dec.setConfig("loq_unprocessed_cap", kUnprocessedCap));
@@ -311,7 +381,7 @@ TEST(decoderInitRelease, initAfterValidConfigs)
 TEST(decoderInitRelease, initAfterInvalidConfigs)
 {
     LCEVC_DecoderHandle throwawayDecoderHdl{kInvalidHandle};
-    LCEVC_AccelContextHandle throwawayAccelContextHdl{kInvalidHandle};
+    const LCEVC_AccelContextHandle throwawayAccelContextHdl{kInvalidHandle};
     Decoder dec(throwawayAccelContextHdl, throwawayDecoderHdl);
 
     // Configs that exist will pass configuration, but if the values are unusable, then init fails.
@@ -323,7 +393,7 @@ TEST(decoderInitRelease, initAfterInvalidConfigs)
 TEST(decoderInitRelease, initAfterNonexistentConfigs)
 {
     LCEVC_DecoderHandle throwawayDecoderHdl{kInvalidHandle};
-    LCEVC_AccelContextHandle throwawayAccelContextHdl{kInvalidHandle};
+    const LCEVC_AccelContextHandle throwawayAccelContextHdl{kInvalidHandle};
     Decoder dec(throwawayAccelContextHdl, throwawayDecoderHdl);
 
     // Configs that don't exist will fail to set, but will not prevent init.
@@ -337,19 +407,19 @@ TEST(decoderInitRelease, initAfterNonexistentConfigs)
 
 TEST_F(DecoderFixtureUninitialised, initEvents)
 {
-    for (std::atomic<uint32_t>& count : m_callbackCounts) {
+    for (const std::atomic<uint32_t>& count : m_callbackCounts) {
         EXPECT_EQ(count.load(), 0);
     }
     m_decoder.setEventCallback(DecoderFixtureUninitialised::callback, this);
-    for (std::atomic<uint32_t>& count : m_callbackCounts) {
+    for (const std::atomic<uint32_t>& count : m_callbackCounts) {
         EXPECT_EQ(count.load(), 0);
     }
     EXPECT_TRUE(m_decoder.setConfig("events", kAllEvents));
 
     // Set expected callback results:
-    m_expectedCallbackResults[LCEVC_CanSendBase].push(CallbackData(m_pretendDecoderHdl.hdl));
-    m_expectedCallbackResults[LCEVC_CanSendEnhancement].push(CallbackData(m_pretendDecoderHdl.hdl));
-    m_expectedCallbackResults[LCEVC_CanSendPicture].push(CallbackData(m_pretendDecoderHdl.hdl));
+    m_expectedCallbackResults[LCEVC_CanSendBase].emplace(m_pretendDecoderHdl.hdl);
+    m_expectedCallbackResults[LCEVC_CanSendEnhancement].emplace(m_pretendDecoderHdl.hdl);
+    m_expectedCallbackResults[LCEVC_CanSendPicture].emplace(m_pretendDecoderHdl.hdl);
 
     m_decoder.initialize();
 
@@ -412,7 +482,7 @@ TEST_F(DecoderFixtureDeathTest, picturePoolInterfaceExternal)
     LCEVC_PictureHandle externalPicture{kInvalidHandle};
     VN_EXPECT_DEATH(m_decoder.getPicture(externalPicture.hdl), "Assertion .* failed", nullptr);
 
-    std::unique_ptr<uint8_t[]> overallBuffer = std::make_unique<uint8_t[]>(1920 * 1080 * 3 / 2);
+    const std::unique_ptr<uint8_t[]> overallBuffer = std::make_unique<uint8_t[]>(1920 * 1080 * 3 / 2);
     const LCEVC_PictureBufferDesc bufferDesc = {overallBuffer.get(),
                                                 1920 * 1080 * 3 / 2,
                                                 {kInvalidHandle},
@@ -594,7 +664,7 @@ TEST_F(DecoderFixtureWithData, sendAllUntilAllFull)
         }
     }
 
-    // Make sure that sending the outputs DIDN'T triger any events, i.e. they're STILL 1.
+    // Make sure that sending the outputs DIDN'T trigger any events, i.e. they're STILL 1.
     EXPECT_EQ(oldCounts[LCEVC_CanSendEnhancement], 1);
     EXPECT_EQ(oldCounts[LCEVC_CanSendBase], 1);
     EXPECT_EQ(oldCounts[LCEVC_CanSendPicture], 1);
@@ -609,14 +679,14 @@ TEST_F(DecoderFixtureWithData, sendAllUntilAllFull)
     for (; lastSendSucceeded; pts++) {
         // Do this right before sending, to make sure we've finished waiting for all callbacks from
         // the last loop.
-        for (LCEVC_Event sendType : sendTypes) {
+        for (const LCEVC_Event sendType : sendTypes) {
             oldCounts[sendType] = m_callbackCounts[sendType];
         }
 
         sendOneOfEach(pts, newSendResults[LCEVC_CanSendPicture],
                       newSendResults[LCEVC_CanSendEnhancement], newSendResults[LCEVC_CanSendBase]);
 
-        for (LCEVC_Event sendType : sendTypes) {
+        for (const LCEVC_Event sendType : sendTypes) {
             switch (newSendResults[sendType]) {
                 case LCEVC_Again: break;
                 case LCEVC_Success:
@@ -657,9 +727,8 @@ TEST_F(DecoderFixtureWithData, sendAllUntilAllFull)
 
     // This is overkill but, it's conceivable that, though we've tested the sends individually,
     // they don't work all at the same time (we want them ALL to return LCEVC_Again now)
-    EnhancementWithData enhancement = getEnhancement(pts);
-    EXPECT_EQ(m_decoder.feedEnhancementData(pts++, false, enhancement.first, enhancement.second),
-              LCEVC_Again);
+    const auto [enhancementData, enhancementSize] = getEnhancement(pts);
+    EXPECT_EQ(m_decoder.feedEnhancementData(pts++, false, enhancementData, enhancementSize), LCEVC_Again);
     allocOutputManaged();
     EXPECT_EQ(m_decoder.feedOutputPicture(m_outputs.back().first.hdl), LCEVC_Again);
     allocBaseManaged(pts);
@@ -672,7 +741,7 @@ TEST_F(DecoderFixtureWithData, sendAllUntilAllFull)
 
 TEST_F(DecoderFixturePreFilled, flushClearsBases)
 {
-    int64_t pts = 100;
+    const int64_t pts = 100;
     allocBaseManaged(pts);
     EXPECT_EQ(m_decoder.feedBase(pts, false, m_bases.back().handle, UINT32_MAX, m_bases.back().id),
               LCEVC_Again);
@@ -683,12 +752,11 @@ TEST_F(DecoderFixturePreFilled, flushClearsBases)
 
 TEST_F(DecoderFixturePreFilled, flushClearsEnhancements)
 {
-    int64_t pts = 100;
-    EnhancementWithData enhancement = getEnhancement(pts);
-    EXPECT_EQ(m_decoder.feedEnhancementData(pts, false, enhancement.first, enhancement.second), LCEVC_Again);
+    const int64_t pts = 100;
+    const auto [enhancementData, enhancementSize] = getEnhancement(pts);
+    EXPECT_EQ(m_decoder.feedEnhancementData(pts, false, enhancementData, enhancementSize), LCEVC_Again);
     m_decoder.flush();
-    EXPECT_EQ(m_decoder.feedEnhancementData(pts, false, enhancement.first, enhancement.second),
-              LCEVC_Success);
+    EXPECT_EQ(m_decoder.feedEnhancementData(pts, false, enhancementData, enhancementSize), LCEVC_Success);
 }
 
 TEST_F(DecoderFixturePreFilled, flushClearsOutputPictures)
@@ -710,8 +778,37 @@ TEST_F(DecoderFixturePreFilled, flushCausesReceiveToReturnFlushed)
 
 // Skip
 
+TEST_F(DecoderFixtureWithData, skipOneBase)
+{
+    EXPECT_TRUE(allocFeedBase(0));
+
+    // You can tell that a base was skipped, because you can "receive" it.
+    LCEVC_PictureHandle hdl;
+    EXPECT_EQ(m_decoder.produceFinishedBase(hdl), LCEVC_Again);
+    EXPECT_EQ(m_decoder.skip(0), LCEVC_Success);
+    EXPECT_EQ(m_decoder.produceFinishedBase(hdl), LCEVC_Success);
+    EXPECT_EQ(hdl.hdl, m_bases.front().handle.handle);
+}
+
+TEST_F(DecoderFixtureWithData, skipOneEnhancement)
+{
+    const auto [enhancementData, enhancementSize] = getEnhancement(static_cast<int64_t>(0));
+    EXPECT_EQ(m_decoder.feedEnhancementData(0, false, enhancementData, enhancementSize), LCEVC_Success);
+
+    // You can't actually "receive" any skipped-result from a skipped enhancement, since there's
+    // no output picture that it corresponds to. However, we DO know that you can't send two
+    // enhancements with the same timestamp. So, use that as a proxy to determine if the
+    // enhancement was skipped.
+
+    EXPECT_EQ(m_decoder.feedEnhancementData(0, false, enhancementData, enhancementSize), LCEVC_Error);
+    EXPECT_EQ(m_decoder.skip(0), LCEVC_Success);
+    EXPECT_EQ(m_decoder.feedEnhancementData(0, false, enhancementData, enhancementSize), LCEVC_Success);
+}
+
 TEST_F(DecoderFixturePreFilled, skipClearsSomeBases)
 {
+    // Like "skipOneBase", but for macro-level changes to an already-filled decoder
+
     // full before
     const Picture* backPic = m_decoder.getPicture(m_bases.back().handle);
     const uint64_t nextTH = backPic->getTimehandle() + 1;
@@ -729,19 +826,19 @@ TEST_F(DecoderFixturePreFilled, skipClearsSomeBases)
 
 TEST_F(DecoderFixturePreFilled, skipClearsSomeEnhancements)
 {
+    // Like "skipOneEnhancement", but for macro-level changes to an already-filled decoder
+
     // full before
     const Picture* backPic = m_decoder.getPicture(m_bases.back().handle);
     const uint64_t nextTH = backPic->getTimehandle() + 1;
-    EnhancementWithData enhancement = getEnhancement(static_cast<int64_t>(nextTH));
-    EXPECT_EQ(m_decoder.feedEnhancementData(nextTH, false, enhancement.first, enhancement.second),
-              LCEVC_Again);
+    const auto [enhancementData, enhancementSize] = getEnhancement(static_cast<int64_t>(nextTH));
+    EXPECT_EQ(m_decoder.feedEnhancementData(nextTH, false, enhancementData, enhancementSize), LCEVC_Again);
 
     // non-full after
     const Picture* frontPic = m_decoder.getPicture(m_bases.front().handle);
     const uint64_t middleTH = (frontPic->getTimehandle() + backPic->getTimehandle() / 2);
     m_decoder.skip(static_cast<int64_t>(middleTH));
-    EXPECT_EQ(m_decoder.feedEnhancementData(nextTH, false, enhancement.first, enhancement.second),
-              LCEVC_Success);
+    EXPECT_EQ(m_decoder.feedEnhancementData(nextTH, false, enhancementData, enhancementSize), LCEVC_Success);
 }
 
 TEST_F(DecoderFixturePreFilled, skipDecodesAfterSkippedFrames)
@@ -752,7 +849,7 @@ TEST_F(DecoderFixturePreFilled, skipDecodesAfterSkippedFrames)
     // Skip the middle.
     const Picture* frontPic = m_decoder.getPicture(m_bases.front().handle);
     const Picture* backPic = m_decoder.getPicture(m_bases.back().handle);
-    const int64_t skippedTimestamp =
+    const auto skippedTimestamp =
         static_cast<int64_t>(frontPic->getTimehandle() + backPic->getTimehandle() / 2);
     m_decoder.skip(skippedTimestamp);
 
@@ -761,27 +858,20 @@ TEST_F(DecoderFixturePreFilled, skipDecodesAfterSkippedFrames)
     LCEVC_DecodeInformation infoOut;
     const Picture* latestDecodedPic = nullptr;
     const Picture* nextExpectedBase = nullptr;
-    while (true) {
-        m_decoder.produceOutputPicture(picHandleOut, infoOut);
-
+    m_decoder.produceOutputPicture(picHandleOut, infoOut);
+    while (infoOut.timestamp <= skippedTimestamp) {
         EXPECT_TRUE(infoOut.skipped);
         EXPECT_EQ(picHandleOut.hdl, m_outputs.front().first.hdl);
         m_outputs.pop_front();
 
-        // This picture is either the next one that we fed in, or it's the skipped one (in which
-        // case we may have skipped way ahead).
-        if (infoOut.timestamp >= skippedTimestamp) {
-            break;
-        }
         nextExpectedBase = m_decoder.getPicture(m_bases.front().handle);
-        EXPECT_EQ(infoOut.timestamp,
-                  lcevc_dec::api_utility::timehandleGetTimestamp(nextExpectedBase->getTimehandle()));
+        EXPECT_EQ(infoOut.timestamp, timehandleGetTimestamp(nextExpectedBase->getTimehandle()));
 
         m_bases.pop_front();
+        m_decoder.produceOutputPicture(picHandleOut, infoOut);
     }
 
     // This should now be the first NON skipped frame.
-    m_decoder.produceOutputPicture(picHandleOut, infoOut);
     EXPECT_FALSE(infoOut.skipped);
 
     // Several bases will have never even reached the decode step, so skip ahead to the first base
@@ -813,8 +903,8 @@ TEST_F(DecoderFixturePreFilled, receiveOneOutputFromFullDecoder)
 
     // Check decode info
     {
-        m_expectedCallbackResults[LCEVC_OutputPictureDone].push(
-            CallbackData(m_pretendDecoderHdl.hdl, m_outputs.front().first.hdl));
+        m_expectedCallbackResults[LCEVC_OutputPictureDone].emplace(m_pretendDecoderHdl.hdl,
+                                                                   m_outputs.front().first.hdl);
 
         LCEVC_DecodeInformation infoOut;
         LCEVC_PictureHandle outputHdl;
@@ -879,8 +969,8 @@ TEST_F(DecoderFixturePreFilled, receiveAllOutputFromFullDecoder)
     LCEVC_PictureHandle outputHdlOut = {};
     LCEVC_DecodeInformation infoOut;
     uint32_t numOutputsProduced = 0;
-    m_expectedCallbackResults[LCEVC_OutputPictureDone].push(
-        CallbackData(m_pretendDecoderHdl.hdl, m_outputs.front().first.hdl));
+    m_expectedCallbackResults[LCEVC_OutputPictureDone].emplace(m_pretendDecoderHdl.hdl,
+                                                               m_outputs.front().first.hdl);
 
     for (uint64_t pts = firstBase->getTimehandle();
          m_decoder.produceOutputPicture(outputHdlOut, infoOut) == LCEVC_Success; pts++) {
@@ -899,10 +989,10 @@ TEST_F(DecoderFixturePreFilled, receiveAllOutputFromFullDecoder)
         // emptied when we called pop_front).
         EXPECT_TRUE(atomicWaitUntil(didTimeout, equal, m_callbackCounts[LCEVC_OutputPictureDone], numOutputsProduced))
             << "Count was " << m_callbackCounts[LCEVC_OutputPictureDone].load()
-            << " but we expected " << numOutputsProduced << std::endl;
+            << " but we expected " << numOutputsProduced << "\n";
         ASSERT_FALSE(didTimeout);
-        m_expectedCallbackResults[LCEVC_OutputPictureDone].push(CallbackData(
-            m_pretendDecoderHdl.hdl, (m_outputs.empty() ? kInvalidHandle : m_outputs.front().first.hdl)));
+        m_expectedCallbackResults[LCEVC_OutputPictureDone].emplace(
+            m_pretendDecoderHdl.hdl, (m_outputs.empty() ? kInvalidHandle : m_outputs.front().first.hdl));
     }
 
     // Confirm that, once you empty out the decoded outputs, you get "LCEVC_Again" (as in "try
@@ -947,3 +1037,109 @@ TEST_F(DecoderFixturePreFilled, receiveUntilAllHandlesHaveBeenReused)
         EXPECT_EQ(m_decoder.feedOutputPicture(m_outputs.back().first.hdl), LCEVC_Success);
     }
 }
+
+// - Peek ---------------------------------------
+
+// A decoder, parameterized on passthrough mdode
+class DecoderFixturePassthrough
+    : public DecoderFixtureWithData
+    , public testing::WithParamInterface<int32_t>
+{
+    using BaseClass = DecoderFixtureWithData;
+
+public:
+    void SetUp() override
+    {
+        m_decoder.setConfig("passthrough_mode", GetParam());
+        BaseClass::SetUp();
+    }
+
+protected:
+    static bool forcePassthrough() { return GetParam() == 1; }
+    static bool allowPassthrough() { return GetParam() != -1; }
+};
+
+TEST_P(DecoderFixturePassthrough, peek)
+{
+    // Standard case: send a base and an enhancement, peek, and expect double-width and double-
+    // height, plus "success" return code.
+    allocFeedBase(0);
+    allocFeedEnhancement(0);
+    uint32_t width = 0;
+    uint32_t height = 0;
+    const uint32_t outputMultiplier = (forcePassthrough() ? 1 : 2);
+    const LCEVC_ReturnCode outputResult = LCEVC_Success;
+    EXPECT_EQ(m_decoder.peek(0, width, height), outputResult);
+    EXPECT_EQ(width, m_inputDesc.width * outputMultiplier);
+    EXPECT_EQ(height, m_inputDesc.height * outputMultiplier);
+}
+
+TEST_P(DecoderFixturePassthrough, peekBaseNoEnhancement)
+{
+    // Passthrough-allowed case: with no enhancement, you should get the original width and height
+    allocFeedBase(0);
+    uint32_t width = 0;
+    uint32_t height = 0;
+    const uint32_t outputMultiplier = (allowPassthrough() ? 1 : 0);
+    const LCEVC_ReturnCode outputResult = (allowPassthrough() ? LCEVC_Success : LCEVC_NotFound);
+    EXPECT_EQ(m_decoder.peek(0, width, height), outputResult);
+    EXPECT_EQ(width, m_inputDesc.width * outputMultiplier);
+    EXPECT_EQ(height, m_inputDesc.height * outputMultiplier);
+}
+
+TEST_P(DecoderFixturePassthrough, peekEnhancementNoBase)
+{
+    // Passthrough-allowed case: with no enhancement, you should get the original width and height
+    allocFeedEnhancement(0);
+    uint32_t width = 0;
+    uint32_t height = 0;
+    const uint32_t outputMultiplier = (forcePassthrough() ? 0 : 2);
+    const LCEVC_ReturnCode outputResult = (forcePassthrough() ? LCEVC_NotFound : LCEVC_Success);
+    EXPECT_EQ(m_decoder.peek(0, width, height), outputResult);
+    EXPECT_EQ(width, m_inputDesc.width * outputMultiplier);
+    EXPECT_EQ(height, m_inputDesc.height * outputMultiplier);
+}
+
+TEST_P(DecoderFixturePassthrough, peekInvalidCases)
+{
+    uint32_t width = 0;
+    uint32_t height = 0;
+
+    // Various invalid cases.
+
+    // Invalid case 1: peeking a timestamp with no inputs whatsoever.
+    EXPECT_EQ(m_decoder.peek(0, width, height), LCEVC_NotFound);
+
+    // Case 2: Peeking the wrong timestamp
+    allocFeedBase(100);
+    EXPECT_EQ(m_decoder.peek(101, width, height), LCEVC_NotFound);
+
+    // Case 3: Peeking into an otherwise valid input, but the base has timed out (the timeout is 0,
+    // so it should timeout instantly). Also, if passthrough is allowed, then we expect timeouts to
+    // turn into passthroughs, so check that the dimensions match up too.
+    width = 0;
+    height = 0;
+    const uint32_t outputMultiplier = (allowPassthrough() ? 1 : 0);
+    allocBaseManaged(0);
+    allocFeedEnhancement(0);
+    ASSERT_EQ(m_decoder.feedBase(0, false, m_bases.back().handle, 0, m_bases.back().id), LCEVC_Success);
+    EXPECT_EQ(m_decoder.peek(0, width, height), LCEVC_Timeout);
+    EXPECT_EQ(width, m_inputDesc.width * outputMultiplier);
+    EXPECT_EQ(height, m_inputDesc.height * outputMultiplier);
+}
+
+// - Passthrough --------------------------------
+
+TEST_P(DecoderFixturePassthrough, passthrough)
+{
+    // Send a full set, and expect success, plus enhanced iff not forcing passthrough
+    sendOneOfEach(0);
+    receiveOneOfEach(LCEVC_Success, !forcePassthrough());
+
+    // Send a base and output but no enhancement: success if passthrough is allowed, but never
+    // enhanced.
+    sendOneOfEach(1, false);
+    receiveOneOfEach(allowPassthrough() ? LCEVC_Success : LCEVC_Error, false);
+}
+
+INSTANTIATE_TEST_SUITE_P(Peek, DecoderFixturePassthrough, testing::Values(-1, 0, 1));

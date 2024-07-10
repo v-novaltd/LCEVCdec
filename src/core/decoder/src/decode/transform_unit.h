@@ -1,3 +1,14 @@
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_TRANSFORM_UNIT_H_
 #define VN_DEC_CORE_TRANSFORM_UNIT_H_
 
@@ -67,44 +78,42 @@
 
 /*------------------------------------------------------------------------------*/
 
-/* TUState stores transform unit information. */
+typedef struct Chunk Chunk_t;
+typedef struct CmdBuffer CmdBuffer_t;
+
+/*------------------------------------------------------------------------------*/
+
+/* TUState stores transform unit information. A transform unit is either 4 (DD) or 16 (DDS)
+ * coefficients, which are then transformed into residuals. */
 typedef struct TUState
 {
-    uint32_t tuTotal;
-    uint32_t tuSize;
-    uint32_t numAcross;
+    uint32_t tuTotal;   /**< The total number of TUs in the whole surface*/
+    uint32_t numAcross; /**< The width of the surface, in TUs. */
     uint32_t xOffset;
     uint32_t yOffset;
+    uint8_t tuWidthShift; /**< Width of the TU, log2. E.g. DDS is 4x4, so width is 4, shift is 2 */
 
-    /* clang-format off */
-	struct BlockArgs
-	{
-		uint32_t tuPerBlockDims;          /**< Number of TUs across and down in whole blocks. */
-		uint32_t tuPerBlock;              /**< Number of TUs in whole block. */
-		uint32_t tuPerBlockBottomEdge;    /**< Number of TUs in the bottom edge block. */
-		uint32_t tuPerBlockRowRightEdge;  /**< Number of TUs in a right edge blocks row. */
-		uint32_t tuPerBlockColBottomEdge; /**< Number of TUs in a bottom edge blocks column. */
-		uint32_t tuPerRow;                /**< Number of TUs in a whole row (including row edge block)*/
-		uint32_t wholeBlocksPerRow;       /**< Number of full blocks in a row */
-		uint32_t wholeBlocksPerCol;       /**< Number of full blocks in a column */
-		uint32_t blocksPerRow;            /**< Number of blocks in a row */
-		uint32_t blocksPerCol;            /**< Number of blocks in a column */
-	} block;
-    /* clang-format on */
+    struct BlockArgs
+    {
+        uint32_t tuPerBlockBottomEdge;    /**< Number of TUs in the bottom edge block. */
+        uint32_t tuPerBlockRowRightEdge;  /**< Number of TUs in a right edge blocks row. */
+        uint32_t tuPerBlockColBottomEdge; /**< Number of TUs in a bottom edge blocks column. */
+        uint32_t tuPerRow; /**< Number of TUs in a whole row of blocks (including row edge block). */
+        uint32_t wholeBlocksPerRow; /**< Number of full blocks in a row */
+        uint32_t wholeBlocksPerCol; /**< Number of full blocks in a column */
+        uint32_t blocksPerRow;      /**< Number of blocks in a row */
+        uint32_t blocksPerCol;      /**< Number of blocks in a column */
+        uint16_t tuPerBlock;        /**< Number of TUs in whole block. 64 for DDS, 256 for DD */
+        uint8_t tuPerBlockDims; /**< Number of TUs across or down in whole blocks. 8 for DDS, 16 for DD*/
+        uint8_t tuPerBlockDimsShift; /**< log2(tuPerBlockDims). shift by this instead of multiplying/dividing by tuPerBlockDims.*/
+        uint8_t tuPerBlockShift; /**< log2(tuPerBlock). shift by this instead of multiplying/dividing by tuPerBlock.*/
+    } block;
+    struct BlockAlignedArgs
+    {
+        uint32_t tuPerRow;       /**< Number of TUs in a whole aligned row */
+        uint32_t maxWholeBlockY; /**< Y position of the lowest whole block */
+    } blockAligned;
 } TUState_t;
-
-typedef struct Chunk Chunk_t;
-
-/* @todo(bob): This probably needs to be elsewhere. */
-typedef struct TileState
-{
-    uint32_t x;
-    uint32_t y;
-    uint32_t width;
-    uint32_t height;
-    Chunk_t* chunks;
-    Chunk_t* temporalChunk;
-} TileState_t;
 
 /*! \brief Setup a TUState based upon a region and tuSize.
  *
@@ -113,7 +122,8 @@ typedef struct TileState
  * \param tuSize  The size of the transform
  *
  * \return 0 on success, otherwise -1. */
-int32_t tuStateInitialise(TUState_t* state, const TileState_t* tile, uint32_t tuSize);
+int32_t tuStateInitialise(TUState_t* state, uint32_t width, uint32_t height, uint32_t xOffset,
+                          uint32_t yOffset, uint8_t tuSize);
 
 /*! \brief Given a transform index calculate the absolute destination surface coordinates
  *         using the surface raster access pattern.
@@ -126,6 +136,27 @@ int32_t tuStateInitialise(TUState_t* state, const TileState_t* tile, uint32_t tu
  * \return 0 upon success, 1 upon completion, -1 upon tuIndex overflow. */
 int32_t tuCoordsSurfaceRaster(const TUState_t* state, uint32_t tuIndex, uint32_t* x, uint32_t* y);
 
+/*! \brief Given an x, y coordinate within a surface raster ordered plane, returns the TU index
+ *
+ * \param state    The state to use
+ * \param x        The x coordinate
+ * \param y        The y coordinate
+ *
+ * \return TU index of the coordinate */
+uint32_t tuCoordsSurfaceIndex(const TUState_t* state, uint32_t x, uint32_t y);
+
+/*! \brief Given a transform index calculate the absolute destination surface coordinates
+ *         using the surface raster access pattern where the dimensions of the surface are rounded
+ *         up to the nearest 32px.
+ *
+ * \param state    The state to use
+ * \param tuIndex  The transform unit index
+ * \param x        Location to write the absolute x coordinate
+ * \param y        Location to write the absolute y coordinate
+ *
+ * \return 0 upon success, 1 upon completion, -1 upon tuIndex overflow. */
+int32_t tuCoordsBlockAlignedRaster(const TUState_t* state, uint32_t tuIndex, uint32_t* x, uint32_t* y);
+
 /*! \brief Given a transform index calculate the absolute destination surface coordinates
  *         using the surface raster access pattern.
  *
@@ -136,6 +167,16 @@ int32_t tuCoordsSurfaceRaster(const TUState_t* state, uint32_t tuIndex, uint32_t
  *
  * \return 0 upon success, 1 upon completion, -1 upon tuIndex overflow. */
 int32_t tuCoordsBlockRaster(const TUState_t* state, uint32_t tuIndex, uint32_t* x, uint32_t* y);
+
+/*! \brief Given an x, y coordinate within a block ordered plane, returns the TU index where the
+ *         dimensions of the surface are rounded up to the nearest 32x32 pixels (32 is BSTemporal)
+ *
+ * \param state    The state to use
+ * \param x        The x coordinate
+ * \param y        The y coordinate
+ *
+ * \return TU index of the coordinate */
+uint32_t tuCoordsBlockAlignedIndex(const TUState_t* state, uint32_t x, uint32_t y);
 
 /*! \brief Obtains the block index for the given pixel coordinate
  *
@@ -157,6 +198,14 @@ int32_t tuCoordsBlockIndex(const TUState_t* state, uint32_t x, uint32_t y, uint3
  * \param tuCount      Location to write the number of transform units within the block. */
 void tuCoordsBlockDetails(const TUState_t* state, uint32_t x, uint32_t y, uint32_t* blockWidth,
                           uint32_t* blockHeight, uint32_t* tuCount);
+
+/*! \brief Determines number of TUs in the block at the given pixel coordinate
+ *
+ * \param state        The state to use
+ * \param x            The x coordinate
+ * \param y            The y coordinate
+ * \param tuCount      Location to write the number of transform units within the block. */
+void tuBlockTuCount(const TUState_t* state, uint32_t x, uint32_t y, uint32_t* tuCount);
 
 /*! \brief Function pointer type for the TU coords calculation functions. */
 typedef int32_t (*TUCoordFunction_t)(const TUState_t*, uint32_t, uint32_t*, uint32_t*);

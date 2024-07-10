@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "common/simd.h"
 
 /* @todo(bob): Drive this not on compile time enable features flags, but target architecture (new repo will have this). */
@@ -42,7 +52,8 @@ static CPUAccelerationFeatures_t detectSSEFeature(const int32_t cpuInfo[4])
 
 static CPUAccelerationFeatures_t detectAVX2Feature(const int32_t cpuInfo[4])
 {
-#if VN_COMPILER(GCC) && (__GNUC___ >= 9) || VN_COMPILER(CLANG) && (__clang_major__ >= 9) || \
+    /* Note: clang has sse in version 8, but not xsave functions, so need >=9 .*/
+#if VN_COMPILER(GCC) && (__GNUC__ >= 9) || VN_COMPILER(CLANG) && (__clang_major__ >= 9) || \
     VN_COMPILER(MSVC)
     static const int32_t kAVX2Flag = 1 << 5;
     static const int32_t kXSaveFlag = 1 << 27;
@@ -67,7 +78,7 @@ static CPUAccelerationFeatures_t detectAVX2Feature(const int32_t cpuInfo[4])
 
     return ((info[1] & kAVX2Flag) == kAVX2Flag) ? CAFAVX2 : CAFNone;
 #else
-    // vndk goes not define _xgetbv
+    /* vndk does not define _xgetbv */
     return CAFNone;
 #endif
 }

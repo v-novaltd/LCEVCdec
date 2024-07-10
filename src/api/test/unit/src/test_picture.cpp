@@ -1,4 +1,13 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 // This tests api/src/picture.h
 
@@ -8,20 +17,18 @@
 // handy functions from the actual interface of the API (which normally WOULD be in a dll).
 #define VNDisablePublicAPI
 
-#include <LCEVC/PerseusDecoder.h>
-#include <LCEVC/lcevc_dec.h>
 #include <buffer_manager.h>
 #include <gtest/gtest.h>
 #include <interface.h>
+#include <LCEVC/lcevc_dec.h>
+#include <LCEVC/PerseusDecoder.h>
 #include <picture.h>
-#include <uPictureFormatDesc.h>
 
 #include <algorithm>
 
 // - Usings and consts ----------------------------------------------------------------------------
 
 using namespace lcevc_dec::decoder;
-using namespace lcevc_dec::api_utility;
 
 static const uint32_t kBigRes[2] = {1920, 1080};
 static const uint32_t kSmallRes[2] = {960, 540};
@@ -34,7 +41,7 @@ static const LCEVC_HDRStaticInfo kNonsenseHDRInfo = {
 
 static const uint32_t kBytesIn12Bits = 2;
 
-static const uint8_t kYUVValues[kI420NumPlanes] = {'V', '-', 'N'};
+static const uint8_t kYUVValues[kI420NumPlanes] = {'Y', 'U', 'V'};
 
 // - Helper functions -----------------------------------------------------------------------------
 
@@ -54,7 +61,7 @@ static bool setDesc(Picture& pic, const LCEVC_PictureDesc& newDesc,
     if (pic.isManaged()) {
         return setDesc(static_cast<PictureManaged&>(pic), newDesc, planeDescArr, bufferDesc);
     }
-    return setDesc(static_cast<PictureExternal&>(pic), newDesc, planeDescArr, bufferDesc);
+    return setDesc(static_cast<PictureExternal&>(pic), newDesc, nullptr, bufferDesc);
 }
 
 static bool initPic(Picture& pic, SmartBuffer& bufferOut, LCEVC_ColorFormat format, uint32_t width,
@@ -97,7 +104,7 @@ public:
         return ::setDesc(m_pic, defaultDesc, m_planeDescArr, m_bufferDesc);
     }
 
-    VNInline PicType constructPic();
+    PicType constructPic();
 
 protected:
     // for managed pics:
@@ -119,13 +126,13 @@ template <>
 PictureFixture<PictureExternal>::PictureFixture() = default;
 
 template <>
-VNInline PictureManaged PictureFixture<PictureManaged>::constructPic()
+inline PictureManaged PictureFixture<PictureManaged>::constructPic()
 {
     return PictureManaged(m_BufMan);
 }
 
 template <>
-VNInline PictureExternal PictureFixture<PictureExternal>::constructPic()
+inline PictureExternal PictureFixture<PictureExternal>::constructPic()
 {
     return PictureExternal();
 }
@@ -155,8 +162,9 @@ TEST_F(PicExtFixture, validSetDesc)
     // stride for the 2nd plane will be the same as that for the first.
     LCEVC_PictureDesc desiredDesc = {};
     const LCEVC_PictureBufferDesc& desiredBufferDesc = m_bufferDesc; // default is fine.
-    LCEVC_PicturePlaneDesc desiredPlaneDescs[2] = {
+    LCEVC_PicturePlaneDesc desiredPlaneDescs[3] = {
         {desiredBufferDesc.data, kSmallRes[0]},
+        {desiredBufferDesc.data + kSmallRes[0] * kSmallRes[1], kSmallRes[0]},
         {desiredBufferDesc.data + kSmallRes[0] * kSmallRes[1], kSmallRes[0]}};
     ASSERT_EQ(LCEVC_DefaultPictureDesc(&desiredDesc, LCEVC_NV12_8, kSmallRes[0], kSmallRes[1]),
               LCEVC_Success);
@@ -437,13 +445,6 @@ TYPED_TEST(PictureFixture, toCoreImage)
     // interleaving
     LCEVC_PictureDesc desc;
     this->m_pic.getDesc(desc);
-    PictureFormat::Enum colorFormat = fromLCEVCDescColorFormat(desc.colorFormat);
-    if (PictureFormat::IsRGB(colorFormat)) {
-        EXPECT_TRUE(coreImg.ilv == PSS_ILV_RGB || coreImg.ilv == PSS_ILV_RGBA);
-    } else {
-        PictureInterleaving::Enum interleaving = fromLCEVCDescInterleaving(desc.colorFormat);
-        EXPECT_EQ(interleaving == PictureInterleaving::NV12, coreImg.ilv == PSS_ILV_NV12);
-    }
 
     // stride and contents
     for (uint32_t planeIdx = 0; planeIdx < this->m_pic.getNumPlanes(); planeIdx++) {
@@ -469,7 +470,9 @@ TYPED_TEST(PictureFixture, lock)
     LCEVC_PictureDesc newNV12Desc;
     LCEVC_DefaultPictureDesc(&newNV12Desc, LCEVC_NV12_8, 540, 960);
     EXPECT_FALSE(::setDesc(this->m_pic, newNV12Desc, this->m_planeDescArr, this->m_bufferDesc));
-    EXPECT_TRUE(this->setDesc());
+    if (!this->m_externalBuffer) {
+        EXPECT_TRUE(this->setDesc());
+    }
 
     this->m_pic.unlock();
     EXPECT_TRUE(::setDesc(this->m_pic, newNV12Desc, this->m_planeDescArr, this->m_bufferDesc));

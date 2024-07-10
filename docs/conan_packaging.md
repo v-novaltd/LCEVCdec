@@ -9,7 +9,7 @@
 
  	conan install lcevc_dec/1.0.0@user/channel --build=missing
 
-## Installing a a binary build local Conan repository usign a given profile
+## Installing a binary build local Conan repository using a given profile
 
  	conan install lcevc_dec/1.0.0@user/channel --build=missing --profile=android-armeabi-v7a-api-21-Release
 

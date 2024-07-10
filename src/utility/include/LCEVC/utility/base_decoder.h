@@ -1,5 +1,14 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 // A simple interface for base decoders used by samples and test harnesses.
 //
 #ifndef VN_LCEVC_UTILITY_BASE_DECODER_H
@@ -8,9 +17,9 @@
 #include "LCEVC/lcevc_dec.h"
 #include "LCEVC/utility/picture_layout.h"
 
+#include <chrono>
 #include <memory>
 #include <string_view>
-#include <vector>
 
 namespace lcevc_dec::utility {
 
@@ -41,6 +50,7 @@ public:
         uint8_t* ptr;
         uint32_t size;
         int64_t timestamp;
+        std::chrono::high_resolution_clock::time_point baseDecodeStart;
 
         bool empty() const { return ptr == nullptr; }
         void clear()
@@ -48,6 +58,7 @@ public:
             ptr = nullptr;
             size = 0;
             timestamp = -1;
+            baseDecodeStart = std::chrono::time_point<std::chrono::high_resolution_clock>();
         }
     };
 
@@ -80,7 +91,7 @@ public:
  */
 std::unique_ptr<BaseDecoder>
 createBaseDecoderLibAV(std::string_view source, std::string_view sourceFormat = std::string_view(),
-                       LCEVC_ColorFormat baseFormat = LCEVC_ColorFormat_Unknown);
+                       LCEVC_ColorFormat baseFormat = LCEVC_ColorFormat_Unknown, bool verbose = false);
 
 /*!
  * \brief Create a base video stream decoder that reads LCEVC bin files and raw base frames

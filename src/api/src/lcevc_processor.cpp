@@ -1,16 +1,36 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "lcevc_processor.h"
 
-#include "lcevc_container.h"
-#include "uLog.h"
-#include "uTimestamps.h"
+#include "buffer_manager.h"
+#include "handle.h"
+#include "log.h"
+#include "timestamps.h"
 
 #include <LCEVC/lcevc_dec.h>
+#include <LCEVC/PerseusDecoder.h>
+#include <lcevc_container.h>
+
+#include <cinttypes>
+#include <cstdint>
+#include <memory>
+
+// ------------------------------------------------------------------------------------------------
 
 namespace lcevc_dec::decoder {
 
-using namespace lcevc_dec::api_utility;
+static const LogComponent kComp = LogComponent::LCEVCProcessor;
+
+// ------------------------------------------------------------------------------------------------
 
 LcevcProcessor::LcevcProcessor(perseus_decoder& decoder, BufferManager& bufferManager)
     : m_coreDecoderRef(decoder)
@@ -55,9 +75,17 @@ int32_t LcevcProcessor::insertUnprocessedLcevcData(const uint8_t* data, uint32_t
     return LCEVC_Success;
 }
 
-std::shared_ptr<perseus_decoder_stream> LcevcProcessor::extractProcessedLcevcData(uint64_t timehandle)
+std::shared_ptr<perseus_decoder_stream> LcevcProcessor::extractProcessedLcevcData(uint64_t timehandle,
+                                                                                  bool discardProcessed)
 {
-    return processUpToTimehandle(timehandle);
+    if (auto itToProcessedData = m_processedLcevcContainer.find(timehandle);
+        itToProcessedData != m_processedLcevcContainer.end()) {
+        if (discardProcessed) {
+            m_processedLcevcContainer.erase(itToProcessedData);
+        }
+        return itToProcessedData->second;
+    }
+    return processUpToTimehandle(timehandle, discardProcessed);
 }
 
 uint32_t LcevcProcessor::getUnprocessedCapacity() const
@@ -74,16 +102,18 @@ bool LcevcProcessor::isUnprocessedQueueFull() const
 bool LcevcProcessor::contains(uint64_t timehandle) const
 {
     bool dummyIsHeadOut = false;
-    return lcevcContainerExists(m_unprocessedLcevcContainer, timehandle, &dummyIsHeadOut);
+    return lcevcContainerExists(m_unprocessedLcevcContainer, timehandle, &dummyIsHeadOut) ||
+           (m_processedLcevcContainer.count(timehandle) > 0);
 }
 
-std::shared_ptr<perseus_decoder_stream> LcevcProcessor::processUpToTimehandle(uint64_t timehandle)
+std::shared_ptr<perseus_decoder_stream> LcevcProcessor::processUpToTimehandle(uint64_t timehandle,
+                                                                              bool discardProcessed)
 {
     // This currently fails to account for Peek operations, see DEC-277
     uint32_t numProcessed = 0;
     uint64_t lastExtractedTH = kInvalidHandle;
     std::shared_ptr<perseus_decoder_stream> processedData =
-        processUpToTimehandleLoop(timehandle, numProcessed, lastExtractedTH);
+        processUpToTimehandleLoop(timehandle, numProcessed, lastExtractedTH, discardProcessed);
     if (lastExtractedTH != timehandle) {
         VNLogWarning(
             "CC %u PTS %" PRId64
@@ -124,7 +154,7 @@ bool LcevcProcessor::accumulateTemporalFromSkippedFrame(const perseus_decoder_st
 
 std::shared_ptr<perseus_decoder_stream>
 LcevcProcessor::processUpToTimehandleLoop(uint64_t timehandle, uint32_t& numProcessedOut,
-                                          uint64_t& lastExtractedTH)
+                                          uint64_t& lastExtractedTH, bool discardProcessed)
 {
     size_t currentQueueSize = std::numeric_limits<size_t>::max();
     StampedBuffer_t* lcevcDataToProcess = nullptr;
@@ -162,6 +192,10 @@ LcevcProcessor::processUpToTimehandleLoop(uint64_t timehandle, uint32_t& numProc
         }
 
         stampedBufferRelease(&lcevcDataToProcess);
+
+        if (lastExtractedTH < timehandle && !discardProcessed) {
+            m_processedLcevcContainer[lastExtractedTH] = dataOut;
+        }
     }
     return dataOut;
 }

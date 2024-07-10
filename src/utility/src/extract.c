@@ -1,11 +1,19 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved.
- *
- * This is deliberately written as a C module to allow use by various C-only integrations - it
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
+/* This is deliberately written as a C module to allow use by various C-only integrations - it
  * is logic that we really don't want being reimplemented with subtle bugs.
  */
 #include "LCEVC/utility/extract.h"
 
-#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -236,17 +244,19 @@ static bool findNextNalUnit(ExtractState* state, NalUnitSpan* nalSpan)
     switch (state->nalFormat) {
         case LCEVC_NALFormat_AnnexB: return findNextNalUnitAnnexB(state, nalSpan);
         case LCEVC_NALFormat_LengthPrefix: return findNextNalUnitLengthPrefix(state, nalSpan);
-        default: assert(0); return false;
+        default: return false;
     }
 }
 
 /* Edit out previously found NAL unit from AU data
  */
-static void removeNalUnit(ExtractState* state, NalUnitSpan* nalSpan)
+static bool removeNalUnit(ExtractState* state, NalUnitSpan* nalSpan)
 {
-    assert(state->data <= nalSpan->data);
-    assert((state->data + state->size) >= (nalSpan->data + nalSpan->size));
-    assert((nalSpan->data + nalSpan->size) <= (state->data + state->offset));
+    // Check that something has not gone horribly wrong
+    if ((state->data > nalSpan->data) || ((state->data + state->size) < (nalSpan->data + nalSpan->size)) ||
+        ((nalSpan->data + nalSpan->size) > (state->data + state->offset))) {
+        return false;
+    }
 
     /* Move following data down
      */
@@ -256,18 +266,28 @@ static void removeNalUnit(ExtractState* state, NalUnitSpan* nalSpan)
      */
     state->offset -= nalSpan->size;
     state->size -= nalSpan->size;
+    return true;
 }
 
 /* Common work for both exported 'extract' functions
  */
-uint32_t extractEnhancementFromNAL(uint8_t* data, uint32_t dataSize, LCEVC_CodecType codecType,
-                                   LCEVC_NALFormat nalFormat, uint8_t* outputData, uint32_t outputCapacity,
-                                   uint32_t* outputSize, bool remove, uint32_t* newDataSize)
+static int32_t extractEnhancementFromNAL(uint8_t* data, uint32_t dataSize,
+                                         LCEVC_CodecType codecType, LCEVC_NALFormat nalFormat,
+                                         uint8_t* outputData, uint32_t outputCapacity,
+                                         uint32_t* outputSize, bool remove, uint32_t* newDataSize)
 {
+    // Basic check to ensure we have the required values
+    if (data == NULL) {
+        return 0; // not an error, no LCEVC data if no data to search
+    }
+
+    if ((outputData == NULL) || (outputSize == NULL) || ((int32_t)(codecType) < 0) ||
+        ((int32_t)(codecType) >= sizeof(kNalTypes) / sizeof(kNalTypes[0]))) {
+        return -1;
+    }
+
     uint32_t outputOffset = 0;
-
-    assert(codecType >= 0 && codecType < sizeof(kNalTypes) / sizeof(kNalTypes[0]));
-
+    bool foundLcevc = false;
     ExtractState state = {
         codecType, nalFormat, kNalTypes[codecType], kNalTypesSEI[codecType], data, dataSize,
     };
@@ -278,6 +298,7 @@ uint32_t extractEnhancementFromNAL(uint8_t* data, uint32_t dataSize, LCEVC_Codec
         if (nalSpan.type == 0) {
             continue;
         }
+        foundLcevc = true; // we have found some LCEVC data
 
         /* Don't do start code emulation prevention on the start of the
          * NAL units we care about - we know that the 0,0,[1-3] pattern will not
@@ -316,67 +337,61 @@ uint32_t extractEnhancementFromNAL(uint8_t* data, uint32_t dataSize, LCEVC_Codec
             /* Append payload to output
              */
             if (outputOffset + payloadSize > outputCapacity || seiSize > payloadSize) {
-                return 0;
+                // This should not happen
+                return -1;
             }
 
             unencapsulate(1, outputData + outputOffset, nalSpan.payload + payloadOffset, payloadSize);
 
             outputOffset += seiSize;
-
         } else {
             /* Found LCEVC data in interleaved LCEVC NAL unit
              */
             if (outputOffset + nalSpan.size > outputCapacity) {
-                return 0;
+                // This should not happen
+                return -1;
             }
 
             memcpy(outputData + outputOffset, nalSpan.data, nalSpan.size);
             outputOffset += nalSpan.size;
         }
 
-        if (remove) {
-            /* Remove NALU from source
-             */
-            removeNalUnit(&state, &nalSpan);
+        /* Remove NALU from source
+         */
+        if (remove && !removeNalUnit(&state, &nalSpan)) {
+            // This is a failure NOT the fact that we wouldn't find LCEVC
+            return -1;
         }
     }
 
-    assert(outputSize != NULL);
     *outputSize = outputOffset;
 
     if (newDataSize) {
         *newDataSize = state.size;
     }
 
-    return outputOffset;
+    return foundLcevc ? 1 : 0;
 }
 
 /* Extract LCEVC enhancement data from a buffer containing NAL Units
  */
-void LCEVC_extractEnhancementFromNAL(const uint8_t* nalData, uint32_t nalSize, LCEVC_NALFormat nalFormat,
-                                     LCEVC_CodecType codecType, uint8_t* enhancementData,
-                                     uint32_t enhancementCapacity, uint32_t* enhancementSize)
+int32_t LCEVC_extractEnhancementFromNAL(const uint8_t* nalData, uint32_t nalSize, LCEVC_NALFormat nalFormat,
+                                        LCEVC_CodecType codecType, uint8_t* enhancementData,
+                                        uint32_t enhancementCapacity, uint32_t* enhancementSize)
 {
-    assert(nalData);
-    assert(enhancementData);
-    assert(enhancementSize);
-
-    extractEnhancementFromNAL((uint8_t*)(nalData), nalSize, codecType, nalFormat, enhancementData,
-                              enhancementCapacity, enhancementSize, false, NULL);
+    // Slightly dodgy cast, removing the `const` is never a good idea. However we know that the
+    // extractEnhancementFromNAL will not modify the buffer in this mode.
+    return extractEnhancementFromNAL((uint8_t*)(nalData), nalSize, codecType, nalFormat, enhancementData,
+                                     enhancementCapacity, enhancementSize, false, NULL);
 }
 
 /* Extract LCEVC enhancement data from a buffer containing NAL Units, and splice extracted data from input buffer.
  */
-void LCEVC_extractAndRemoveEnhancementFromNAL(uint8_t* nalData, uint32_t nalSize,
-                                              LCEVC_NALFormat nalFormat, LCEVC_CodecType codecType,
-                                              uint32_t* nalOutSize, uint8_t* enhancementData,
-                                              uint32_t enhancementCapacity, uint32_t* enhancementSize)
+int32_t LCEVC_extractAndRemoveEnhancementFromNAL(uint8_t* nalData, uint32_t nalSize,
+                                                 LCEVC_NALFormat nalFormat, LCEVC_CodecType codecType,
+                                                 uint32_t* nalOutSize, uint8_t* enhancementData,
+                                                 uint32_t enhancementCapacity, uint32_t* enhancementSize)
 {
-    assert(nalData);
-    assert(enhancementData);
-    assert(enhancementSize);
-    assert(nalOutSize);
-
-    extractEnhancementFromNAL(nalData, nalSize, codecType, nalFormat, enhancementData,
-                              enhancementCapacity, enhancementSize, true, nalOutSize);
+    return extractEnhancementFromNAL(nalData, nalSize, codecType, nalFormat, enhancementData,
+                                     enhancementCapacity, enhancementSize, true, nalOutSize);
 }

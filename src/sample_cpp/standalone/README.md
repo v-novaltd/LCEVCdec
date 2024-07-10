@@ -139,5 +139,5 @@ yuv - I420 10/8bit output, the bit depth is dependent on the input stream
 rgb - RGB 8bit output
 
 ```shell
-    lcevc_dec_api_sample_cpp <path to lcevc stream> dump.yuv
+    lcevc_dec_sample <path to lcevc stream> dump.yuv
 ```

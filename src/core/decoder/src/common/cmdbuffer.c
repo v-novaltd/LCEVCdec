@@ -1,36 +1,21 @@
-/* Copyright (c) V-Nova International Limited 2022-2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "common/cmdbuffer.h"
 
-#include "common/memory.h"
 #include "context.h"
 
 #include <assert.h>
 
 /*------------------------------------------------------------------------------*/
-
-/*! \brief Arbitrary constants used for the command buffer storage behavior. */
-enum CmdBufferConstants
-{
-    CBCStoreGrowFactor = 2, /**< The factory multiply current capacity by when growing the buffer. */
-    CBCDefaultInitialCapacity = 1024, /**< The default initial capacity of a cmdbuffer. */
-};
-
-/*! \brief Dynamically growing managing the memory for a command buffer instance.
- *
- *  The storage can be resized after initialization. This can be performed after
- *  changing both the capacity and entry size..
- *
- *  \note This does not contract itself overtime.
- */
-typedef struct CmdBufferStorage
-{
-    Memory_t memory;            /**< Decoder instance this belongs to. */
-    uint8_t* backing;           /**< Pointer to the start of the storage. */
-    uint8_t* current;           /**< Pointer to the current write position in the storage. */
-    uint8_t* end;               /**< Pointer to the end of the storage. */
-    int32_t allocatedEntrySize; /**< Number of bytes allocated for each entry. */
-    int32_t allocatedCapacity;  /**< Number of elements allocated. */
-} CmdBufferStorage_t;
 
 /*! \brief Resizes a store object for a new capacity and/or entry byte size.
  *
@@ -44,54 +29,50 @@ typedef struct CmdBufferStorage
  *  performed, the same memory is reused.
  *
  *  \param store             The store to resize.
- *  \param capacity          The new capacity to resize the storage with.
- *  \param entryByteSize   The new byte size fort each entry in the storage.
+ *  \param capacity          The new capacity to resize the storage with in bytes.
+ *  \param entryByteSize     The new byte size for each entry in the storage.
  *
  *  \return true on success, otherwise false.
  */
-static bool cmdBufferStorageResize(CmdBufferStorage_t* store, int32_t capacity, int32_t entryByteSize)
+static bool cmdBufferStorageResize(CmdBufferStorage_t* store, uint32_t capacity)
 {
     assert(store);
 
-    const size_t allocSize = (size_t)entryByteSize * capacity;
-    const size_t currentSize = (size_t)store->allocatedCapacity * store->allocatedEntrySize;
+    if (capacity == store->end - store->start) {
+        return true;
+    }
 
-    if (allocSize != currentSize) {
-        if (store->backing) {
-            const uintptr_t currOffset = (uintptr_t)(store->current - store->backing);
-            uint8_t* newPtr = VN_REALLOC_T_ARR(store->memory, store->backing, uint8_t, allocSize);
+    if (store->start) {
+        /* Assume that the storage is never contracted only ever expanded as needed. */
+        const size_t dataOffset = (size_t)(store->end - store->currentData);
+        const size_t commandOffset = (size_t)(store->currentCommand - store->start);
 
-            if (!newPtr) {
-                return false;
-            }
-
-            store->backing = newPtr;
-
-            if (store->allocatedEntrySize == entryByteSize) {
-                /* Assume that the storage is never contracted only ever expanded as needed. */
-                assert(currOffset <= allocSize);
-                store->current = store->backing + currOffset;
-            }
-        } else {
-            store->backing = VN_MALLOC_T_ARR(store->memory, uint8_t, allocSize);
-
-            if (!store->backing) {
-                return false;
-            }
-
-            store->current = store->backing;
+        store->start = VN_REALLOC_T_ARR(store->memory, store->start, uint8_t, capacity);
+        if (!store->start) {
+            return false;
         }
+        /* Realloc may have moved data, so reset to valid values*/
+        store->currentData = store->start + store->allocatedCapacity - dataOffset;
+        store->currentCommand = store->start + commandOffset;
+
+        /* Command-side of the buffer is unchanged, because realloc only extends the end, so
+         * we just need to extend the far-side of the buffer. */
+        uint8_t* newEnd = store->start + capacity;
+        memcpy((void* const)(newEnd - dataOffset), store->currentData, dataOffset);
+        store->currentData = newEnd - dataOffset;
+    } else {
+        store->start = VN_MALLOC_T_ARR(store->memory, uint8_t, capacity);
+
+        if (!store->start) {
+            return false;
+        }
+
+        store->currentCommand = store->start;
+        store->currentData = store->start + capacity - 32;
     }
 
-    /* If the resize changes the dimensions of the entries, then the current must
-     * be reset as it is expected that all data in storage is now invalid. */
-    if (store->allocatedEntrySize != entryByteSize) {
-        store->current = store->backing;
-    }
-
-    store->end = store->backing + allocSize;
+    store->end = store->start + capacity;
     store->allocatedCapacity = capacity;
-    store->allocatedEntrySize = entryByteSize;
 
     return true;
 }
@@ -104,8 +85,7 @@ static bool cmdBufferStorageResize(CmdBufferStorage_t* store, int32_t capacity, 
  *
  *  \return true on success, otherwise false.
  */
-static bool cmdBufferStorageInitialise(Memory_t memory, CmdBufferStorage_t* store,
-                                       int32_t initialCapacity, int32_t entryByteSize)
+static bool cmdBufferStorageInitialise(Memory_t memory, CmdBufferStorage_t* store, int32_t initialCapacity)
 {
     assert(store);
     assert(initialCapacity >= 1);
@@ -114,7 +94,7 @@ static bool cmdBufferStorageInitialise(Memory_t memory, CmdBufferStorage_t* stor
 
     store->memory = memory;
 
-    return cmdBufferStorageResize(store, initialCapacity, entryByteSize);
+    return cmdBufferStorageResize(store, initialCapacity);
 }
 
 /*! \brief Releases all the memory associated with a store object.
@@ -125,8 +105,8 @@ static void cmdBufferStorageFree(CmdBufferStorage_t* store)
 {
     assert(store);
 
-    if (store->memory && store->backing) {
-        VN_FREE(store->memory, store->backing);
+    if (store->memory && store->start) {
+        VN_FREE(store->memory, store->start);
     }
     memorySet(store, 0, sizeof(CmdBufferStorage_t));
 }
@@ -139,82 +119,31 @@ static void cmdBufferStorageReset(CmdBufferStorage_t* store)
 {
     assert(store);
 
-    store->current = store->backing;
-}
-
-/*! \brief Moves the storage onto the next entry.
- *
- *  The intention is that a user will populate the current entry in the storage
- *  and then indicate they are completed with it by calling this API. This API
- *  will automatically allocate more storage if there is not enough room for the
- *  next entry.
- *
- *  \param store   The store to move to the next element on.
- *
- *  \return true on success, otherwise false.
- */
-static bool cmdBufferStorageNext(CmdBufferStorage_t* store)
-{
-    assert(store);
-    assert(store->allocatedEntrySize != 0);
-
-    store->current += store->allocatedEntrySize;
-
-    if ((store->current == store->end) &&
-        !cmdBufferStorageResize(store, store->allocatedCapacity * CBCStoreGrowFactor,
-                                store->allocatedEntrySize)) {
-        return false;
-    }
-
-    assert(store->current <= (store->end - store->allocatedEntrySize));
-
-    return true;
+    store->currentCommand = store->start;
+    store->currentData = store->end;
 }
 
 /*------------------------------------------------------------------------------*/
 
-typedef struct CmdBuffer
-{
-    Memory_t memory;      /**< Memory allocator this command buffer uses. */
-    CmdBufferType_t type; /**< The type of the command buffer. */
-    int32_t count;        /**< Number of entries added to the command buffer. */
-    int32_t layerCount;   /**< Number of layers the command buffer is initialised for. */
-    CmdBufferStorage_t coordinateStore; /**< Memory storage for the coordinates. */
-    CmdBufferStorage_t residualStore;   /**< Memory storage for the residuals. */
-} CmdBuffer_t;
-
-static int32_t cmdBufferEntrySize(int32_t layerCount)
-{
-    /* [4, 16] values */
-    assert((layerCount == 4) || (layerCount == 16));
-    return (int32_t)(sizeof(int16_t) * layerCount);
-}
-
-bool cmdBufferInitialise(Memory_t memory, CmdBuffer_t** cmdBuffer, CmdBufferType_t type)
+bool cmdBufferInitialise(Memory_t memory, CmdBuffer_t** cmdBuffer, uint16_t numEntryPoints)
 {
     assert(cmdBuffer);
 
     CmdBuffer_t* newBuffer = VN_CALLOC_T(memory, CmdBuffer_t);
-
     if (!newBuffer) {
         return false;
     }
 
-    memorySet(newBuffer, 0, sizeof(CmdBuffer_t));
     newBuffer->memory = memory;
-    newBuffer->type = type;
 
-    if (!cmdBufferStorageInitialise(memory, &newBuffer->coordinateStore, CBCDefaultInitialCapacity,
-                                    sizeof(int16_t) * 2)) {
+    if (!cmdBufferStorageInitialise(memory, &newBuffer->data, CBKDefaultInitialCapacity)) {
         cmdBufferFree(newBuffer);
         return false;
     }
 
-    if ((type == CBTResiduals) &&
-        !cmdBufferStorageInitialise(memory, &newBuffer->residualStore, CBCDefaultInitialCapacity,
-                                    sizeof(int16_t) * 4)) {
-        cmdBufferFree(newBuffer);
-        return false;
+    newBuffer->numEntryPoints = numEntryPoints;
+    if (numEntryPoints > 0) {
+        newBuffer->entryPoints = VN_CALLOC_T_ARR(memory, CmdBufferEntryPoint_t, numEntryPoints);
     }
 
     *cmdBuffer = newBuffer;
@@ -228,17 +157,21 @@ void cmdBufferFree(CmdBuffer_t* cmdBuffer)
         return;
     }
 
-    cmdBufferStorageFree(&cmdBuffer->coordinateStore);
-    cmdBufferStorageFree(&cmdBuffer->residualStore);
+    if (cmdBuffer->numEntryPoints > 0) {
+        VN_FREE(cmdBuffer->memory, cmdBuffer->entryPoints);
+        cmdBuffer->numEntryPoints = 0;
+    }
+
+    cmdBufferStorageFree(&cmdBuffer->data);
+
     VN_FREE(cmdBuffer->memory, cmdBuffer);
 }
 
-bool cmdBufferReset(CmdBuffer_t* cmdBuffer, int32_t layerCount)
+bool cmdBufferReset(CmdBuffer_t* cmdBuffer, uint8_t layerCount)
 {
     assert(cmdBuffer);
 
-    cmdBufferStorageReset(&cmdBuffer->coordinateStore);
-    cmdBufferStorageReset(&cmdBuffer->residualStore);
+    cmdBufferStorageReset(&cmdBuffer->data);
     cmdBuffer->count = 0;
 
     /* Already with the right number of layers. */
@@ -246,8 +179,7 @@ bool cmdBufferReset(CmdBuffer_t* cmdBuffer, int32_t layerCount)
         return true;
     }
 
-    if (!cmdBufferStorageResize(&cmdBuffer->residualStore, cmdBuffer->residualStore.allocatedCapacity,
-                                cmdBufferEntrySize(layerCount))) {
+    if (!cmdBufferStorageResize(&cmdBuffer->data, cmdBuffer->data.allocatedCapacity)) {
         return false;
     }
 
@@ -256,61 +188,133 @@ bool cmdBufferReset(CmdBuffer_t* cmdBuffer, int32_t layerCount)
     return true;
 }
 
-int32_t cmdBufferGetLayerCount(const CmdBuffer_t* cmdBuffer)
-{
-    assert(cmdBuffer);
-
-    return cmdBuffer->layerCount;
-}
-
-CmdBufferData_t cmdBufferGetData(const CmdBuffer_t* cmdBuffer)
-{
-    CmdBufferData_t data;
-    data.coordinates = (const int16_t*)cmdBuffer->coordinateStore.backing;
-    data.residuals = (const int16_t*)cmdBuffer->residualStore.backing;
-    data.count = cmdBuffer->count;
-    return data;
-}
-
-bool cmdBufferIsEmpty(const CmdBuffer_t* cmdBuffer) { return (cmdBuffer->count == 0); }
-
-int32_t cmdBufferGetCount(const CmdBuffer_t* cmdBuffer) { return cmdBuffer->count; }
-
-bool cmdBufferAppend(CmdBuffer_t* cmdBuffer, int16_t x, int16_t y, const int16_t* values)
+bool cmdBufferAppend(CmdBuffer_t* cmdBuffer, CmdBufferCmd_t command, const int16_t* values, uint32_t jump)
 {
     assert(cmdBuffer);
     assert(cmdBuffer->layerCount > 0);
+    CmdBufferStorage_t* dataStore = &cmdBuffer->data;
 
-    if (cmdBuffer->type != CBTResiduals) {
+    if (jump < CBKBigJump) {
+        *dataStore->currentCommand = command | (uint8_t)jump;
+        dataStore->currentCommand++;
+    } else if (jump < CBKExtraBigJump) {
+        dataStore->currentCommand[0] = command | (uint8_t)CBKBigJump;
+        dataStore->currentCommand[1] = jump & 0xff;
+        dataStore->currentCommand[2] = (jump >> 8) & 0xff;
+        dataStore->currentCommand += 3;
+    } else {
+        assert(jump < 0x1000000);
+        dataStore->currentCommand[0] = command | (uint8_t)CBKExtraBigJumpSignal;
+        dataStore->currentCommand[1] = jump & 0xff;
+        dataStore->currentCommand[2] = (jump >> 8) & 0xff;
+        dataStore->currentCommand[3] = (jump >> 16) & 0xff;
+        dataStore->currentCommand += 4;
+    }
+
+    const uint8_t layerSize = (cmdBuffer->layerCount == CBKDDSLayers ? CBKDDSLayerSize : CBKDDLayerSize);
+    if (command == CBCAdd || command == CBCSet) {
+        dataStore->currentData -= layerSize;
+        if (cmdBuffer->layerCount == CBKDDSLayers) {
+            /* Note that we reorder the values when we copy here. This differs from the
+             * non-command-buffer implementation, where the reordering is done at the apply stage,
+             * rather than the residual-generation stage. */
+            int16_t* dstData = (int16_t*)dataStore->currentData;
+            dstData[0] = values[0];
+            dstData[1] = values[1];
+            dstData[2] = values[4];
+            dstData[3] = values[5];
+            dstData[4] = values[2];
+            dstData[5] = values[3];
+            dstData[6] = values[6];
+            dstData[7] = values[7];
+            dstData[8] = values[8];
+            dstData[9] = values[9];
+            dstData[10] = values[12];
+            dstData[11] = values[13];
+            dstData[12] = values[10];
+            dstData[13] = values[11];
+            dstData[14] = values[14];
+            dstData[15] = values[15];
+        } else {
+            memoryCopy((int16_t*)dataStore->currentData, values, layerSize);
+        }
+    }
+
+    cmdBuffer->count++;
+
+    if ((size_t)(dataStore->currentData - dataStore->currentCommand) < layerSize + sizeof(int32_t) + 1 &&
+        !cmdBufferStorageResize(dataStore, dataStore->allocatedCapacity * CBKStoreGrowFactor)) {
         return false;
     }
 
-    int16_t* dstCoord = (int16_t*)cmdBuffer->coordinateStore.current;
-    int16_t* dst = (int16_t*)cmdBuffer->residualStore.current;
-    *dstCoord++ = x;
-    *dstCoord++ = y;
-    memoryCopy(dst, values, sizeof(int16_t) * cmdBuffer->layerCount);
-
-    cmdBuffer->count++;
-    return cmdBufferStorageNext(&cmdBuffer->coordinateStore) &&
-           cmdBufferStorageNext(&cmdBuffer->residualStore);
+    return true;
 }
 
-bool cmdBufferAppendCoord(CmdBuffer_t* cmdBuffer, int16_t x, int16_t y)
+void cmdBufferSplit(const CmdBuffer_t* cmdBuffer)
 {
-    assert(cmdBuffer);
-    assert(cmdBuffer->layerCount == 0);
+    const uint16_t numEntryPoints = cmdBuffer->numEntryPoints;
+    CmdBufferEntryPoint_t* entryPoints = cmdBuffer->entryPoints;
+    const uint32_t groupSize = cmdBuffer->count / numEntryPoints;
+    const uint8_t blockShift = (cmdBuffer->layerCount == 16) ? 6 : 8;
+    uint32_t splitPoint = groupSize;
 
-    if (cmdBuffer->type != CBTCoordinates) {
-        return false;
+    int32_t dataOffset = 0;
+    int32_t cmdOffset = 0;
+    uint32_t tuIndex = 0;
+    uint16_t bufferIndex = 0;
+
+    for (uint16_t i = 0; i < numEntryPoints; i++) {
+        entryPoints[i].initialJump = 0;
+        entryPoints[i].commandOffset = 0;
+        entryPoints[i].dataOffset = 0;
+        entryPoints[i].count = 0;
     }
 
-    int16_t* dst = (int16_t*)cmdBuffer->coordinateStore.current;
-    *dst++ = x;
-    *dst++ = y;
+    int32_t lastCmdBlock = -1;
+    uint32_t lastBufferCount = 0;
+    entryPoints[0].initialJump = 0;
+    entryPoints[0].commandOffset = 0;
+    entryPoints[0].dataOffset = 0;
+    uint32_t cmdCount = 0;
+    for (; cmdCount < cmdBuffer->count; cmdCount++) {
+        const uint8_t* commandPtr = (const uint8_t*)(cmdBuffer->data.start) + cmdOffset;
+        const CmdBufferCmd_t command = (const CmdBufferCmd_t)(*commandPtr & 0xC0);
+        const uint8_t jumpSignal = *commandPtr & 0x3F;
 
-    cmdBuffer->count++;
-    return cmdBufferStorageNext(&cmdBuffer->coordinateStore);
+        uint32_t jump = 0;
+        int32_t cmdIncrement = 0;
+        if (jumpSignal < CBKBigJump) {
+            jump = jumpSignal;
+            cmdIncrement++;
+        } else if (jumpSignal == CBKBigJump) {
+            jump = commandPtr[1] + (commandPtr[2] << 8);
+            cmdIncrement += 3;
+        } else { // jumpSignal == CBKExtraBigJump
+            jump = commandPtr[1] + (commandPtr[2] << 8) + (commandPtr[3] << 16);
+            cmdIncrement += 4;
+        }
+
+        const int32_t currentBlock = (tuIndex + jump) >> blockShift;
+        if ((uint32_t)cmdCount > splitPoint && bufferIndex < (numEntryPoints - 1) &&
+            currentBlock != lastCmdBlock) {
+            entryPoints[bufferIndex].count = cmdCount - lastBufferCount;
+            bufferIndex++;
+            entryPoints[bufferIndex].initialJump = tuIndex;
+            entryPoints[bufferIndex].commandOffset = cmdOffset;
+            entryPoints[bufferIndex].dataOffset =
+                (int32_t)(dataOffset * cmdBuffer->layerCount * sizeof(int16_t));
+            splitPoint += groupSize;
+            lastBufferCount = cmdCount;
+        }
+        lastCmdBlock = currentBlock;
+
+        cmdOffset += cmdIncrement;
+        tuIndex += jump;
+        if (command == CBCSet || command == CBCAdd) {
+            dataOffset++;
+        }
+    }
+    entryPoints[bufferIndex].count = cmdCount - lastBufferCount;
 }
 
 /*------------------------------------------------------------------------------*/

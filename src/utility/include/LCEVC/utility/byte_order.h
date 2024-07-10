@@ -1,5 +1,14 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 // Cross platform byte swapping, host<->network, and reading specific endianness from streams
 //
 #ifndef VN_LCEVC_UTILITY_BYTE_ORDER_H
@@ -20,6 +29,95 @@
 #endif
 
 namespace lcevc_dec::utility {
+
+template <typename T>
+struct ByteOrder
+{
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    static inline T ToNetwork(T val) { return Reverse(val); }
+    static inline T ToHost(T val) { return Reverse(val); }
+#else
+    static inline T ToNetwork(T val) { return val; }
+    static inline T ToHost(T val) { return val; }
+#endif
+    static inline T Reverse(T val);
+};
+
+#if defined(_MSC_VER)
+template <>
+inline uint64_t ByteOrder<uint64_t>::Reverse(uint64_t val)
+{
+    return _byteswap_uint64(val);
+}
+template <>
+inline int64_t ByteOrder<int64_t>::Reverse(int64_t val)
+{
+    return (int64_t)_byteswap_uint64((uint64_t)val);
+}
+template <>
+inline uint32_t ByteOrder<uint32_t>::Reverse(uint32_t val)
+{
+    return _byteswap_ulong(val);
+}
+template <>
+inline int32_t ByteOrder<int32_t>::Reverse(int32_t val)
+{
+    return (int32_t)_byteswap_ulong((uint32_t)val);
+}
+template <>
+inline uint16_t ByteOrder<uint16_t>::Reverse(uint16_t val)
+{
+    return _byteswap_ushort(val);
+}
+template <>
+inline int16_t ByteOrder<int16_t>::Reverse(int16_t val)
+{
+    return (int16_t)_byteswap_ushort((uint16_t)val);
+}
+#else
+template <>
+inline uint64_t ByteOrder<uint64_t>::Reverse(uint64_t val)
+{
+    return __builtin_bswap64(val);
+}
+template <>
+inline int64_t ByteOrder<int64_t>::Reverse(int64_t val)
+{
+    return (int64_t)__builtin_bswap64((uint64_t)val);
+}
+template <>
+inline uint32_t ByteOrder<uint32_t>::Reverse(uint32_t val)
+{
+    return __builtin_bswap32(val);
+}
+template <>
+inline int32_t ByteOrder<int32_t>::Reverse(int32_t val)
+{
+    return (int32_t)__builtin_bswap32((uint32_t)val);
+}
+template <>
+inline uint16_t ByteOrder<uint16_t>::Reverse(uint16_t val)
+{
+    return __builtin_bswap16(val);
+}
+template <>
+inline int16_t ByteOrder<int16_t>::Reverse(int16_t val)
+{
+    return (int16_t)__builtin_bswap16((uint16_t)val);
+}
+#endif
+
+template <>
+inline uint8_t ByteOrder<uint8_t>::Reverse(uint8_t val)
+{
+    return val;
+}
+
+template <>
+inline int8_t ByteOrder<int8_t>::Reverse(int8_t val)
+{
+    return val;
+}
 
 // Byte swapping templated on the integer types
 //

@@ -1,8 +1,17 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_CONTEXT_H_
 #define VN_DEC_CORE_CONTEXT_H_
 
-#include "LCEVC/PerseusDecoder.h"
 #include "common/cmdbuffer.h"
 #include "common/log.h"
 #include "common/profiler.h"
@@ -10,6 +19,7 @@
 #include "common/types.h"
 #include "decode/dequant.h"
 #include "decode/deserialiser.h"
+#include "LCEVC/PerseusDecoder.h"
 #include "surface/surface.h"
 
 /*------------------------------------------------------------------------------*/
@@ -52,9 +62,8 @@ typedef struct Context
 {
     /* The following members are globally accessible in any module, so must
      * always be available. */
-
-    Memory_t memory;
     ThreadManager_t threadManager;
+    Memory_t memory;
     Logger_t log;
     ProfilerState_t* profiler;
     Time_t time;
@@ -63,17 +72,18 @@ typedef struct Context
     /* The following members should be hidden from modules, only accessible in
      * the API layer - modules should take a handle as input if they're dependent
      * @todo(bob): Make this a reality. */
-    DecodeSerial_t decodeSerial;
-    DecodeParallel_t decodeParallel;
+    DecodeSerial_t decodeSerial[LOQEnhancedCount];
+    DecodeParallel_t decodeParallel[LOQEnhancedCount];
     Dither_t dither;
     Sharpen_t sharpen;
+
+    lcevc_hdr_info hdrInfo;
+    lcevc_vui_info vuiInfo;
+    lcevc_deinterlacing_info deinterlacingInfo;
 
     DeserialisedData_t deserialised;
     PlaneSurfaces_t planes[RCMaxPlanes];
     Surface_t upscaleIntermediateSurface;
-
-    lcevc_hdr_info hdrInfo;
-    lcevc_vui_info vuiInfo;
 
     DequantParams_t dequant; /**< Dequantisation settings for all planes, LOQ, layers, and temporal signal */
 
@@ -106,7 +116,9 @@ typedef struct Context
     const char* dumpPath;
     uint8_t dumpSurfaces;
 
-    bool generateCmdBuffers; /**< When true this generates command buffers - it will not write to surfaces passed in. */
+    bool generateCmdBuffers; /**< When true this generates command buffers - residuals will not be written to surfaces passed in without `applyCmdBuffers` enabled as well. */
+    bool applyCmdBuffers; /**< Writes the generated command buffers to internal surfaces or passed surfaces, `generateCmdBuffers` must be true. */
+    uint16_t applyCmdBufferThreads; /**< Generates jump positions to evenly split commands across threads for an external multi-threaded apply */
 
     SurfaceDumpCache_t* surfaceDumpCache; /**< Cache for surface dumpers. */
     uint64_t deserialiseCount; /**< Helper for debugging - number of times the deserialise function has successfully completed. */
@@ -134,7 +146,7 @@ void contextPlaneSurfacesInitialise(Context_t* ctx);
  *
  *  \note The decoder lazily allocates resources as it needs them, so this function
  *        may perform varying amounts of work. */
-void contextPlaneSurfacesRelease(Context_t* ctx);
+void contextPlaneSurfacesRelease(Context_t* ctx, Memory_t memory);
 
 /*! \brief Determines if the decoder is using internal surfaces for a given LOQ.
  *
@@ -153,7 +165,7 @@ void contextPlaneSurfacesRelease(Context_t* ctx);
  *
  * \return True if internal surfaces are being used for the given LOQ, otherwise
  *         false. */
-bool contextLOQUsingInternalSurfaces(Context_t* ctx, LOQIndex_t loq);
+bool contextLOQUsingInternalSurfaces(Context_t* ctx, Memory_t memory, Logger_t log, LOQIndex_t loq);
 
 /*! \brief Copies between the user surfaces and the internally allocated surfaces.
  *
@@ -165,7 +177,8 @@ bool contextLOQUsingInternalSurfaces(Context_t* ctx, LOQIndex_t loq);
  *                 vice versa.
  *
  * \return 0 on success, otherwise -1 */
-int32_t contextInternalSurfacesImageCopy(Context_t* ctx, Surface_t src[3], LOQIndex_t loq, bool fromSrc);
+int32_t contextInternalSurfacesImageCopy(Context_t* ctx, Logger_t log, Surface_t src[3],
+                                         LOQIndex_t loq, bool fromSrc);
 
 /*! \brief Prepares the temporal & convert surfaces for use during decoding.
  *
@@ -175,7 +188,7 @@ int32_t contextInternalSurfacesImageCopy(Context_t* ctx, Surface_t src[3], LOQIn
  *  \param ctx The decoder instance
  *
  *  \return 0 on success, otherwise -1. */
-int32_t contextTemporalConvertSurfacesPrepare(Context_t* ctx);
+int32_t contextTemporalConvertSurfacesPrepare(Context_t* ctx, Memory_t memory, Logger_t log);
 
 /* \brief Prepares a target surface for upscaling from LOQ-2 to LOQ-1.
  *
@@ -185,7 +198,7 @@ int32_t contextTemporalConvertSurfacesPrepare(Context_t* ctx);
  *  \param ctx The decoder instance
  *
  *  \return 0 on success, otherwise -1. */
-int32_t contextLOQ2TargetSurfacePrepare(Context_t* ctx);
+int32_t contextLOQ2TargetSurfacePrepare(Context_t* ctx, Memory_t memory, Logger_t log);
 
 /* \brief Prepares the surfaces for external surface input
  *

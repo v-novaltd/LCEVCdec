@@ -1,20 +1,29 @@
-﻿/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_API_POOL_H_
 #define VN_API_POOL_H_
 
 #include "handle.h"
-#include "uPlatform.h"
 
+#include <cassert>
 #include <memory>
 #include <vector>
 
 // ------------------------------------------------------------------------------------------------
 
 namespace lcevc_dec::decoder {
-
 // Pool class, to glue instances of objects to the handles that we output in the API. It is
-// recommended that T be a parent-most class (i.e. have no parents), but that you allocate child-
-// most classes in `allocate`.
+// recommended that T be a parent-most class (i.e. have no parents), but that you allocate
+// child- most classes in `allocate`.
 
 // Also, avoid putting the function definitions in the source file. If you're on Windows, it's
 // tempting (because it will compile), but it won't work on our Linux builds.
@@ -29,7 +38,7 @@ public:
     {
         // This guarantees that kInvalidHandle is always invalid (and why would you make a pool
         // with such a high capacity?)
-        VNAssert(capacity < handleIndex(kInvalidHandle));
+        assert(capacity < handleIndex(kInvalidHandle));
 
         m_objects.resize(capacity);
 
@@ -43,8 +52,8 @@ public:
 
     // Note that this does not allocate the memory, just the handle. This will actually move the
     // pointer itself, so if you've assigned the freshly-made pointer to some variable before
-    // allocating it to a spot here, that variable will not generally be valid after calling this
-    // function.
+    // allocating it to a spot here, that variable will not generally be valid after calling
+    // this function.
     virtual Handle<T> allocate(std::unique_ptr<T>&& ptrToT)
     {
         if (m_freeIndices.empty() || ptrToT == nullptr) {
@@ -56,7 +65,7 @@ public:
 
         // Bump generation and assert odd (because odd means "currently allocated").
         m_generations[idx]++;
-        VNAssert((m_generations[idx] & 1) == 1);
+        assert((m_generations[idx] & 1) == 1);
 
         const Handle<T> handleOut = handleMake(idx, m_generations[idx]);
         m_objects[idx] = std::move(ptrToT);
@@ -67,14 +76,14 @@ public:
     void release(Handle<T> handle)
     {
         if (!isValid(handle)) {
-            VNAssert(false);
+            assert(false);
             return;
         }
         const size_t idx = handleIndex(handle);
 
         // Bump generation and assert even (because even means "not allocated").
         m_generations[idx]++;
-        VNAssert((m_generations[idx] & 1) == 0);
+        assert((m_generations[idx] & 1) == 0);
 
         // Add back to free list
         m_freeIndices.push_back(idx);
@@ -85,7 +94,7 @@ public:
     T* lookup(Handle<T> handle)
     {
         if (!isValid(handle)) {
-            VNAssert(false);
+            assert(false);
             return nullptr;
         }
         return m_objects[handleIndex(handle)].get();
@@ -94,7 +103,7 @@ public:
     const T* lookup(Handle<T> handle) const
     {
         if (!isValid(handle)) {
-            VNAssert(false);
+            assert(false);
             return nullptr;
         }
         return m_objects[handleIndex(handle)].get();

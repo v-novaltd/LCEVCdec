@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "common/bytestream.h"
 
 #include "common/memory.h"
@@ -77,7 +87,8 @@ int32_t bytestreamReadU8(ByteStream_t* stream, uint8_t* out)
         return -1;
     }
 
-    stream->offset += readU8(stream->data + stream->offset, out);
+    *out = *(stream->data + stream->offset);
+    stream->offset += 1;
     return 0;
 }
 
@@ -152,15 +163,6 @@ const uint8_t* bytestreamCurrent(const ByteStream_t* stream)
     return (stream->data + stream->offset);
 }
 
-size_t bytestreamRemaining(const ByteStream_t* stream)
-{
-    if (stream->offset > stream->size) {
-        return 0;
-    }
-
-    return stream->size - stream->offset;
-}
-
 size_t byteStreamGetSize(const ByteStream_t* stream) { return stream->size; }
 
 /*------------------------------------------------------------------------------*/
@@ -187,12 +189,6 @@ int32_t readU16(const uint8_t* ptr, uint16_t* out)
 {
     *out = (uint16_t)((ptr[0] << 8) | ptr[1]);
     return 2;
-}
-
-int32_t readU8(const uint8_t* ptr, uint8_t* out)
-{
-    *out = *ptr;
-    return 1;
 }
 
 /*------------------------------------------------------------------------------*/

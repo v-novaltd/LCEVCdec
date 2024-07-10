@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_SURFACE_H_
 #define VN_DEC_CORE_SURFACE_H_
 
@@ -6,12 +16,15 @@
 
 /*------------------------------------------------------------------------------*/
 
+typedef struct Context Context_t;
+typedef struct Logger* Logger_t;
+typedef struct Memory* Memory_t;
+
 /*
  * \brief Surface is a representation of a block of memory containing raw pixel data.
  */
 typedef struct Surface
 {
-    Context_t* ctx;
     uint8_t* data;     /**< Raw data allocation. */
     FixedPoint_t type; /**< Fixed point type for this surface. */
     uint32_t width;    /**< Width in pixels. */
@@ -24,31 +37,31 @@ typedef struct Surface
 /*------------------------------------------------------------------------------*/
 
 /* `stride` is the number of pixel elements to get to the next line. */
-int32_t surfaceInitialise(Context_t* ctx, Surface_t* surface, FixedPoint_t type, uint32_t width,
+int32_t surfaceInitialise(Memory_t memory, Surface_t* surface, FixedPoint_t type, uint32_t width,
                           uint32_t height, uint32_t stride, Interleaving_t interleaving);
 
-int32_t surfaceInitialiseExt(Context_t* ctx, Surface_t* surface, void* data, FixedPoint_t type,
-                             uint32_t width, uint32_t height, uint32_t stride,
-                             Interleaving_t interleaving);
+int32_t surfaceInitialiseExt(Surface_t* surface, void* data, FixedPoint_t type, uint32_t width,
+                             uint32_t height, uint32_t stride, Interleaving_t interleaving);
 
-int32_t surfaceInitialiseExt2(Context_t* ctx, Surface_t* surface, FixedPoint_t type, uint32_t width,
+int32_t surfaceInitialiseExt2(Surface_t* surface, FixedPoint_t type, uint32_t width,
                               uint32_t height, uint32_t stride, Interleaving_t interleaving);
 
-void surfaceRelease(Context_t* ctx, Surface_t* surface);
+void surfaceRelease(Memory_t memory, Surface_t* surface);
 
-void surfaceIdle(Context_t* ctx, Surface_t* surface);
+void surfaceIdle(Surface_t* surface);
 
-uint8_t surfaceIsIdle(Context_t* ctx, const Surface_t* surface);
+uint8_t surfaceIsIdle(const Surface_t* surface);
 
-uint8_t surfaceCompatible(Context_t* ctx, const Surface_t* surface, FixedPoint_t type,
-                          uint32_t stride, uint32_t height, Interleaving_t interleaving);
+uint8_t surfaceCompatible(const Surface_t* surface, FixedPoint_t type, uint32_t stride,
+                          uint32_t height, Interleaving_t interleaving);
 
-void surfaceZero(Context_t* ctx, Surface_t* surface);
+void surfaceZero(Memory_t memory, Surface_t* surface);
 
-void surfaceToFile(Context_t* ctx, const Surface_t* surfaces, uint32_t planeCount, const char* filePath);
+void surfaceToFile(Logger_t log, Memory_t memory, Context_t* ctx, const Surface_t* surfaces,
+                   uint32_t planeCount, const char* filePath);
 
-int32_t surfaceGetChannelSkipOffset(const Surface_t* surface, uint32_t channel, int32_t* skip,
-                                    int32_t* offset);
+int32_t surfaceGetChannelSkipOffset(const Surface_t* surface, uint32_t channel, uint32_t* skip,
+                                    uint32_t* offset);
 
 uint8_t* surfaceGetLine(const Surface_t* surface, uint32_t y);
 
@@ -69,7 +82,7 @@ typedef struct SurfaceDumpCache SurfaceDumpCache_t;
  * \param cache    Pointer to a surface dump handle.
  * \return 0 on success, otherwise -1
  */
-int32_t surfaceDumpCacheInitialise(Context_t* ctx, SurfaceDumpCache_t** cache);
+int32_t surfaceDumpCacheInitialise(Memory_t memory, Logger_t log, SurfaceDumpCache_t** cache);
 
 /**! Surface dump cache release.
  *
@@ -95,7 +108,8 @@ void surfaceDumpCacheRelease(SurfaceDumpCache_t* cache);
  * \param idFormat Format of the ID to dump the surface with.
  * \return 0 on success, otherwise -1
  */
-int32_t surfaceDump(Context_t* ctx, const Surface_t* surface, const char* idFormat, ...);
+int32_t surfaceDump(Memory_t memory, Logger_t log, Context_t* ctx, const Surface_t* surface,
+                    const char* idFormat, ...);
 
 /*------------------------------------------------------------------------------*/
 

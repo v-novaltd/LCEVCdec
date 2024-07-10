@@ -1,5 +1,14 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 // Class for writing raw image files to streams or filesystem.
 //
 #include "LCEVC/utility/raw_writer.h"
@@ -8,7 +17,7 @@
 #include "LCEVC/utility/check.h"
 #include "LCEVC/utility/picture_layout.h"
 #include "LCEVC/utility/picture_lock.h"
-#include "string_utils.h"
+#include "LCEVC/utility/string_utils.h"
 
 #include <fstream>
 #include <ios>
@@ -32,23 +41,23 @@ bool RawWriter::write(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture)
 {
     assert(m_stream);
 
-    if(m_description.colorFormat == LCEVC_ColorFormat_Unknown) {
+    if (m_description.colorFormat == LCEVC_ColorFormat_Unknown) {
         // If the current description was unknown, initialize from first picture
         LCEVC_GetPictureDesc(decoder, picture, &m_description);
         m_layout = PictureLayout(m_description);
     } else {
         // Check incoming picture is compatible with current descriptions
         PictureLayout thisLayout(decoder, picture);
-        if(!m_layout.isCompatible(thisLayout)) {
+        if (!m_layout.isCompatible(thisLayout)) {
             return false;
         }
     }
 
-   PictureLock lock(decoder, picture, LCEVC_Access_Read);
+    PictureLock lock(decoder, picture, LCEVC_Access_Read);
 
-    for (unsigned plane = 0; plane < lock.numPlanes(); ++plane) {
+    for (unsigned plane = 0; plane < lock.numPlaneGroups(); ++plane) {
         for (unsigned row = 0; row < lock.height(plane); ++row) {
-            m_stream->write(lock.rowData<const char>(plane,row), lock.rowSize(plane));
+            m_stream->write(lock.rowData<const char>(plane, row), lock.rowSize(plane));
             if (!m_stream->good()) {
                 return false;
             }
@@ -71,7 +80,7 @@ bool RawWriter::write(std::vector<uint8_t>& memory)
 std::unique_ptr<RawWriter> createRawWriter(const LCEVC_PictureDesc& pictureDescription,
                                            std::string_view filename)
 {
-    if(filename.empty()) {
+    if (filename.empty()) {
         return nullptr;
     }
 
@@ -86,14 +95,14 @@ std::unique_ptr<RawWriter> createRawWriter(const LCEVC_PictureDesc& pictureDescr
 
 std::unique_ptr<RawWriter> createRawWriter(std::string_view filename)
 {
-    LCEVC_PictureDesc unknownDesc {};
+    LCEVC_PictureDesc unknownDesc{};
     return createRawWriter(unknownDesc, filename);
 }
 
 std::unique_ptr<RawWriter> createRawWriter(const LCEVC_PictureDesc& description,
                                            std::unique_ptr<std::ostream> stream)
 {
-    if(!stream) {
+    if (!stream) {
         return nullptr;
     }
 

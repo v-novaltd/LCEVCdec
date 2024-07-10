@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "surface/upscale_scalar.h"
 
 #include "common/dither.h"
@@ -69,8 +79,8 @@ static inline void getNextPelsU8(const uint8_t* in, uint32_t inSize, uint32_t st
     }
 
     /* Load the new one */
-    const int32_t rowIndex = getPelsOffset(offset, inSize, pelsLength);
-    pels[pelsLength - 1] = in[(size_t)rowIndex * stride];
+    const size_t rowIndex = (size_t)getPelsOffset(offset, inSize, pelsLength);
+    pels[pelsLength - 1] = in[rowIndex * stride];
 }
 
 static inline void getPelsU16(const uint16_t* in, uint32_t inSize, uint32_t stride, int32_t offset,
@@ -167,7 +177,7 @@ static inline void getNextPelsUN(const uint8_t* in, uint32_t inSize, uint32_t st
  *    - simultaneous upscaling of interleaved data up to 4 channels at a time with
  *      support for YUYV/UYVY interleaving.
  *
- * \param ctx           Decoder context
+ * \param dither        Dither data (NULL for no dithering)
  * \param in            Byte pointers to the 2 input rows to upscale from.
  * \param out           Byte pointers to the 2 output rows to upscale to.
  * \param base          Byte pointers to 2 rows to use for PA, if the second pointer
@@ -176,7 +186,6 @@ static inline void getNextPelsUN(const uint8_t* in, uint32_t inSize, uint32_t st
  * \param xStart        The x-coordinate to start upscaling from.
  * \param xEnd          The x-coordinate to end upscaling from.
  * \param k             The kernel to perform convolution upscaling with.
- * \param dither        Indicates that dithering should be performed.
  * \param channelCount  The number of channels to upscale, up to a maximum of 4, this
  *                      is essentially the number of interleave planes to upscale.
  * \param channelSkip   An array that specifies how many pixels each channel should
@@ -186,9 +195,9 @@ static inline void getNextPelsUN(const uint8_t* in, uint32_t inSize, uint32_t st
  *                      for YUYV/UYVY where the second luma channel is really just the
  *                      next iteration of the first luma channel.
  */
-static inline void horizontalU8(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
-                                const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                                const Kernel_t* kernel, bool dither, uint32_t channelCount,
+static inline void horizontalU8(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
+                                const uint8_t* base[2], uint32_t width, uint32_t xStart,
+                                uint32_t xEnd, const Kernel_t* kernel, uint32_t channelCount,
                                 const uint32_t channelSkip[4], const uint32_t channelMap[4])
 {
     uint8_t pels[4][2][8]; /* Maximum kernel size is 6, use 8 for alignment. Maximum channel count of 4. */
@@ -247,8 +256,8 @@ static inline void horizontalU8(Context_t* ctx, const uint8_t* in[2], uint8_t* o
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows
      * for each channel */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, 4 * (xEnd - xStart) * channelCount);
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, 4 * (xEnd - xStart) * channelCount);
     }
 
     for (uint32_t x = xStart; x < xEnd; ++x) {
@@ -335,7 +344,7 @@ static inline void horizontalU8(Context_t* ctx, const uint8_t* in[2], uint8_t* o
  *    - simultaneous upscaling of interleaved data up to 4 channels at a time with
  *      support for YUYV/UYVY interleaving.
  *
- * \param ctx           Decoder context
+ * \param dither        Dithering info. NULL indicates that dithering should not be performed.
  * \param in            Byte pointers to the 2 input rows to upscale from.
  * \param out           Byte pointers to the 2 output rows to upscale to.
  * \param base          Byte pointers to 2 rows to use for PA, if the second pointer
@@ -344,7 +353,6 @@ static inline void horizontalU8(Context_t* ctx, const uint8_t* in[2], uint8_t* o
  * \param xStart        The x-coordinate to start upscaling from.
  * \param xEnd          The x-coordinate to end upscaling from.
  * \param k             The kernel to perform convolution upscaling with.
- * \param dither        Indicates that dithering should be performed.
  * \param channelCount  The number of channels to upscale, up to a maximum of 4.
  * \param channelSkip   An array that specifies how many pixels each channel should
  *                      skip over for each load/store
@@ -355,9 +363,9 @@ static inline void horizontalU8(Context_t* ctx, const uint8_t* in[2], uint8_t* o
  *
  * \note See `upscale_horizontal_u8_impl` implementation for more details comments.
  */
-static void horizontalS16(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static void horizontalS16(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                           const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                          const Kernel_t* kernel, bool dither, uint32_t channelCount,
+                          const Kernel_t* kernel, uint32_t channelCount,
                           const uint32_t channelSkip[4], const uint32_t channelMap[4])
 {
     int16_t pels[4][2][8];
@@ -409,8 +417,8 @@ static void horizontalS16(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows
      * for each channel */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, 4 * (xEnd - xStart) * channelCount);
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, 4 * (xEnd - xStart) * channelCount);
     }
 
     for (uint32_t x = xStart; x < xEnd; ++x) {
@@ -497,7 +505,7 @@ static void horizontalS16(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
  *    - simultaneous upscaling of interleaved data up to 4 channels at a time with
  *      support for YUYV/UYVY interleaving.
  *
- * \param ctx           Decoder context
+ * \param dither        Dithering data (set to null if not desired)
  * \param in            Byte pointers to the 2 input rows to upscale from.
  * \param out           Byte pointers to the 2 output rows to upscale to.
  * \param base          Byte pointers to 2 rows to use for PA, if the second pointer
@@ -506,7 +514,6 @@ static void horizontalS16(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
  * \param xStart        The x-coordinate to start upscaling from.
  * \param xEnd          The x-coordinate to end upscaling from.
  * \param k             The kernel to perform convolution upscaling with.
- * \param dither        Indicates that dithering should be performed.
  * \param channelCount  The number of channels to upscale, up to a maximum of 4.
  * \param channelSkip   An array that specifies how many pixels each channel should
  *                      skip over for each load/store
@@ -518,10 +525,10 @@ static void horizontalS16(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
  *
  * \note See `upscale_horizontal_u8_impl` implementation for more details comments.
  */
-static void horizontalU16(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static void horizontalU16(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                           const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                          const Kernel_t* kernel, bool dither, uint32_t channelCount,
-                          const uint32_t channelSkip[4], const uint32_t channelMap[4], uint16_t maxValue)
+                          const Kernel_t* kernel, uint32_t channelCount, const uint32_t channelSkip[4],
+                          const uint32_t channelMap[4], uint16_t maxValue)
 {
     uint16_t pels[4][2][8];
     uint16_t* outU16[2] = {(uint16_t*)out[0], (uint16_t*)out[1]};
@@ -572,8 +579,8 @@ static void horizontalU16(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows
      * for each channel */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, 4 * (xEnd - xStart) * channelCount);
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, 4 * (xEnd - xStart) * channelCount);
     }
 
     for (uint32_t x = xStart; x < xEnd; ++x) {
@@ -646,13 +653,12 @@ static void horizontalU16(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
     }
 }
 
-static void horizontalU8ToU16BaseUN(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static void horizontalU8ToU16BaseUN(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                     const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                    uint32_t xEnd, const Kernel_t* kernel, bool dither,
-                                    uint32_t channelCount, const uint32_t channelSkip[4],
-                                    const uint32_t channelMap[4], const uint32_t inPelSize,
-                                    const uint32_t inShift, const uint32_t basePelSize,
-                                    const uint32_t baseShift, uint16_t maxValue)
+                                    uint32_t xEnd, const Kernel_t* kernel, uint32_t channelCount,
+                                    const uint32_t channelSkip[4], const uint32_t channelMap[4],
+                                    const uint32_t inPelSize, const uint32_t inShift,
+                                    const uint32_t basePelSize, const uint32_t baseShift, uint16_t maxValue)
 {
     int16_t pels[4][2][8];
     uint16_t* outU16[2] = {(uint16_t*)out[0], (uint16_t*)out[1]};
@@ -705,8 +711,8 @@ static void horizontalU8ToU16BaseUN(Context_t* ctx, const uint8_t* in[2], uint8_
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows
      * for each channel */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, 4 * (xEnd - xStart) * channelCount);
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, 4 * (xEnd - xStart) * channelCount);
     }
 
     for (uint32_t x = xStart; x < xEnd; ++x) {
@@ -803,14 +809,13 @@ static void horizontalU8ToU16BaseUN(Context_t* ctx, const uint8_t* in[2], uint8_
     }
 }
 
-void horizontalUNPlanar(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+void horizontalUNPlanar(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                         const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                        const Kernel_t* kernel, bool dither, uint16_t maxValue)
+                        const Kernel_t* kernel, uint16_t maxValue)
 {
     const uint32_t channelSkip[4] = {1, 0, 0, 0};
     const uint32_t channelMap[4] = {0, 0, 0, 0};
-    horizontalU16(ctx, in, out, base, width, xStart, xEnd, kernel, dither, 1, channelSkip,
-                  channelMap, maxValue);
+    horizontalU16(dither, in, out, base, width, xStart, xEnd, kernel, 1, channelSkip, channelMap, maxValue);
 }
 
 /*!
@@ -837,11 +842,9 @@ void horizontalUNPlanar(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
  *                               0,
  *                               height - 1);
  */
-static void verticalU8(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+static void verticalU8(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
                        uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    VN_UNUSED(ctx);
-
     uint8_t pels[2][8];
     const int16_t* kernelFwd = kernel->coeffs[0];
     const int16_t* kernelRev = kernel->coeffs[1];
@@ -889,7 +892,6 @@ static void verticalU8(Context_t* ctx, const uint8_t* in, uint32_t inStride, uin
 /*!
  * Perform vertical upscaling of 2 columns at a time for signed 16-bit surfaces.
  *
- * \param ctx          Decoder context
  * \param in           Byte pointer to the input surface data pointer offset by
  *                     the first column to upscale from.
  * \param inStride     The pixel stride of the input surface.
@@ -903,12 +905,9 @@ static void verticalU8(Context_t* ctx, const uint8_t* in, uint32_t inStride, uin
  *
  * \note See `upscale_vertical_u8` for more details.
  */
-static void verticalS16(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                        uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height,
-                        const Kernel_t* kernel)
+static void verticalS16(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                        uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    VN_UNUSED(ctx);
-
     int16_t pels[2][8];
     const int16_t* inI16 = (const int16_t*)in;
     const int16_t* kernelFwd = kernel->coeffs[0];
@@ -957,7 +956,6 @@ static void verticalS16(Context_t* ctx, const uint8_t* in, uint32_t inStride, ui
 /*!
  * Perform vertical upscaling of 2 columns at a time for unsigned 16-bit surfaces.
  *
- * \param ctx          Decoder context
  * \param in           Byte pointer to the input surface data pointer offset by
  *                     the first column to upscale from.
  * \param inStride     The pixel stride of the input surface.
@@ -972,12 +970,9 @@ static void verticalS16(Context_t* ctx, const uint8_t* in, uint32_t inStride, ui
  *
  * \note See `upscale_vertical_u8` for more details.
  */
-static void verticalU16(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                        uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height,
-                        const Kernel_t* kernel, uint16_t maxValue)
+static void verticalU16(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride, uint32_t y,
+                        uint32_t rows, uint32_t height, const Kernel_t* kernel, uint16_t maxValue)
 {
-    VN_UNUSED(ctx);
-
     uint16_t pels[2][8];
     const uint16_t* inU16 = (const uint16_t*)in;
     const int16_t* kernelFwd = kernel->coeffs[0];
@@ -1024,13 +1019,10 @@ static void verticalU16(Context_t* ctx, const uint8_t* in, uint32_t inStride, ui
 }
 
 /* Promoting input vertical upscale from N-bits to 16-bits. */
-static void verticalUNToU16(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                            uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height,
-                            const Kernel_t* kernel, const uint32_t inPelSize,
-                            const uint32_t inShift, const uint16_t maxValue)
+static void verticalUNToU16(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                            uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel,
+                            const uint32_t inPelSize, const uint32_t inShift, const uint16_t maxValue)
 {
-    VN_UNUSED(ctx);
-
     int16_t pels[2][8];
     const int16_t* kernelFwd = kernel->coeffs[0];
     const int16_t* kernelRev = kernel->coeffs[1];
@@ -1076,58 +1068,58 @@ static void verticalUNToU16(Context_t* ctx, const uint8_t* in, uint32_t inStride
     }
 }
 
-void verticalU10(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                 uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalU10(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride, uint32_t y,
+                 uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalU16(ctx, in, inStride, out, outStride, y, rows, height, kernel, 1023);
+    verticalU16(in, inStride, out, outStride, y, rows, height, kernel, 1023);
 }
 
-void verticalU12(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                 uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalU12(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride, uint32_t y,
+                 uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalU16(ctx, in, inStride, out, outStride, y, rows, height, kernel, 4095);
+    verticalU16(in, inStride, out, outStride, y, rows, height, kernel, 4095);
 }
 
-void verticalU14(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                 uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalU14(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride, uint32_t y,
+                 uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalU16(ctx, in, inStride, out, outStride, y, rows, height, kernel, 16383);
+    verticalU16(in, inStride, out, outStride, y, rows, height, kernel, 16383);
 }
 
-void verticalU8ToU10(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                     uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalU8ToU10(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                     uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalUNToU16(ctx, in, inStride, out, outStride, y, rows, height, kernel, 1, 2, 1023);
+    verticalUNToU16(in, inStride, out, outStride, y, rows, height, kernel, 1, 2, 1023);
 }
 
-void verticalU8ToU12(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                     uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalU8ToU12(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                     uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalUNToU16(ctx, in, inStride, out, outStride, y, rows, height, kernel, 1, 4, 4095);
+    verticalUNToU16(in, inStride, out, outStride, y, rows, height, kernel, 1, 4, 4095);
 }
 
-void verticalU8ToU14(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                     uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalU8ToU14(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                     uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalUNToU16(ctx, in, inStride, out, outStride, y, rows, height, kernel, 1, 6, 16383);
+    verticalUNToU16(in, inStride, out, outStride, y, rows, height, kernel, 1, 6, 16383);
 }
 
-void verticalU10ToU12(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+void verticalU10ToU12(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
                       uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalUNToU16(ctx, in, inStride, out, outStride, y, rows, height, kernel, 2, 2, 4095);
+    verticalUNToU16(in, inStride, out, outStride, y, rows, height, kernel, 2, 2, 4095);
 }
 
-void verticalU10ToU14(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+void verticalU10ToU14(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
                       uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalUNToU16(ctx, in, inStride, out, outStride, y, rows, height, kernel, 2, 4, 16383);
+    verticalUNToU16(in, inStride, out, outStride, y, rows, height, kernel, 2, 4, 16383);
 }
 
-void verticalU12ToU14(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+void verticalU12ToU14(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
                       uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalUNToU16(ctx, in, inStride, out, outStride, y, rows, height, kernel, 2, 2, 16383);
+    verticalUNToU16(in, inStride, out, outStride, y, rows, height, kernel, 2, 2, 16383);
 }
 
 /*------------------------------------------------------------------------------*/
@@ -1204,11 +1196,11 @@ static const uint16_t kMaxValuePromotion_U14 = 16383;
  * \param fp   The fixedpoint type - for all signed types s16 should be used. */
 #define VN_GEN_HORI_FUNCTION(fn, ilv, fp)                                                      \
     void horizontal##fp##ilv(                                                                  \
-        Context_t* ctx, const uint8_t* in[2], uint8_t* out[2], const uint8_t* base[2],         \
-        uint32_t width, uint32_t xStart, uint32_t xEnd, const Kernel_t* kernel, bool dither) { \
-        fn(ctx, in, out, base, width >> kLumaShift_##ilv,                                      \
+        Dither_t dither, const uint8_t* in[2], uint8_t* out[2], const uint8_t* base[2],        \
+        uint32_t width, uint32_t xStart, uint32_t xEnd, const Kernel_t* kernel) {              \
+        fn(dither, in, out, base, width >> kLumaShift_##ilv,                                   \
            xStart >> kLumaShift_##ilv, xEnd >> kLumaShift_##ilv,                               \
-           kernel, dither, kChannelCount_##ilv, kChannelSkip##ilv,                             \
+           kernel, kChannelCount_##ilv, kChannelSkip##ilv,                                     \
            kChannelMap##ilv VN_HORI_MAX_VALUE_##fp()); }
 
 /* Helper macro for generating a single upscale_horizontal() unsigned promotion 
@@ -1225,12 +1217,12 @@ static const uint16_t kMaxValuePromotion_U14 = 16383;
  */
 #define VN_GEN_HORI_UNSIGNED_PROMOTION_FUNC(ilv, srcFP, dstFP, baseFP)                         \
     void horizontal##srcFP##To##dstFP##Base##baseFP##ilv(                                      \
-        Context_t* ctx, const uint8_t* in[2], uint8_t* out[2], const uint8_t* base[2],         \
-        uint32_t width, uint32_t xStart, uint32_t xEnd, const Kernel_t* kernel, bool dither) { \
+        Dither_t dither, const uint8_t* in[2], uint8_t* out[2], const uint8_t* base[2],        \
+        uint32_t width, uint32_t xStart, uint32_t xEnd, const Kernel_t* kernel) {              \
             horizontalU8ToU16BaseUN(                                                           \
-            ctx, in, out, base, width >> kLumaShift_##ilv,                                     \
+            dither, in, out, base, width >> kLumaShift_##ilv,                                  \
             xStart >> kLumaShift_##ilv, xEnd >> kLumaShift_##ilv,                              \
-            kernel, dither, kChannelCount_##ilv, kChannelSkip##ilv,                            \
+            kernel, kChannelCount_##ilv, kChannelSkip##ilv,                                    \
             kChannelMap##ilv, kFormatBytes_##srcFP,                                            \
             kShift_##srcFP##_##dstFP, kFormatBytes_##baseFP,                                   \
             kShift_##baseFP##_##dstFP, kMaxValuePromotion_##dstFP); }

@@ -1,8 +1,18 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decode/dequant.h"
 
 #include "common/memory.h"
+#include "decode/deserialiser.h"
 
 #include <math.h>
 
@@ -52,15 +62,6 @@ void quantMatrixSetDefault(QuantMatrix_t* matrix, ScalingMode_t loq0Scaling, Tra
 void quantMatrixDuplicateLOQs(QuantMatrix_t* matrix)
 {
     memoryCopy(matrix->values[LOQ1], matrix->values[LOQ0], RCLayerCountDDS * sizeof(uint8_t));
-}
-
-uint8_t* quantMatrixGetValues(QuantMatrix_t* matrix, LOQIndex_t index)
-{
-    if (!matrix || ((uint32_t)index >= LOQEnhancedCount)) {
-        return NULL;
-    }
-
-    return matrix->values[index];
 }
 
 /*------------------------------------------------------------------------------*/
@@ -233,6 +234,23 @@ static int32_t calculatePlaneLOQ(Dequant_t* dst, const DequantArgs_t* args, int3
 }
 
 /*------------------------------------------------------------------------------*/
+
+int32_t initialiseDequantArgs(const DeserialisedData_t* data, DequantArgs_t* args)
+{
+    args->planeCount = data->numPlanes;
+    args->layerCount = data->numLayers;
+    args->dequantOffsetMode = data->dequantOffsetMode;
+    args->dequantOffset = data->dequantOffset;
+    args->temporalEnabled = data->temporalEnabled;
+    args->temporalRefresh = data->temporalRefresh;
+    args->temporalStepWidthModifier = data->temporalStepWidthModifier;
+    args->stepWidth[LOQ0] = data->stepWidths[LOQ0];
+    args->stepWidth[LOQ1] = data->stepWidths[LOQ1];
+    args->chromaStepWidthMultiplier = data->chromaStepWidthMultiplier;
+    args->quantMatrix = (QuantMatrix_t*)&data->quantMatrix;
+
+    return 0;
+}
 
 int32_t dequantCalculate(DequantParams_t* params, const DequantArgs_t* args)
 {

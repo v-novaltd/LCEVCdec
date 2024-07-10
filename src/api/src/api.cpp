@@ -1,4 +1,13 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #define VNEnablePublicAPIExport
 
@@ -13,17 +22,12 @@
 #include <LCEVC/lcevc_dec.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 // ------------------------------------------------------------------------------------------------
 
 using namespace lcevc_dec::decoder;
-
-// - Structs --------------------------------------------------------------------------------------
-
-// These are Opaque wrappers for their Handled classes. We have to hide them in structs here
-// because the header has to follow C syntax, so templates can't be exposed, nor can nested
-// namespaces.
 
 // - Helper functions -----------------------------------------------------------------------------
 
@@ -614,6 +618,23 @@ LCEVC_API LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture(LCEVC_DecoderHandle decHa
     }
 
     return decoder->produceOutputPicture(*output, *decodeInformation);
+}
+
+LCEVC_API LCEVC_ReturnCode LCEVC_PeekDecoder(LCEVC_DecoderHandle decHandle, int64_t timestamp,
+                                             uint32_t* width, uint32_t* height)
+
+{
+    if ((width == nullptr) || (height == nullptr)) {
+        return LCEVC_InvalidParam;
+    }
+    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
+    Decoder* decoder = nullptr;
+    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
+    if (getDecResult != LCEVC_Success) {
+        return getDecResult;
+    }
+
+    return decoder->peek(timestamp, *width, *height);
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_SkipDecoder(LCEVC_DecoderHandle decHandle, int64_t timestamp)

@@ -1,4 +1,13 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "surface/blit.h"
 
@@ -54,25 +63,24 @@ int32_t blitSlicedJob(const void* executeContext, JobIndex_t index, SliceOffset_
     return 0;
 }
 
-bool surfaceBlit(Context_t* ctx, const Surface_t* src, const Surface_t* dst, BlendingMode_t blending)
+bool surfaceBlit(Logger_t log, ThreadManager_t* threadManager, CPUAccelerationFeatures_t cpuFeatures,
+                 const Surface_t* src, const Surface_t* dst, BlendingMode_t blending)
 {
-    ThreadManager_t* threadManager = &ctx->threadManager;
-
     if (src->interleaving != dst->interleaving) {
-        VN_ERROR(ctx->log, "blit requires both src and dst ilvl to be the same\n");
+        VN_ERROR(log, "blit requires both src and dst ilvl to be the same\n");
         return false;
     }
 
     const BlitSlicedJobContext_t slicedJobContext = {
-        surfaceBlitGetFunction(src->type, dst->type, src->interleaving, blending, ctx->cpuFeatures),
-        src, dst};
+        surfaceBlitGetFunction(src->type, dst->type, src->interleaving, blending, cpuFeatures), src, dst};
 
     if (!slicedJobContext.function) {
-        VN_ERROR(ctx->log, "failed to find function to perform blitting with\n");
+        VN_ERROR(log, "failed to find function to perform blitting with\n");
         return false;
     }
 
-    return threadingExecuteSlicedJobs(threadManager, &blitSlicedJob, &slicedJobContext, dst->height);
+    return threadingExecuteSlicedJobs(threadManager, &blitSlicedJob, &slicedJobContext,
+                                      minU32(src->height, dst->height));
 }
 
 /*------------------------------------------------------------------------------*/

@@ -1,27 +1,29 @@
-# Copyright 2023 - V-Nova Ltd.
-#
+# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# This software is licensed under the BSD-3-Clause-Clear License.
+# No patent licenses are granted under this license. For enquiries about patent licenses,
+# please contact legal@v-nova.com.
+# The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+# If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+# AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+# DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+# EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
+
 include("Sources.cmake")
 
 find_package(fmt REQUIRED)
 find_package(CLI11 REQUIRED)
 find_package(xxHash REQUIRED)
 
-if(VN_SDK_EXECUTABLES)
-	add_executable(lcevc_api_test_harness ${SOURCES})
-	lcevc_set_properties(lcevc_api_test_harness)
+add_executable(lcevc_dec_test_harness ${SOURCES})
+lcevc_set_properties(lcevc_dec_test_harness)
 
-	target_link_libraries(lcevc_api_test_harness
-		lcevc_dec::api
-		lcevc_dec::utility
-		fmt::fmt
-		CLI11::CLI11
-		xxHash::xxHash
-		)
+target_link_libraries(lcevc_dec_test_harness lcevc_dec::api lcevc_dec::utility fmt::fmt
+                      CLI11::CLI11 xxHash::xxHash)
 
-	# Tests can include interal headers from helper sources
-	target_include_directories(lcevc_api_test_harness PUBLIC "${CMAKE_SOURCE_DIR}/src/utility/src")
+# Tests can include internal headers from helper sources
+target_include_directories(lcevc_dec_test_harness PUBLIC "${CMAKE_SOURCE_DIR}/src/utility/src")
 
-	add_executable(lcevc_dec::api_test_harness ALIAS lcevc_api_test_harness)
+add_executable(lcevc_dec::test_harness ALIAS lcevc_dec_test_harness)
 
-	install(TARGETS "lcevc_api_test_harness"  DESTINATION "bin")
-endif()
+install(TARGETS lcevc_dec_test_harness DESTINATION "bin")

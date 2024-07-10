@@ -103,7 +103,7 @@ AlignEscapedNewlines: Left
 IndentExternBlock: NoIndent
 
 # Includes
-SortIncludes: true
+SortIncludes: CaseInsensitive
 IncludeBlocks: Regroup
 IncludeCategories:
   - Regex:           '<[[:alnum:|_]]+>'

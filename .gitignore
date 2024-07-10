@@ -8,7 +8,7 @@ compile_commands.json
 __pycache__
 test_cache
 test_outputs
-dec_test_results.json
+dec_test_results*.json
 env
 .idea
 
@@ -16,12 +16,11 @@ env
 *.sublime-workspace
 .vscode
 .vs
+*.TMP
 .benchmarks
 .codechecker
 .scannerwork
 .report.json
-cache.vnsc
-
 
 .DS_Store
 

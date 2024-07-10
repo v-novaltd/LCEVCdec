@@ -1,8 +1,19 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_BLIT_H_
 #define VN_DEC_CORE_BLIT_H_
 
 #include "common/platform.h"
+#include "common/types.h"
 
 /*! \file
  *
@@ -74,7 +85,8 @@
 
 /*------------------------------------------------------------------------------*/
 
-typedef struct Context Context_t;
+typedef struct Logger* Logger_t;
+typedef struct ThreadManager ThreadManager_t;
 typedef struct Surface Surface_t;
 
 /*------------------------------------------------------------------------------*/
@@ -89,13 +101,16 @@ typedef enum BlendingMode
 /*! \brief Blits a source surface to a destination surface using the specified
  *         blending mode.
  *
- * \param ctx      The decoder context.
- * \param src      The source surface to blit from.
- * \param dst      The destination surface to blit to.
- * \param blending The blending operation to apply during the blit.
+ * \param log            The logger.
+ * \param threadManager  The thread manager.
+ * \param cpuFeatures    Bitfield indicating the available CPU acceleration features.
+ * \param src            The source surface to blit from.
+ * \param dst            The destination surface to blit to.
+ * \param blending       The blending operation to apply during the blit.
  *
  * \return True if the blit operation was successful. */
-bool surfaceBlit(Context_t* ctx, const Surface_t* src, const Surface_t* dst, BlendingMode_t blending);
+bool surfaceBlit(Logger_t log, ThreadManager_t* threadManager, CPUAccelerationFeatures_t cpuFeatures,
+                 const Surface_t* src, const Surface_t* dst, BlendingMode_t blending);
 
 /*------------------------------------------------------------------------------*/
 

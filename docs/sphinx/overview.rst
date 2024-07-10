@@ -2,7 +2,7 @@
 Overview
 ========
 
-The LCVEVC Decoder SDK provides a **C** API to a library that takes decoded video frames from a separate base decoder, along with encoded enhancement data, and produces enhanced video frames according to the LCEVC specification. It is the responsibility of the integration to manage the decoding of the base frames, and extracting the enhancement data from the overall video stream.
+The LCEVC Decoder SDK provides a **C** API to a library that takes decoded video frames from a separate base decoder, along with encoded enhancement data, and produces enhanced video frames according to the LCEVC specification. It is the responsibility of the integration to manage the decoding of the base frames, and extracting the enhancement data from the overall video stream.
 
 :ref:`Decoder` objects are allocated, configured, initialized and release using the Decoder SDK API.
 
@@ -74,7 +74,7 @@ Once configured, the decoder is moved to the *Initialized* state by calling :cpp
 Enhancement Decoding
 ....................
 
-Once a decoder has been configured, it can be used to decode an **LCEVC** enhanced video stream. The integration and decoder communicate using a *Send*/*Receive* mechanism. A *Send* call transfers owndership of resources into the decoder, and a *Receive* call takes ownership of resources from the the decoder.
+Once a decoder has been configured, it can be used to decode an **LCEVC** enhanced video stream. The integration and decoder communicate using a *Send*/*Receive* mechanism. A *Send* call transfers ownership of resources into the decoder, and a *Receive* call takes ownership of resources from the the decoder.
 
 The integration sends:
 
@@ -175,7 +175,7 @@ The event callback will be made *before* the ``LCEVC_DestroyDecoder()`` function
 
   autoactivate on
 
-  Integration -> Decoder: **LCEVC_DestrocyDecoder(decoderHandle)**
+  Integration -> Decoder: **LCEVC_DestroyDecoder(decoderHandle)**
   return **void**
 
 Pictures
@@ -248,7 +248,7 @@ A picture can have it's description adjusted, by using the :cpp:func:`LCEVC_SetP
 
 For the pictures coming from the base decoder, the integration layer will set up picture description derived from the base decoder's configuration and frames.
 
-For the pictures coming from enhancement decoder, the integration will allocate them with small default values, then send them to the decoder. The decoder will then set the new description according to the configuration of the LCEVC enhancement data stream. It picture pools are being used - the enhanced pictures will cycle around with an unchanged layout, until the next configuration change embedded in the LEVC stream.
+For the pictures coming from enhancement decoder, the integration will allocate them with small default values, then send them to the decoder. The decoder will then set the new description according to the configuration of the LCEVC enhancement data stream. It picture pools are being used - the enhanced pictures will cycle around with an unchanged layout, until the next configuration change embedded in the LCEVC stream.
 
 The integration can then query the description of the enhanced ``Picture`` objects using the :cpp:func:`LCEVC_GetPictureDesc` function.
 
@@ -335,7 +335,7 @@ Whilst it is possible to write generic image copy routines completely based on t
       for(uint32_r = 0; r < rows; ++r) {
         memcpy(src, dest, sz);
         src += sz;
-        dest += desc->rowByteSstride;
+        dest += desc->rowByteStride;
       }
 
       return;
@@ -376,7 +376,7 @@ Typically, this timestamp would be transcribed straight from overall stream cont
 Decode Information
 ------------------
 
-The enhanced output picture received from the LCEVC enhancement decoder have information about the decoding process written into a :cpp:struct:`LCEVC_DecodeInformation` structure as an output of the :cpp:func:`LCEVC_ReceiveDecoderPicture` function:
+The enhanced output picture received from the LCEVC enhancement decoder has information about the decoding process written into an :cpp:struct:`LCEVC_DecodeInformation` structure as an output of the :cpp:func:`LCEVC_ReceiveDecoderPicture` function:
 
 .. code-block:: C++
 
@@ -474,14 +474,83 @@ A handle can be tested for null by checking the value:
 Supported Configuration Options
 -------------------------------
 
-=================== ========== =============
-Option              Type       Description
-=================== ========== =============
-"max_width"         Int        The highest output width that this decoder is expected to support
-"max_height"        Int        The highest output height that this decoder is expected to support
-"max_bitdepth"      Int        The highest output bit depth that this decoder is expected to support
-"max_latency        Int        The maximum number of frames that the decoder is expected to buffer
-"events"            IntArray   :cpp:enum:`LCEVC_Event` Events that will generated via the event callback
-"log_level"         Int        An implementation defined log detail level - larger for more detail
-=================== ========== =============
+Note that these are all the *supported* configuration options. You should almost never need to set any of these, except
+those listed in :ref:`Configurable Options`. This list is sorted alphabetically (with "_" first)
 
+=========================== ========== ================================================================================
+Option                      Type       Description
+=========================== ========== ================================================================================
+"allow_dithering"           boolean    If false, dithering will not occur, even when it's enabled in the stream.
+"core_threads"              int        The number of threads to use in the Core decoder (the part of the decoder which
+                                       generates residuals from the bitstream).
+"disable_simd"              boolean    If true, no SIMD (that's SSE, NEON, etc.) will be used.
+"dither_seed"               int        The seed to use for dithering.
+"dither_strength"           int        If provided, this overrides the stream's Dither strength. Dither is random noise
+                                       applied during rendering. It subjectively improves video quality, at low cost.
+"enable_logo_overlay"       boolean    If true, an LCEVC logo will appear, to let you know that LCEVC is being used.
+"events"                    intArray   Array of :cpp:enum:`LCEVC_Event`. The events that will be generated via the
+                                       event callback.
+"generate_cmd_buffers"      boolean    If true, residuals are generated as command buffers. Otherwise, residuals are
+                                       arrays of pixels.
+"high_precision"            boolean    If true, Core decoder runs in Precision mode. Otherwise, runs in Speed mode.
+"highlight_residuals"       boolean    If true, residuals will appear as saturated squares.
+"log_level"                 int        An :cpp:enum:`LCEVC_LogLevel`. The global *minimum* log level. In addition to
+                                       this, you can *raise* the log level for specific components, using the
+                                       "log_level_<component>" options below. Users are not expected to know what each
+                                       component refers to, but developers should (they typically correspond to
+                                       internal files or classes of the same name).
+"log_level_api"             int        An :cpp:enum:`LCEVC_LogLevel`. Sets the minimum log level for API function
+                                       calls.
+"log_level_buffer_manager"  int        An :cpp:enum:`LCEVC_LogLevel`. Sets the minimum log level for the BufferManager.
+"log_level_core_decoder"    int        An :cpp:enum:`LCEVC_LogLevel`. Sets the minimum log level for the Core Decoder.
+"log_level_decoder"         int        An :cpp:enum:`LCEVC_LogLevel`. Sets the minimum log level for the Decoder (the
+                                       wrapper around the Core Decoder).
+"log_level_decoder_config"  int        An :cpp:enum:`LCEVC_LogLevel`. Sets the minimum log level for the Decoder's
+                                       Config.
+"log_level_interface"       int        An :cpp:enum:`LCEVC_LogLevel`. Sets the minimum log level for the Interface
+                                       (the utility containing various conversion functions and constants).
+"log_level_lcevc_processor" int        An :cpp:enum:`LCEVC_LogLevel`. Sets the minimum log level for the LCEVC
+                                       processor.
+"log_level_log"             int        An :cpp:enum:`LCEVC_LogLevel`. Sets the minimum log level for the Logger itself.
+"log_level_picture"         int        An :cpp:enum:`LCEVC_LogLevel`. Sets the minimum log level for the Picture class.
+"log_stdout"                boolean    If true, logs go to stdout. If false, logs go to a platform-specific log
+                                       handler: `__android_log_write` (Android), `os_log_with_type` (Apple), or else
+                                       `stderr` only for severe logs (Windows, Linux). Windows also always prints logs
+                                       to the Debugger (e.g. the Visual Studio console).
+"log_timestamp_precision"   int        An :cpp:enum:`LCEVC_LogPrecision`. The precision of the log's timestamps. By
+                                       default, the timestamp precision is determined based on "log_level", but you can
+                                       override that with this option.
+"logo_overlay_delay_frames" int        The number of frames to wait before display the LCEVC logo overlay, if enabled.
+"logo_overlay_position_x"   int        The horizontal pixel position of the LCEVC logo overlay, if enabled.
+"logo_overlay_position_y"   int        The vertical pixel position of the LCEVC logo overlay, if enabled.
+"loq_unprocessed_cap"       int        The number of frames of raw LCEVC Enhancement data to store before rejecting it.
+                                       Use -1 to wrap around to infinity for "no cap".
+"parallel_decode"           boolean    If true, the Core uses the "Parallel decode" pipeline.
+"passthrough_mode"          int        Determines if the Decoder runs in passthrough mode never (-1), always (1), or
+                                       only when LCEVC Enhancement data is missing (0). Passthrough mode means that no
+                                       LCEVC is applied whatsoever: the base is simply copied to the output picture.
+"predicted_average_method"  int        Whether to apply predicted average directly (1) or approximately, using the
+                                       upsampling kernel (2). Predicted average is a step of upsampling, in which the
+                                       upsampled 2x2 pixel is normalised to the same magnitude as the original 1 pixel.
+"pss_surface_fp_setting"    int        This determines whether residuals are stored in S16 (0) or U8 (1) surfaces. The
+                                       default (-1) is to use U8 surfaces if and only if all LOQs are 8bit.
+"results_queue_cap"         int        The number of decoding results (either decoded pictures or decode failures) to
+                                       store. This queue is cleared by calling :cpp:func:`LCEVC_ReceiveDecoderPicture`.
+                                       Use -1 to wrap around to infinity for "no cap".
+"s_filter_strength"         float      If provided, this overrides the stream's S-Filter strength. S-Filter is a
+                                       sharpening modification to the upsampling step.
+=========================== ========== ================================================================================
+
+Configuration Options Not Yet Implemented
+-----------------------------------------
+
+These are configuration options which are not yet implemented.
+
+=========================== ========== ================================================================================
+Option                      Type       Description
+=========================== ========== ================================================================================
+"max_width"                 int        The highest output width that this decoder is expected to support
+"max_height"                int        The highest output height that this decoder is expected to support
+"max_bitdepth"              int        The highest output bit depth that this decoder is expected to support
+"max_latency                int        The maximum number of frames that the decoder is expected to buffer
+=========================== ========== ================================================================================

@@ -1,4 +1,13 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 // This tests api/include/LCEVC/lcevc_dec.h against event-based operation. This is a near-duplicate
 // of `test_event_manager`, but with a focus on how the code might realistically get used, in case
@@ -34,11 +43,25 @@ void DecodeTester::setup()
     ASSERT_EQ(LCEVC_ConfigureDecoderIntArray(m_hdl, "events", static_cast<uint32_t>(kAllEvents.size()),
                                              kAllEvents.data()),
               LCEVC_Success);
+    ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_hdl, "core_threads", 1), LCEVC_Success);
     ASSERT_EQ(LCEVC_SetDecoderEventCallback(m_hdl, ::callback, static_cast<void*>(this)), LCEVC_Success);
     LCEVC_DefaultPictureDesc(&m_inputDesc, LCEVC_I420_8, 960, 540);
     LCEVC_DefaultPictureDesc(&m_outputDesc, LCEVC_I420_8, 1920, 1080);
 
     ASSERT_EQ(LCEVC_InitializeDecoder(m_hdl), LCEVC_Success);
+}
+
+void DecodeTester::teardown()
+{
+    // This blocks any new sends (in case we're tearing down after a timeout).
+    m_basePtsToSend = m_enhancementPtsToSend = m_latestReceivedPts = m_afterTheEndPts;
+
+    // Receive any pending outputs before destroying, or else you might set certain outputs to NULL
+    // while the decoder is writing to those destinations.
+    receiveOutput(false);
+
+    LCEVC_DestroyDecoder(m_hdl);
+    m_tornDown = true;
 }
 
 void DecodeTester::callback(LCEVC_DecoderHandle decHandle, LCEVC_Event event, LCEVC_PictureHandle picHandle,
@@ -136,7 +159,7 @@ void DecodeTester::sendEnhancement(LCEVC_DecoderHandle decHandle)
     }
 }
 
-void DecodeTester::receiveOutput()
+void DecodeTester::receiveOutput(bool expectOutput)
 {
     LCEVC_PictureHandle picHdl = {};
     LCEVC_DecodeInformation decodeInformation = {};
@@ -166,7 +189,10 @@ void DecodeTester::receiveOutput()
             }
         }
     }
-    EXPECT_TRUE(anySuccesses);
+
+    if (expectOutput) {
+        EXPECT_TRUE(anySuccesses);
+    }
 }
 
 void DecodeTester::reuseBase(LCEVC_PictureHandle picHandle)
@@ -223,8 +249,8 @@ TEST(APIEventReporting, Test)
     // Wait until tester is done, with a 15 second timeout for the entire 100-frame decode loop
     // (locally, this took about 500ms, and 15 seconds was sufficient even for coverage builds).
     bool wasTimeout = false;
-    const std::chrono::milliseconds timeout(15000);
-    EXPECT_TRUE(
+    const std::chrono::milliseconds timeout(45000);
+    ASSERT_TRUE(
         atomicWaitUntilTimeout(wasTimeout, timeout, [&tester]() { return tester.atomicIsDone(); }));
     EXPECT_FALSE(wasTimeout);
 

@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "decode/deserialiser.h"
 
 #include "common/bitstream.h"
@@ -6,6 +16,7 @@
 #include "common/memory.h"
 #include "common/types.h"
 #include "context.h"
+#include "decode/dequant.h"
 #include "decode/entropy.h"
 #include "surface/sharpen.h"
 
@@ -62,6 +73,7 @@ typedef enum AdditionalInfoType
     AIT_SEI = 0,
     AIT_VUI = 1,
     AIT_SFilter = 23,
+    AIT_HDR = 25,
 } AdditionalInfoType_t;
 
 typedef enum SEIPayloadType
@@ -127,6 +139,7 @@ static inline const char* additionalInfoTypeToString(AdditionalInfoType_t type)
         case AIT_SEI: return "sei";
         case AIT_VUI: return "vui";
         case AIT_SFilter: return "s_filter";
+        case AIT_HDR: return "hdr";
     }
 
     return "Unknown";
@@ -148,7 +161,7 @@ static inline const char* seiPayloadTypeToString(SEIPayloadType_t type)
 /*------------------------------------------------------------------------------*/
 
 /* NAL Unit Header - 7.3.2 (Table-6) & 7.4.2.2 */
-static int32_t parseNALHeader(Context_t* ctx, DeserialisedData_t* data, ByteStream_t* stream)
+static int32_t parseNALHeader(Logger_t log, DeserialisedData_t* data, ByteStream_t* stream)
 {
     int32_t res = 0;
     uint8_t header[5] = {0};
@@ -157,7 +170,7 @@ static int32_t parseNALHeader(Context_t* ctx, DeserialisedData_t* data, ByteStre
 
     /* start-code (@todo: Proposal to remove this). */
     if (header[0] != 0x0 || header[1] != 0x0 || header[2] != 0x1) {
-        VN_ERROR(ctx->log, "Malformed header, prefix bytes are not [0x0, 0x0, 0x1]\n");
+        VN_ERROR(log, "Malformed header, prefix bytes are not [0x0, 0x0, 0x1]\n");
         return -1;
     }
 
@@ -168,20 +181,20 @@ static int32_t parseNALHeader(Context_t* ctx, DeserialisedData_t* data, ByteStre
 
     /* forbidden bits and reserved flag */
     if ((header[3] & 0xC1) != 0x41 || header[4] != 0xFF) {
-        VN_ERROR(ctx->log, "Malformed header: forbidden bits or reserved flags not as expected\n");
+        VN_ERROR(log, "Malformed header: forbidden bits or reserved flags not as expected\n");
         return -1;
     }
 
     data->type = (NALType_t)((header[3] & 0x3E) >> 1);
     if (data->type != NTNonIDR && data->type != NTIDR) {
-        VN_ERROR(ctx->log, "Unrecognized LCEVC nal type, it should be IDR or NonIDR\n");
+        VN_ERROR(log, "Unrecognized LCEVC nal type, it should be IDR or NonIDR\n");
         return -1;
     }
 
     return 0;
 }
 
-static int32_t unencapsulate(Context_t* ctx, DeserialisedData_t* data, ByteStream_t* stream)
+static int32_t unencapsulate(Memory_t memory, Logger_t log, DeserialisedData_t* data, ByteStream_t* stream)
 {
     int32_t res = 0;
 
@@ -190,20 +203,20 @@ static int32_t unencapsulate(Context_t* ctx, DeserialisedData_t* data, ByteStrea
     stream->size -= 1;
 
     if (stream->data[stream->size] != 0x80) {
-        VN_ERROR(ctx->log, "Malformed NAL unit: missing RBSP stop-bit\n");
+        VN_ERROR(log, "Malformed NAL unit: missing RBSP stop-bit\n");
     }
 
-    if (parseNALHeader(ctx, data, stream) < 0) {
+    if (parseNALHeader(log, data, stream) < 0) {
         return -1;
     }
 
     /* Cache the unencapsulation buffer. */
     if (stream->size > data->unencapsulatedCapacity) {
-        uint8_t* newPtr = VN_REALLOC_T_ARR(ctx->memory, data->unencapsulatedData, uint8_t, stream->size);
+        uint8_t* newPtr = VN_REALLOC_T_ARR(memory, data->unencapsulatedData, uint8_t, stream->size);
 
         if (newPtr == NULL) {
-            VN_ERROR(ctx->log, "unencapsulation buffer realloc returned NULL");
-            VN_FREE(ctx->memory, data->unencapsulatedData);
+            VN_ERROR(log, "unencapsulation buffer realloc returned NULL");
+            VN_FREE(memory, data->unencapsulatedData);
             return -1;
         }
 
@@ -306,14 +319,15 @@ static int32_t tiledRLEDecoderRead(TiledRLEDecoder_t* decoder, uint8_t* destinat
 
 typedef struct TiledSizeDecoder
 {
-    Context_t* ctx;
+    Memory_t memory;
     int16_t* sizes;
     uint32_t currentIndex;
     uint32_t numSizes;
 } TiledSizeDecoder_t;
 
-static int32_t tiledSizeDecoderInitialise(Context_t* ctx, TiledSizeDecoder_t* decoder, uint32_t numSizes,
-                                          ByteStream_t* stream, TileCompressionSizePerTile_t type)
+static int32_t tiledSizeDecoderInitialise(Memory_t memory, Logger_t log, TiledSizeDecoder_t* decoder,
+                                          uint32_t numSizes, ByteStream_t* stream,
+                                          TileCompressionSizePerTile_t type, bool useOldCodeLengths)
 {
     int32_t res = 0;
 
@@ -326,21 +340,21 @@ static int32_t tiledSizeDecoderInitialise(Context_t* ctx, TiledSizeDecoder_t* de
 
     /* Allocate buffer to store the decoded sizes. */
     if (decoder->numSizes < numSizes) {
-        int16_t* newSizes = VN_REALLOC_T_ARR(ctx->memory, decoder->sizes, int16_t, numSizes);
+        int16_t* newSizes = VN_REALLOC_T_ARR(memory, decoder->sizes, int16_t, numSizes);
 
         if (!newSizes) {
             /* Clean up.*/
-            VN_FREE(ctx->memory, decoder->sizes);
+            VN_FREE(memory, decoder->sizes);
             decoder->sizes = NULL;
 
-            VN_ERROR(ctx->log, "unable to allocate tile sizes buffer\n");
+            VN_ERROR(log, "unable to allocate tile sizes buffer\n");
             return -1;
         }
 
         decoder->sizes = newSizes;
     }
 
-    decoder->ctx = ctx;
+    decoder->memory = memory;
     decoder->currentIndex = 0;
     decoder->numSizes = numSizes;
 
@@ -352,7 +366,7 @@ static int32_t tiledSizeDecoderInitialise(Context_t* ctx, TiledSizeDecoder_t* de
     chunk.size = bytestreamRemaining(stream);
 
     EntropyDecoder_t layerDecoder = {0};
-    VN_CHECK(entropyInitialise(ctx, &layerDecoder, &chunk, decoderType));
+    VN_CHECK(entropyInitialise(log, &layerDecoder, &chunk, decoderType, useOldCodeLengths));
 
     VN_DEBUG_SYNTAX("Tiled size decoder\n");
 
@@ -366,8 +380,6 @@ static int32_t tiledSizeDecoderInitialise(Context_t* ctx, TiledSizeDecoder_t* de
 
     VN_CHECK(bytestreamSeek(stream, consumedBytes));
 
-    entropyRelease(&layerDecoder);
-
     if (type == TCSPTTPrefixOnDiff) {
         for (uint32_t i = 1; i < numSizes; ++i) {
             decoder->sizes[i] += decoder->sizes[i - 1];
@@ -380,7 +392,7 @@ static int32_t tiledSizeDecoderInitialise(Context_t* ctx, TiledSizeDecoder_t* de
 static void tiledSizeDecoderRelease(TiledSizeDecoder_t* decoder)
 {
     if (decoder && decoder->sizes) {
-        VN_FREE(decoder->ctx->memory, decoder->sizes);
+        VN_FREE(decoder->memory, decoder->sizes);
     }
 }
 
@@ -409,17 +421,18 @@ static int32_t quantMatrixParseLOQ(ByteStream_t* stream, LOQIndex_t loq, Deseria
     return 0;
 }
 
-static void quantMatrixDebugLog(Context_t* ctx, DeserialisedData_t* output, LOQIndex_t loq)
+static void quantMatrixDebugLog(const DeserialisedData_t* deserialised, LOQIndex_t loq)
 {
-    const uint8_t* values = quantMatrixGetValues(&output->quantMatrix, loq);
+#if !VN_ENABLE_DEBUG_SYNTAX()
+    VN_UNUSED(deserialised);
+    VN_UNUSED(loq);
+#else
+    const uint8_t* values = quantMatrixGetValues(&deserialised->quantMatrix, loq);
 
-    VN_UNUSED(ctx);
-    VN_UNUSED(values);
-
-    if (output->transform == TransformDD) {
+    if (deserialisedOut->transform == TransformDD) {
         VN_DEBUG_SYNTAX("  Quant-matrix LOQ-%u: %u %u %u %u\n", loq, values[0], values[1],
                         values[2], values[3]);
-    } else if (output->transform == TransformDDS) {
+    } else if (deserialisedOut->transform == TransformDDS) {
         VN_DEBUG_SYNTAX("  Quant-matrix LOQ-%u: %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u\n",
                         loq, values[0], values[1], values[2], values[3], values[4], values[5],
                         values[6], values[7], values[8], values[9], values[10], values[11],
@@ -427,14 +440,14 @@ static void quantMatrixDebugLog(Context_t* ctx, DeserialisedData_t* output, LOQI
     } else {
         VN_DEBUG_SYNTAX("  Unknown layer count for quant-matrix\n");
     }
+#endif
 }
 
-static int32_t parseConformanceValue(Context_t* ctx, ByteStream_t* stream, uint16_t* dst, const char* debugLabel)
+static int32_t parseConformanceValue(ByteStream_t* stream, uint16_t* dst, const char* debugLabel)
 {
     uint64_t value;
     int32_t res = 0;
 
-    VN_UNUSED(ctx);
     VN_UNUSED(debugLabel);
 
     VN_CHECK(bytestreamReadMultiByte(stream, &value));
@@ -489,12 +502,12 @@ static int32_t calculateTileDimensions(DeserialisedData_t* data)
 /*! \brief Determines the number of whole and partial tiles across and down for
  *         each Plane and LOQ.
  *
- * \param ctx        Decoder context
+ * \param log        Decoder context's logger
  * \param data       Deserialised data to obtain dimensions from
  *
  * \return 0 on success, otherwise -1
  */
-static int32_t calculateTileCounts(Context_t* ctx, DeserialisedData_t* data)
+static int32_t calculateTileCounts(Logger_t log, DeserialisedData_t* data)
 {
     const int32_t tuSize = (data->transform == TransformDDS) ? 4 : 2;
 
@@ -504,8 +517,7 @@ static int32_t calculateTileCounts(Context_t* ctx, DeserialisedData_t* data)
         int32_t* tilesDown = &data->tilesDown[plane][0];
 
         if ((data->tileWidth[plane] % tuSize) || (data->tileHeight[plane] % tuSize)) {
-            VN_ERROR(ctx->log,
-                     "invalid stream: Tile dimensions must be divisible by transform size");
+            VN_ERROR(log, "invalid stream: Tile dimensions must be divisible by transform size");
             return -1;
         }
 
@@ -526,8 +538,8 @@ static int32_t calculateTileCounts(Context_t* ctx, DeserialisedData_t* data)
             /* As it is currently intended that all planes at a given LOQ have the
              * same number of tiles, ensure that is the case. */
             if ((plane > 1) && (data->tileCount[plane][loq] != data->tileCount[0][loq])) {
-                VN_ERROR(ctx->log, "Invalid tile counts calculated. Each plane should have the "
-                                   "same number of tiles\n");
+                VN_ERROR(log, "Invalid tile counts calculated. Each plane should have the "
+                              "same number of tiles\n");
                 return -1;
             }
         }
@@ -565,7 +577,7 @@ static inline void calculateTileChunkIndices(DeserialisedData_t* data)
     }
 }
 
-static int32_t calculateTileConfiguration(Context_t* ctx, DeserialisedData_t* data)
+static int32_t calculateTileConfiguration(Logger_t log, DeserialisedData_t* data)
 {
     int32_t res = 0;
 
@@ -573,7 +585,7 @@ static int32_t calculateTileConfiguration(Context_t* ctx, DeserialisedData_t* da
     VN_CHECK(calculateTileDimensions(data));
 
     /* Determine number of tiles across all planes and LOQs. */
-    VN_CHECK(calculateTileCounts(ctx, data));
+    VN_CHECK(calculateTileCounts(log, data));
 
     /* Pre-calculate chunk offsets for quicker chunk lookup. */
     calculateTileChunkIndices(data);
@@ -581,8 +593,8 @@ static int32_t calculateTileConfiguration(Context_t* ctx, DeserialisedData_t* da
     return res;
 }
 
-static int32_t getLayerChunkIndex(DeserialisedData_t* data, int32_t planeIndex, LOQIndex_t loq,
-                                  int32_t tile, int32_t layer)
+static int32_t getLayerChunkIndex(const DeserialisedData_t* data, int32_t planeIndex,
+                                  LOQIndex_t loq, int32_t tile, int32_t layer)
 {
     /* Requires the indices to be cached. */
     return data->tileChunkResidualIndex[planeIndex][loq] + (tile * data->numLayers) + layer;
@@ -590,11 +602,11 @@ static int32_t getLayerChunkIndex(DeserialisedData_t* data, int32_t planeIndex, 
 
 /*------------------------------------------------------------------------------*/
 
-static bool isDepthConfigSupported(Context_t* ctx, DeserialisedData_t* data)
+static bool isDepthConfigSupported(Logger_t log, DeserialisedData_t* data)
 {
     /* Currently only support promoting base-depth to enhancement depth. */
     if (data->enhaDepth < data->baseDepth) {
-        VN_ERROR(ctx->log, "stream: Unsupported functionality. depth configuration is unsupported - [base_depth=%s, enha_depth=%s, loq1_use_enha_depth=%s]\n",
+        VN_ERROR(log, "stream: Unsupported functionality. depth configuration is unsupported - [base_depth=%s, enha_depth=%s, loq1_use_enha_depth=%s]\n",
                  bitdepthToString(data->baseDepth), bitdepthToString(data->enhaDepth),
                  data->loq1UseEnhaDepth ? "true" : "false");
         return false;
@@ -603,7 +615,7 @@ static bool isDepthConfigSupported(Context_t* ctx, DeserialisedData_t* data)
     return true;
 }
 
-static bool validateResolution(Context_t* ctx, DeserialisedData_t* data)
+static bool validateResolution(Logger_t log, DeserialisedData_t* data)
 {
     const ScalingMode_t scaling = data->scalingModes[LOQ0];
     const Chroma_t chroma = data->chroma;
@@ -626,8 +638,8 @@ static bool validateResolution(Context_t* ctx, DeserialisedData_t* data)
 
     /* This relies on alignments both being a power of 2. */
     if ((data->width & (horiAlignment - 1)) || (data->height & (vertAlignment - 1))) {
-        VN_ERROR(ctx->log, "Resolution not supported in LCEVC layer. Resolution must be a factor "
-                           "of whole transforms\n");
+        VN_ERROR(log, "Resolution not supported in LCEVC layer. Resolution must be a factor "
+                      "of whole transforms\n");
         return false;
     }
 
@@ -641,7 +653,7 @@ static void vnovaConfigReset(VNConfig_t* cfg) { memset(cfg, 0, sizeof(VNConfig_t
 /*------------------------------------------------------------------------------*/
 
 /* 7.3.4 (Table-8) & 7.4.3.2 */
-static int32_t parseBlockSequenceConfig(Context_t* ctx, ByteStream_t* stream, DeserialisedData_t* output)
+static int32_t parseBlockSequenceConfig(ByteStream_t* stream, DeserialisedData_t* output)
 {
     int32_t res = 0;
 
@@ -676,10 +688,10 @@ static int32_t parseBlockSequenceConfig(Context_t* ctx, ByteStream_t* stream, De
            conf_win_right_offset: mb
            conf_win_top_offset: mb
            conf_win_bottom_offset: mb */
-        VN_CHECK(parseConformanceValue(ctx, stream, &conformanceWindow->planes[0].left, "left"));
-        VN_CHECK(parseConformanceValue(ctx, stream, &conformanceWindow->planes[0].right, "right"));
-        VN_CHECK(parseConformanceValue(ctx, stream, &conformanceWindow->planes[0].top, "top"));
-        VN_CHECK(parseConformanceValue(ctx, stream, &conformanceWindow->planes[0].bottom, "bottom"));
+        VN_CHECK(parseConformanceValue(stream, &conformanceWindow->planes[0].left, "left"));
+        VN_CHECK(parseConformanceValue(stream, &conformanceWindow->planes[0].right, "right"));
+        VN_CHECK(parseConformanceValue(stream, &conformanceWindow->planes[0].top, "top"));
+        VN_CHECK(parseConformanceValue(stream, &conformanceWindow->planes[0].bottom, "bottom"));
 
         VN_DEBUG_SYNTAX("  Conformance window: %u %u %u %u\n", &conformanceWindow->planes[0].left,
                         &conformanceWindow->planes[0].right, &conformanceWindow->planes[0].top,
@@ -689,12 +701,12 @@ static int32_t parseBlockSequenceConfig(Context_t* ctx, ByteStream_t* stream, De
     return 0;
 }
 
-static void setUserDataConfig(Context_t* ctx, DeserialisedData_t* output, UserDataMode_t mode)
+static void setUserDataConfig(DeserialisedData_t* output, UserDataMode_t mode)
 {
     UserDataConfig_t* userData = &output->userData;
     memorySet(userData, 0, sizeof(UserDataConfig_t));
 
-    VN_DEBUG_SYNTAX("  User data mode: %s\n", userDataModeToString(userData->mode));
+    VN_DEBUG_SYNTAX("  User data mode: %s\n", userDataModeToString(mode));
 
     if (mode != UDMNone) {
         userData->enabled = true;
@@ -702,13 +714,13 @@ static void setUserDataConfig(Context_t* ctx, DeserialisedData_t* output, UserDa
         userData->shift = (mode == UDMWith2Bits) ? UDCShift2 : UDCShift6;
     }
 
-    VN_DEBUG_SYNTAX("  User data mode: %s\n", userDataModeToString(userData->mode));
+    VN_DEBUG_SYNTAX("  User data mode: %s\n", userDataModeToString(mode));
     VN_DEBUG_SYNTAX("  User data layer: %d\n", userData->layerIndex);
-    VN_DEBUG_SYNTAX("  User data shift: %d\n", userData->shift)
+    VN_DEBUG_SYNTAX("  User data shift: %d\n", userData->shift);
 }
 
 /* 7.3.5 (Table-9) & 7.4.3.3 */
-static int32_t parseBlockGlobalConfig(Context_t* ctx, ByteStream_t* stream, DeserialisedData_t* output)
+static int32_t parseBlockGlobalConfig(Logger_t log, ByteStream_t* stream, DeserialisedData_t* output)
 {
     int32_t res = 0;
 
@@ -736,7 +748,7 @@ static int32_t parseBlockGlobalConfig(Context_t* ctx, ByteStream_t* stream, Dese
         VN_DEBUG_SYNTAX("  Resolution width: %u\n", output->width);
         VN_DEBUG_SYNTAX("  Resolution height: %u\n", output->height);
     } else if (resType != kResolutionCustom) {
-        VN_ERROR(ctx->log, "Packet gave an unsupported resolution type %d\n", resType);
+        VN_ERROR(log, "Packet gave an unsupported resolution type %d\n", resType);
         return -1;
     }
 
@@ -748,7 +760,7 @@ static int32_t parseBlockGlobalConfig(Context_t* ctx, ByteStream_t* stream, Dese
         case TransformDD: output->numLayers = RCLayerCountDD; break;
         case TransformDDS: output->numLayers = RCLayerCountDDS; break;
         default: {
-            VN_ERROR(ctx->log, "Supplied transform is unrecognised: %s\n",
+            VN_ERROR(log, "Supplied transform is unrecognised: %s\n",
                      transformTypeToString(output->transform));
             return -1;
         }
@@ -792,7 +804,7 @@ static int32_t parseBlockGlobalConfig(Context_t* ctx, ByteStream_t* stream, Dese
 
     if (upsample != USNearest && upsample != USLinear && upsample != USCubic &&
         upsample != USModifiedCubic && upsample != USAdaptiveCubic) {
-        VN_ERROR(ctx->log, "unrecognized upscale type\n");
+        VN_ERROR(log, "unrecognized upscale type\n");
         return -1;
     }
 
@@ -817,7 +829,7 @@ static int32_t parseBlockGlobalConfig(Context_t* ctx, ByteStream_t* stream, Dese
     VN_DEBUG_SYNTAX("  Tile dimensions: %s\n", tileDimensionsToString(output->tileDimensions));
 
     /* user data mode: 2 bits */
-    setUserDataConfig(ctx, output, (UserDataMode_t)((data >> 2) & 0x03));
+    setUserDataConfig(output, (UserDataMode_t)((data >> 2) & 0x03));
 
     /* level-1 depth flag: 1 bit
        reserved: 1 bit */
@@ -828,7 +840,7 @@ static int32_t parseBlockGlobalConfig(Context_t* ctx, ByteStream_t* stream, Dese
     const uint8_t chromaStepWidthFlag = (data >> 0) & 0x01;
     VN_DEBUG_SYNTAX("  Chroma step-width flag: %u\n", chromaStepWidthFlag);
 
-    if (!isDepthConfigSupported(ctx, output)) {
+    if (!isDepthConfigSupported(log, output)) {
         return -1;
     }
 
@@ -843,7 +855,8 @@ static int32_t parseBlockGlobalConfig(Context_t* ctx, ByteStream_t* stream, Dese
             case PlanesY: output->numPlanes = 1; break;
             case PlanesYUV: output->numPlanes = 3; break;
             default: {
-                VN_ERROR(ctx->log, "Unrecognised plane type: %u\n", planeType);
+                VN_ERROR(log, "Unrecognised plane type: %u\n", planeType);
+                output->numPlanes = 0;
                 return -1;
             }
         }
@@ -943,7 +956,7 @@ static int32_t parseBlockGlobalConfig(Context_t* ctx, ByteStream_t* stream, Dese
     VN_DEBUG_SYNTAX("  Chroma step-width multiplier: %u\n", output->chromaStepWidthMultiplier);
 
     /* checks on viability of settings */
-    if (!validateResolution(ctx, output)) {
+    if (!validateResolution(log, output)) {
         return -1;
     }
 
@@ -990,13 +1003,13 @@ static int32_t parseBlockGlobalConfig(Context_t* ctx, ByteStream_t* stream, Dese
         }
 
         if ((window->planes[0].left + window->planes[0].right) >= output->width) {
-            VN_ERROR(ctx->log, "stream: Conformance window values combined are greater than decode width [left: %u, right: %u, width: %u]\n",
+            VN_ERROR(log, "stream: Conformance window values combined are greater than decode width [left: %u, right: %u, width: %u]\n",
                      window->planes[0].left, window->planes[0].right, output->width);
             return -1;
         }
 
         if ((window->planes[0].top + window->planes[0].bottom) >= output->height) {
-            VN_ERROR(ctx->log, "stream: Window values combined are greater than decode width [top: %u, bottom: %u, height: %u]\n",
+            VN_ERROR(log, "stream: Window values combined are greater than decode width [top: %u, bottom: %u, height: %u]\n",
                      window->planes[0].top, window->planes[0].bottom, output->height);
             return -1;
         }
@@ -1009,7 +1022,7 @@ static int32_t parseBlockGlobalConfig(Context_t* ctx, ByteStream_t* stream, Dese
 }
 
 /* 7.3.6 (Table-10) & 7.4.3.4 */
-static int32_t parseBlockPictureConfig(Context_t* ctx, ByteStream_t* stream, DeserialisedData_t* output)
+static int32_t parseBlockPictureConfig(ByteStream_t* stream, DeserialisedData_t* output)
 {
     int32_t res;
     uint8_t data;
@@ -1080,8 +1093,10 @@ static int32_t parseBlockPictureConfig(Context_t* ctx, ByteStream_t* stream, Des
         VN_DEBUG_SYNTAX("  Step-width LOQ-1: %u\n", output->stepWidths[LOQ1]);
 
         if (qmMode != QMMUsePrevious) {
-            /* Default both quant-matrices initially */
-            quantMatrixSetDefault(&output->quantMatrix, output->scalingModes[LOQ0], output->transform);
+            /* Default both quant-matrices initially if the frame is IDR */
+            if (output->type == NTIDR) {
+                quantMatrixSetDefault(&output->quantMatrix, output->scalingModes[LOQ0], output->transform);
+            }
 
             /* Load up LOQ-0 quant-matrix if it's signalled */
             if (qmMode == QMMCustomBoth || qmMode == QMMCustomLOQ0 || qmMode == QMMCustomBothUnique) {
@@ -1102,8 +1117,8 @@ static int32_t parseBlockPictureConfig(Context_t* ctx, ByteStream_t* stream, Des
             }
         }
 
-        quantMatrixDebugLog(ctx, output, LOQ0);
-        quantMatrixDebugLog(ctx, output, LOQ1);
+        quantMatrixDebugLog(output, LOQ0);
+        quantMatrixDebugLog(output, LOQ1);
 
         if (dequantOffsetEnabled != 0) {
             VN_CHECK(bytestreamReadU8(stream, &data));
@@ -1176,13 +1191,14 @@ static int32_t parseBlockPictureConfig(Context_t* ctx, ByteStream_t* stream, Des
 /*! \brief Helper that checks the chunk array allocation is sufficiently sized and
  *         if not it will resize accordingly.
  *
- * \param ctx           Decoder context.
+ * \param memory        Decoder context's memory manager.
+ * \param log           Decoder context's logger.
  * \param data          Deserialised data to allocate the chunk array on.
  * \param chunk_count   The number of chunks desired for the array.
  *
  * \return 0 on success, otherwise -1
  */
-static int32_t chunkCheckAlloc(Context_t* ctx, DeserialisedData_t* data)
+static int32_t chunkCheckAlloc(Memory_t memory, Logger_t log, DeserialisedData_t* data)
 {
     assert(data);
 
@@ -1204,15 +1220,15 @@ static int32_t chunkCheckAlloc(Context_t* ctx, DeserialisedData_t* data)
     /* Reallocate chunk memory if needed. */
     if (chunkCount != data->numChunks || !data->chunks) {
         if (data->chunks) {
-            VN_FREE(ctx->memory, data->chunks);
+            VN_FREE(memory, data->chunks);
         }
 
-        data->chunks = VN_CALLOC_T_ARR(ctx->memory, Chunk_t, chunkCount);
+        data->chunks = VN_CALLOC_T_ARR(memory, Chunk_t, chunkCount);
         data->numChunks = chunkCount;
     }
 
     if (!data->chunks) {
-        VN_ERROR(ctx->log, "Memory allocation for chunk data failed\n");
+        VN_ERROR(log, "Memory allocation for chunk data failed\n");
         return -1;
     }
 
@@ -1221,7 +1237,7 @@ static int32_t chunkCheckAlloc(Context_t* ctx, DeserialisedData_t* data)
     return 0;
 }
 
-static int32_t parseChunk(Context_t* ctx, ByteStream_t* stream, Chunk_t* chunk,
+static int32_t parseChunk(Logger_t log, ByteStream_t* stream, Chunk_t* chunk,
                           bool* loqEntropyEnabled, TiledSizeDecoder_t* sizeDecoder)
 {
     int32_t res = 0;
@@ -1233,7 +1249,7 @@ static int32_t parseChunk(Context_t* ctx, ByteStream_t* stream, Chunk_t* chunk,
             int16_t chunkSize = tiledSizeDecoderRead(sizeDecoder);
 
             if (chunkSize < 0) {
-                VN_ERROR(ctx->log, "stream: Failed to decode compressed chunk size\n");
+                VN_ERROR(log, "stream: Failed to decode compressed chunk size\n");
                 return -1;
             }
 
@@ -1243,7 +1259,7 @@ static int32_t parseChunk(Context_t* ctx, ByteStream_t* stream, Chunk_t* chunk,
             VN_CHECK(bytestreamReadMultiByte(stream, &mb));
 
             if (mb > INT_MAX) {
-                VN_ERROR(ctx->log, "stream: Chunk data size is larger than INT_MAX\n");
+                VN_ERROR(log, "stream: Chunk data size is larger than INT_MAX\n");
                 return -1;
             }
 
@@ -1278,7 +1294,7 @@ static int32_t parseChunkFlags(BitStream_t* stream, Chunk_t* chunks, int32_t num
     return res;
 }
 
-static int32_t parseCoeffChunks(Context_t* ctx, ByteStream_t* stream, DeserialisedData_t* output,
+static int32_t parseCoeffChunks(Logger_t log, ByteStream_t* stream, DeserialisedData_t* output,
                                 int32_t plane, LOQIndex_t loq)
 {
     int32_t res = 0;
@@ -1288,7 +1304,7 @@ static int32_t parseCoeffChunks(Context_t* ctx, ByteStream_t* stream, Deserialis
 
     for (int32_t layer = 0; layer < output->numLayers; ++layer) {
         VN_DEBUG_SYNTAX("    [%d, %d, %2d]: ", plane, loq, layer);
-        VN_CHECK(parseChunk(ctx, stream, &chunks[layer], &output->entropyEnabled[loq], NULL));
+        VN_CHECK(parseChunk(log, stream, &chunks[layer], &output->entropyEnabled[loq], NULL));
     }
 
     VN_DEBUG_SYNTAX("    %s enabled: %d\n", loqIndexToString((LOQIndex_t)loq),
@@ -1297,23 +1313,24 @@ static int32_t parseCoeffChunks(Context_t* ctx, ByteStream_t* stream, Deserialis
     return res;
 }
 
-static int32_t parseEncodedData(Context_t* ctx, ByteStream_t* stream, DeserialisedData_t* output)
+static int32_t parseEncodedData(Memory_t memory, Logger_t log, ByteStream_t* stream,
+                                DeserialisedData_t* output, perseus_pipeline_mode pipelineMode)
 {
     int32_t res = 0;
 
     if (!output->globalConfigSet) {
-        VN_ERROR(ctx->log, "stream: Have not yet received a global config block\n");
+        VN_ERROR(log, "stream: Have not yet received a global config block\n");
         return -1;
     }
 
     if (!output->pictureConfigSet) {
-        VN_ERROR(ctx->log, "stream: Have not yet received a picture config block\n");
+        VN_ERROR(log, "stream: Have not yet received a picture config block\n");
         return -1;
     }
 
-    VN_CHECK(calculateTileConfiguration(ctx, output));
+    VN_CHECK(calculateTileConfiguration(log, output));
 
-    VN_CHECK(chunkCheckAlloc(ctx, output));
+    VN_CHECK(chunkCheckAlloc(memory, log, output));
 
     output->entropyEnabled[LOQ0] = false;
     output->entropyEnabled[LOQ1] = false;
@@ -1341,7 +1358,7 @@ static int32_t parseEncodedData(Context_t* ctx, ByteStream_t* stream, Deserialis
     }
 
     // @todo(bob): This should be removed, not sure why we need to pass on the pipeline mode to the parsed data.
-    output->pipelineMode = ctx->pipelineMode;
+    output->pipelineMode = pipelineMode;
 
     /* Move bytestream forward with byte alignment */
     bytestreamSeek(stream, bitstreamGetConsumedBytes(&chunkHeadersStream));
@@ -1352,43 +1369,47 @@ static int32_t parseEncodedData(Context_t* ctx, ByteStream_t* stream, Deserialis
     for (int32_t plane = 0; plane < output->numPlanes; ++plane) {
         if (output->enhancementEnabled) {
             for (int32_t loq = LOQ1; loq >= LOQ0; --loq) {
-                VN_CHECK(parseCoeffChunks(ctx, stream, output, plane, (LOQIndex_t)loq));
+                VN_CHECK(parseCoeffChunks(log, stream, output, plane, (LOQIndex_t)loq));
             }
         }
 
         if (output->temporalChunkEnabled) {
             VN_DEBUG_SYNTAX("    [temporal: %d]: ", plane);
             Chunk_t* temporalChunk = NULL;
-            deserialiseGetTileTemporalChunk(output, plane, 0, &temporalChunk);
-            VN_CHECK(parseChunk(ctx, stream, temporalChunk, &output->entropyEnabled[LOQ0], NULL));
+            VN_CHECK(deserialiseGetTileTemporalChunk(output, plane, 0, &temporalChunk));
+            if (temporalChunk == NULL) {
+                return -1;
+            }
+            VN_CHECK(parseChunk(log, stream, temporalChunk, &output->entropyEnabled[LOQ0], NULL));
         }
     }
 
     return 0;
 }
 
-static int32_t parseEncodedDataTiled(Context_t* ctx, ByteStream_t* stream, DeserialisedData_t* output)
+static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t* stream,
+                                     DeserialisedData_t* output, bool useOldCodeLengths)
 {
     int32_t res = 0;
 
     if (!output->globalConfigSet) {
-        VN_ERROR(ctx->log, "stream: Have not yet received a global config block\n");
+        VN_ERROR(log, "stream: Have not yet received a global config block\n");
         return -1;
     }
 
     if (!output->pictureConfigSet) {
-        VN_ERROR(ctx->log, "stream: Have not yet received a picture config block\n");
+        VN_ERROR(log, "stream: Have not yet received a picture config block\n");
         return -1;
     }
 
     if (output->tileWidth[0] == 0 || output->tileHeight[0] == 0) {
-        VN_ERROR(ctx->log, "stream: Both tile dimensions must not be 0\n");
+        VN_ERROR(log, "stream: Both tile dimensions must not be 0\n");
         return -1;
     }
 
-    VN_CHECK(calculateTileConfiguration(ctx, output));
+    VN_CHECK(calculateTileConfiguration(log, output));
 
-    VN_CHECK(chunkCheckAlloc(ctx, output));
+    VN_CHECK(chunkCheckAlloc(memory, log, output));
 
     output->entropyEnabled[LOQ0] = false;
     output->entropyEnabled[LOQ1] = false;
@@ -1526,8 +1547,9 @@ static int32_t parseEncodedDataTiled(Context_t* ctx, ByteStream_t* stream, Deser
                                 numChunksEnabled += chunk->entropyEnabled;
                             }
 
-                            VN_CHECK(tiledSizeDecoderInitialise(ctx, &sizeDecoder, numChunksEnabled,
-                                                                stream, output->tileSizeCompression));
+                            VN_CHECK(tiledSizeDecoderInitialise(memory, log, &sizeDecoder, numChunksEnabled,
+                                                                stream, output->tileSizeCompression,
+                                                                useOldCodeLengths));
                         }
 
                         for (int32_t tile = 0; tile < currentTileCount; ++tile) {
@@ -1537,7 +1559,7 @@ static int32_t parseEncodedDataTiled(Context_t* ctx, ByteStream_t* stream, Deser
 
                             VN_DEBUG_SYNTAX("    [%d, %d, %2d, %3d] chunk %-4d: ", plane, loq,
                                             layer, tile, chunkIndex);
-                            VN_CHECK(parseChunk(ctx, stream, chunk, &output->entropyEnabled[loq],
+                            VN_CHECK(parseChunk(log, stream, chunk, &output->entropyEnabled[loq],
                                                 sizeDecoderPtr));
                         }
                     }
@@ -1558,13 +1580,13 @@ static int32_t parseEncodedDataTiled(Context_t* ctx, ByteStream_t* stream, Deser
                         numChunksEnabled += temporalTileChunks[tile].entropyEnabled;
                     }
 
-                    VN_CHECK(tiledSizeDecoderInitialise(ctx, &sizeDecoder, numChunksEnabled, stream,
-                                                        output->tileSizeCompression));
+                    VN_CHECK(tiledSizeDecoderInitialise(memory, log, &sizeDecoder, numChunksEnabled, stream,
+                                                        output->tileSizeCompression, useOldCodeLengths));
                 }
 
                 for (int32_t tile = 0; tile < currentTileCount; ++tile) {
                     VN_DEBUG_SYNTAX("    temporal: [%d, %3u]: ", plane, tile);
-                    VN_CHECK(parseChunk(ctx, stream, &temporalTileChunks[tile],
+                    VN_CHECK(parseChunk(log, stream, &temporalTileChunks[tile],
                                         &output->entropyEnabled[LOQ0], sizeDecoderPtr));
                 }
             }
@@ -1582,8 +1604,8 @@ static int32_t parseBlockFiller(ByteStream_t* stream, uint32_t blockSize)
     return bytestreamSeek(stream, blockSize);
 }
 
-static int32_t parseSEIPayload(Context_t* ctx, ByteStream_t* stream, DeserialisedData_t* output,
-                               uint32_t blockSize)
+static int32_t parseSEIPayload(ByteStream_t* stream, lcevc_hdr_info* hdrInfoOut,
+                               DeserialisedData_t* deserialisedOut, uint32_t blockSize)
 {
     int32_t res = 0;
 
@@ -1595,8 +1617,8 @@ static int32_t parseSEIPayload(Context_t* ctx, ByteStream_t* stream, Deserialise
     if (payloadType == SPT_MasteringDisplayColourVolume) {
         /* D.2.2 */
 
-        lcevc_hdr_info* hdrInfo = &ctx->hdrInfo; /* Update state on the context as it needs to persist */
-        lcevc_mastering_display_colour_volume* colorInfo = &hdrInfo->mastering_display;
+        /* Write values to hdrInfoOut */
+        lcevc_mastering_display_colour_volume* colorInfo = &hdrInfoOut->mastering_display;
 
         for (int32_t i = 0; i < VN_MDCV_NUM_PRIMARIES; ++i) {
             VN_CHECK(bytestreamReadU16(stream, &colorInfo->display_primaries_x[i]));
@@ -1618,12 +1640,12 @@ static int32_t parseSEIPayload(Context_t* ctx, ByteStream_t* stream, Deserialise
         VN_DEBUG_SYNTAX("      min display mastering luminance: %u\n",
                         colorInfo->min_display_mastering_luminance);
 
-        hdrInfo->flags |= PSS_HDRF_MASTERING_DISPLAY_COLOUR_VOLUME_PRESENT;
+        hdrInfoOut->flags |= LCEVC_HDRF_MASTERING_DISPLAY_COLOUR_VOLUME_PRESENT;
     } else if (payloadType == SPT_ContentLightLevelInfo) {
         /* D.2.3 */
 
-        lcevc_hdr_info* hdrInfo = &ctx->hdrInfo; /* Update state on the context as it needs to persist */
-        lcevc_content_light_level* lightLevel = &hdrInfo->content_light_level;
+        /* Write values to hdrInfoOut */
+        lcevc_content_light_level* lightLevel = &hdrInfoOut->content_light_level;
 
         VN_CHECK(bytestreamReadU16(stream, &lightLevel->max_content_light_level));
         VN_CHECK(bytestreamReadU16(stream, &lightLevel->max_pic_average_light_level));
@@ -1631,37 +1653,39 @@ static int32_t parseSEIPayload(Context_t* ctx, ByteStream_t* stream, Deserialise
         VN_DEBUG_SYNTAX("      max content light level: %u\n", lightLevel->max_content_light_level);
         VN_DEBUG_SYNTAX("      max pic average light level: %u\n", lightLevel->max_pic_average_light_level);
 
-        hdrInfo->flags |= PSS_HDRF_CONTENT_LIGHT_LEVEL_INFO_PRESENT;
+        hdrInfoOut->flags |= LCEVC_HDRF_CONTENT_LIGHT_LEVEL_INFO_PRESENT;
     } else if (payloadType == SPT_UserDataRegistered) {
         /* D.2.4 */
 
+        /* Write values to deserialisedOut and its vnova_config (IF present in stream) */
         uint8_t ituHeader[ITUC_Length] = {0};
 
         VN_CHECK(bytestreamReadU8(stream, &ituHeader[0]));
 
         /* Check for UK country code first. */
-        if (ituHeader[0] == kVNovaITU[0]) {
-            VN_CHECK(bytestreamReadU8(stream, &ituHeader[1]));
-            VN_CHECK(bytestreamReadU8(stream, &ituHeader[2]));
-            VN_CHECK(bytestreamReadU8(stream, &ituHeader[3]));
-
-            if (memcmp(ituHeader, kVNovaITU, ITUC_Length) == 0) {
-                VNConfig_t* cfg = &output->vnova_config;
-                VN_DEBUG_SYNTAX("      V-Nova SEI Payload Found\n");
-
-                VN_CHECK(bytestreamReadU8(stream, &cfg->bitstreamVersion));
-                VN_DEBUG_SYNTAX("      Bitstream version: %u\n", cfg->bitstreamVersion);
-
-                cfg->valid = true;
-                output->currentVnovaConfigSet = true;
-
-                VN_DEBUG_SYNTAX("V-Nova Bitstream Version: %u\n", cfg->bitstreamVersion);
-            } else {
-                return bytestreamSeek(stream, blockSize - ITUC_Length);
-            }
-        } else {
+        if (ituHeader[0] != kVNovaITU[0]) {
             return bytestreamSeek(stream, blockSize - 1);
         }
+
+        VN_CHECK(bytestreamReadU8(stream, &ituHeader[1]));
+        VN_CHECK(bytestreamReadU8(stream, &ituHeader[2]));
+        VN_CHECK(bytestreamReadU8(stream, &ituHeader[3]));
+
+        if (memcmp(ituHeader, kVNovaITU, ITUC_Length) != 0) {
+            return bytestreamSeek(stream, blockSize - ITUC_Length);
+        }
+
+        VNConfig_t* cfg = &deserialisedOut->vnova_config;
+        VN_DEBUG_SYNTAX("      V-Nova SEI Payload Found\n");
+
+        VN_CHECK(bytestreamReadU8(stream, &cfg->bitstreamVersion));
+        VN_DEBUG_SYNTAX("      Bitstream version: %u\n", cfg->bitstreamVersion);
+
+        cfg->valid = true;
+        deserialisedOut->currentVnovaConfigSet = true;
+
+        VN_DEBUG_SYNTAX("V-Nova Bitstream Version: %u\n", cfg->bitstreamVersion);
+
     } else {
         VN_DEBUG_SYNTAX("      unsupported SEI payload type, skipping %d bytes\n", blockSize - 1);
         return bytestreamSeek(stream, blockSize - 1);
@@ -1671,12 +1695,11 @@ static int32_t parseSEIPayload(Context_t* ctx, ByteStream_t* stream, Deserialise
 }
 
 /* E.2 */
-static int32_t parseVUI(Context_t* ctx, ByteStream_t* stream, uint32_t vuiSize)
+static int32_t parseVUIParameters(ByteStream_t* stream, lcevc_vui_info* vuiInfoOut, uint32_t vuiSize)
 {
     int32_t res = 0;
     uint8_t bit = 0;
     int32_t bits = 0;
-    lcevc_vui_info* vuiInfo = &ctx->vuiInfo;
 
     BitStream_t bitstream = {{0}};
     VN_CHECK(bitstreamInitialise(&bitstream, bytestreamCurrent(stream), vuiSize));
@@ -1686,24 +1709,24 @@ static int32_t parseVUI(Context_t* ctx, ByteStream_t* stream, uint32_t vuiSize)
     VN_DEBUG_SYNTAX("    aspect_ratio_info_present: %d\n", bit);
 
     if (bit) {
-        vuiInfo->flags |= PSS_VUIF_ASPECT_RATIO_INFO_PRESENT;
+        vuiInfoOut->flags |= PSS_VUIF_ASPECT_RATIO_INFO_PRESENT;
 
         /* aspect_ratio_idc: 8 bits */
         VN_CHECK(bitstreamReadBits(&bitstream, 8, &bits));
-        vuiInfo->aspect_ratio_idc = (uint8_t)bits;
-        VN_DEBUG_SYNTAX("      aspect_ratio_idc: %u\n", vuiInfo->aspect_ratio_idc);
+        vuiInfoOut->aspect_ratio_idc = (uint8_t)bits;
+        VN_DEBUG_SYNTAX("      aspect_ratio_idc: %u\n", vuiInfoOut->aspect_ratio_idc);
 
-        if (vuiInfo->aspect_ratio_idc == kVUIAspectRatioIDCExtendedSAR) {
+        if (vuiInfoOut->aspect_ratio_idc == kVUIAspectRatioIDCExtendedSAR) {
             /* sar_width: 16 bits */
             VN_CHECK(bitstreamReadBits(&bitstream, 16, &bits));
-            vuiInfo->sar_width = (uint16_t)bits;
+            vuiInfoOut->sar_width = (uint16_t)bits;
 
             /* sar_height: 16 bits */
             VN_CHECK(bitstreamReadBits(&bitstream, 16, &bits));
-            vuiInfo->sar_height = (uint16_t)bits;
+            vuiInfoOut->sar_height = (uint16_t)bits;
 
-            VN_DEBUG_SYNTAX("      sar_width: %u\n", vuiInfo->sar_width);
-            VN_DEBUG_SYNTAX("      sar_height: %u\n", vuiInfo->sar_height);
+            VN_DEBUG_SYNTAX("      sar_width: %u\n", vuiInfoOut->sar_width);
+            VN_DEBUG_SYNTAX("      sar_height: %u\n", vuiInfoOut->sar_height);
         }
     }
 
@@ -1712,12 +1735,12 @@ static int32_t parseVUI(Context_t* ctx, ByteStream_t* stream, uint32_t vuiSize)
     VN_DEBUG_SYNTAX("    overscan_info_present: %d\n", bit);
 
     if (bit) {
-        vuiInfo->flags |= PSS_VUIF_OVERSCAN_INFO_PRESENT;
+        vuiInfoOut->flags |= PSS_VUIF_OVERSCAN_INFO_PRESENT;
 
         /* overscan_appropraite_flag: 1 bit*/
         VN_CHECK(bitstreamReadBit(&bitstream, &bit));
         if (bit) {
-            vuiInfo->flags |= PSS_VUIF_OVERSCAN_APPROPRIATE;
+            vuiInfoOut->flags |= PSS_VUIF_OVERSCAN_APPROPRIATE;
         }
 
         VN_DEBUG_SYNTAX("      overscan_appropriate: %d\n", bit);
@@ -1728,17 +1751,17 @@ static int32_t parseVUI(Context_t* ctx, ByteStream_t* stream, uint32_t vuiSize)
     VN_DEBUG_SYNTAX("    video_signal_type: %d\n", bit);
 
     if (bit) {
-        vuiInfo->flags |= PSS_VUIF_VIDEO_SIGNAL_TYPE_PRESENT;
+        vuiInfoOut->flags |= PSS_VUIF_VIDEO_SIGNAL_TYPE_PRESENT;
 
         /* video_format: 3 bits */
         VN_CHECK(bitstreamReadBits(&bitstream, 3, &bits));
-        vuiInfo->video_format = (lcevc_vui_video_format)bits;
-        VN_DEBUG_SYNTAX("      video_format: %u\n", vuiInfo->video_format);
+        vuiInfoOut->video_format = (lcevc_vui_video_format)bits;
+        VN_DEBUG_SYNTAX("      video_format: %u\n", vuiInfoOut->video_format);
 
         /* video_full_range_flag: 1 bit */
         VN_CHECK(bitstreamReadBit(&bitstream, &bit));
         if (bit) {
-            vuiInfo->flags |= PSS_VUIF_VIDEO_SIGNAL_FULL_RANGE_FLAG;
+            vuiInfoOut->flags |= PSS_VUIF_VIDEO_SIGNAL_FULL_RANGE_FLAG;
         }
         VN_DEBUG_SYNTAX("      video_full_range: %d\n", bit);
 
@@ -1747,23 +1770,23 @@ static int32_t parseVUI(Context_t* ctx, ByteStream_t* stream, uint32_t vuiSize)
         VN_DEBUG_SYNTAX("      colour_description_present: %d\n", bit);
 
         if (bit) {
-            vuiInfo->flags |= PSS_VUIF_VIDEO_SIGNAL_COLOUR_DESC_PRESENT;
+            vuiInfoOut->flags |= PSS_VUIF_VIDEO_SIGNAL_COLOUR_DESC_PRESENT;
 
             /* colour_primaries: 8 bits */
             VN_CHECK(bitstreamReadBits(&bitstream, 8, &bits));
-            vuiInfo->colour_primaries = (uint8_t)bits;
+            vuiInfoOut->colour_primaries = (uint8_t)bits;
 
             /* transfer_characteristics: 8 bits */
             VN_CHECK(bitstreamReadBits(&bitstream, 8, &bits));
-            vuiInfo->transfer_characteristics = (uint8_t)bits;
+            vuiInfoOut->transfer_characteristics = (uint8_t)bits;
 
             /* matrix_coefficients: 8 bits*/
             VN_CHECK(bitstreamReadBits(&bitstream, 8, &bits));
-            vuiInfo->matrix_coefficients = (uint8_t)bits;
+            vuiInfoOut->matrix_coefficients = (uint8_t)bits;
 
-            VN_DEBUG_SYNTAX("        colour_primaries: %u\n", vuiInfo->colour_primaries);
-            VN_DEBUG_SYNTAX("        transfer_characteristics: %u\n", vuiInfo->transfer_characteristics);
-            VN_DEBUG_SYNTAX("        matrix_coefficients: %u\n", vuiInfo->matrix_coefficients);
+            VN_DEBUG_SYNTAX("        colour_primaries: %u\n", vuiInfoOut->colour_primaries);
+            VN_DEBUG_SYNTAX("        transfer_characteristics: %u\n", vuiInfoOut->transfer_characteristics);
+            VN_DEBUG_SYNTAX("        matrix_coefficients: %u\n", vuiInfoOut->matrix_coefficients);
         }
     }
 
@@ -1772,65 +1795,146 @@ static int32_t parseVUI(Context_t* ctx, ByteStream_t* stream, uint32_t vuiSize)
     VN_DEBUG_SYNTAX("    chroma_loc_info_present: %d\n", bit);
 
     if (bit) {
-        vuiInfo->flags |= PSS_VUIF_CHROMA_LOC_INFO_PRESENT;
+        vuiInfoOut->flags |= PSS_VUIF_CHROMA_LOC_INFO_PRESENT;
 
         /* chroma_sample_loc_type_top_field: ue(v) */
-        VN_CHECK(bitstreamReadExpGolomb(&bitstream, &vuiInfo->chroma_sample_loc_type_top_field));
+        VN_CHECK(bitstreamReadExpGolomb(&bitstream, &vuiInfoOut->chroma_sample_loc_type_top_field));
 
         /* chroma_sample_loc_type_bottom_field: ue(v) */
-        VN_CHECK(bitstreamReadExpGolomb(&bitstream, &vuiInfo->chroma_sample_loc_type_bottom_field));
+        VN_CHECK(bitstreamReadExpGolomb(&bitstream, &vuiInfoOut->chroma_sample_loc_type_bottom_field));
 
         VN_DEBUG_SYNTAX("      chroma_sample_loc_type_top_field: %u\n",
-                        vuiInfo->chroma_sample_loc_type_top_field);
+                        vuiInfoOut->chroma_sample_loc_type_top_field);
         VN_DEBUG_SYNTAX("      chroma_sample_loc_type_bottom_field: %u\n",
-                        vuiInfo->chroma_sample_loc_type_bottom_field);
+                        vuiInfoOut->chroma_sample_loc_type_bottom_field);
     }
 
     /* Finally seek the byte-stream forward */
     return bytestreamSeek(stream, vuiSize);
 }
 
+static int32_t parseSFilterPayload(ByteStream_t* stream, DeserialisedData_t* output)
+{
+    int32_t res = 0;
+    uint8_t sfilterByte;
+    VN_CHECK(bytestreamReadU8(stream, &sfilterByte));
+
+    output->sharpenType = (SharpenType_t)((sfilterByte & 0xE0) >> 5);
+    const uint8_t signalledSharpenStrength = (sfilterByte & 0x1F);
+    output->sharpenStrength = (signalledSharpenStrength + 1) * 0.01f;
+    VN_DEBUG_SYNTAX("    sharpen_type: %s\n", sharpenTypeToString(output->sharpenType));
+    VN_DEBUG_SYNTAX("    sharpen_strength: %d [%f]\n", signalledSharpenStrength, output->sharpenStrength);
+    return res;
+}
+
+static int32_t parseHDRPayload(Logger_t log, ByteStream_t* stream, lcevc_hdr_info* hdrInfoOut,
+                               lcevc_deinterlacing_info* deinterlacingInfoOut)
+{
+    int32_t res = 0;
+    uint8_t byte = 0;
+
+    VN_CHECK(bytestreamReadU8(stream, &byte));
+
+    /* tone_mapper_location: 1 bit */
+    uint8_t toneMapperLocation = (byte >> 7) & 0b1;
+    VN_DEBUG_SYNTAX("    tone_mapper_location: %u\n", toneMapperLocation);
+    /* tone_mapper_type: 5 bit */
+    uint8_t toneMapperType = (byte >> 2) & 0b11111;
+    VN_DEBUG_SYNTAX("    tone_mapper_type: %u\n", toneMapperType);
+    /* tone_mapper_data_present_flag: 1 bit */
+    uint8_t toneMapperDataPresentFlag = (byte >> 1) & 0b1;
+    VN_DEBUG_SYNTAX("    tone_mapper_data_present_flag: %u\n", toneMapperDataPresentFlag);
+    /* deinterlacer_enabled_flag: 1 bit */
+    uint8_t deinterlacerEnabledFlag = byte & 0b1;
+    VN_DEBUG_SYNTAX("    deinterlacer_enabled_flag: %u\n", deinterlacerEnabledFlag);
+
+    if (toneMapperDataPresentFlag) {
+        /*  tone_mapper.size: multibyte */
+        uint64_t toneMapperSize = 0;
+        VN_CHECK(bytestreamReadMultiByte(stream, &toneMapperSize));
+        VN_DEBUG_SYNTAX("        tone_mapper_size: %" PRIu64 "\n", toneMapperSize);
+        /*  tone_mapper.payload: tone_mapper.size */
+        // Skip tonemapper data as not supported yet
+        VN_CHECK(bytestreamSeek(stream, (size_t)toneMapperSize));
+    }
+    if (toneMapperType == 31) {
+        /* tone_mapper_type_extended: 8 bit */
+        VN_CHECK(bytestreamReadU8(stream, &toneMapperType));
+        VN_DEBUG_SYNTAX("        tone_mapper_type_extended: %u\n", toneMapperType);
+    }
+    int8_t deinterlacerType = -1;
+    uint8_t topFieldFirstFlag = 0;
+    if (deinterlacerEnabledFlag) {
+        VN_CHECK(bytestreamReadU8(stream, &byte));
+
+        /* deinterlacer_type: 4 bit */
+        deinterlacerType = (byte >> 4) & 0b1111;
+        VN_DEBUG_SYNTAX("        deinterlacer_type: %u\n", deinterlacerType);
+        /* top_field_first_flag: 1 bit */
+        topFieldFirstFlag = (byte >> 3) & 0b1;
+        VN_DEBUG_SYNTAX("        top_field_first_flag: %u\n", topFieldFirstFlag);
+        /* reserved_zeros_3bit: 3 bit */
+        if (byte & 0b111) {
+            VN_ERROR(log, "hdr_payload_global_config: reserved_zeros_3bit is non zero\n");
+            return -1;
+        }
+    }
+
+    // Set ctx
+    hdrInfoOut->flags |= LCEVC_HDRF_HDR_PAYLOAD_GLOBAL_CONFIG_PRESENT;
+    hdrInfoOut->tonemapper_config[toneMapperLocation].type = toneMapperType;
+    if (toneMapperDataPresentFlag) {
+        hdrInfoOut->flags |= LCEVC_HDRF_TONE_MAPPER_DATA_PRESENT;
+    }
+    if (deinterlacerEnabledFlag) {
+        hdrInfoOut->flags |= LCEVC_HDRF_DEINTERLACER_ENABLED;
+        deinterlacingInfoOut->deinterlacer_type = deinterlacerType;
+        deinterlacingInfoOut->top_field_first_flag = topFieldFirstFlag;
+    }
+    return res;
+}
+
 /* 7.3.10 (Table-14) */
-static int32_t parseBlockAdditionaInfo(Context_t* ctx, ByteStream_t* stream,
-                                       DeserialisedData_t* output, uint32_t blockSize)
+static int32_t parseBlockAdditionalInfo(Logger_t log, ByteStream_t* stream,
+                                        lcevc_hdr_info* hdrInfoOut, lcevc_vui_info* vuiInfoOut,
+                                        lcevc_deinterlacing_info* deinterlacingInfoOut,
+                                        DeserialisedData_t* deserialisedOut, uint32_t blockSize)
 {
     int32_t res = 0;
 
     if (blockSize == 0) {
-        VN_ERROR(ctx->log,
+        VN_ERROR(log,
                  "stream: Additional info block size is 0, this is not possible in the standard\n");
         return -1;
     }
 
-    uint8_t data;
-    VN_CHECK(bytestreamReadU8(stream, &data));
-    const AdditionalInfoType_t infoType = (AdditionalInfoType_t)data;
+    uint8_t byte = 0;
+    VN_CHECK(bytestreamReadU8(stream, &byte));
+    const AdditionalInfoType_t infoType = (AdditionalInfoType_t)byte;
     VN_DEBUG_SYNTAX("  additional_info_type: %s\n", additionalInfoTypeToString(infoType));
 
-    if (infoType == AIT_SEI) {
-        VN_CHECK(parseSEIPayload(ctx, stream, output, blockSize - 1));
-    } else if (infoType == AIT_VUI) {
-        VN_CHECK(parseVUI(ctx, stream, blockSize - 1));
-    } else if (infoType == AIT_SFilter) {
-        uint8_t sfilterPayload;
-        VN_CHECK(bytestreamReadU8(stream, &sfilterPayload));
-
-        output->sharpenType = (SharpenType_t)((sfilterPayload & 0xE0) >> 5);
-        const uint8_t signalledSharpenStrength = (sfilterPayload & 0x1F);
-        output->sharpenStrength = (signalledSharpenStrength + 1) * 0.01f;
-        VN_DEBUG_SYNTAX("    sharpen_type: %s\n", sharpenTypeToString(output->sharpenType));
-        VN_DEBUG_SYNTAX("    sharpen_strength: %d [%f]\n", signalledSharpenStrength, output->sharpenStrength);
-    } else {
-        VN_DEBUG_SYNTAX("    unsupported additional info type, skipping %d bytes\n", blockSize - 1);
-        return bytestreamSeek(stream, blockSize - 1);
+    switch (infoType) {
+        case AIT_SEI:
+            VN_CHECK(parseSEIPayload(stream, hdrInfoOut, deserialisedOut, blockSize - 1));
+            break;
+        case AIT_VUI: VN_CHECK(parseVUIParameters(stream, vuiInfoOut, blockSize - 1)); break;
+        case AIT_SFilter: VN_CHECK(parseSFilterPayload(stream, deserialisedOut)); break;
+        case AIT_HDR:
+            VN_CHECK(parseHDRPayload(log, stream, hdrInfoOut, deinterlacingInfoOut));
+            break;
+        default:
+            VN_DEBUG_SYNTAX("    unsupported additional info type, skipping %d bytes\n", blockSize - 1);
+            return bytestreamSeek(stream, blockSize - 1);
     }
 
     return 0;
 }
 
 /* Return 1 when using parse_mode == Parse_GlobalConfig and global config has been hit*/
-static int32_t parseBlock(Context_t* ctx, ByteStream_t* stream, DeserialisedData_t* output,
-                          ParseType_t parseMode)
+static int32_t parseBlock(Memory_t memory, Logger_t log, ByteStream_t* stream, lcevc_hdr_info* hdrOut,
+                          lcevc_vui_info* vuiOut, lcevc_deinterlacing_info* deinterlacingOut,
+                          DeserialisedData_t* deserialisedOut, ParseType_t parseMode,
+                          perseus_pipeline_mode pipelineMode, bool useOldCodeLengths)
 {
     // @todo(bob): Remove parse mode, think its probably not exactly what we're after.
     // @todo(bob): swap to using size_t for things that are sized in bytes.
@@ -1851,8 +1955,7 @@ static int32_t parseBlock(Context_t* ctx, ByteStream_t* stream, DeserialisedData
         VN_CHECK(bytestreamReadMultiByte(stream, &customBlockSize));
 
         if (customBlockSize > 0xFFFFFFFF) {
-            VN_ERROR(ctx->log,
-                     "stream: Invalid custom block size, expect < 32-bits used, value is: %" PRIu64 "\n",
+            VN_ERROR(log, "stream: Invalid custom block size, expect < 32-bits used, value is: %" PRIu64 "\n",
                      customBlockSize);
             return -1;
         }
@@ -1869,30 +1972,41 @@ static int32_t parseBlock(Context_t* ctx, ByteStream_t* stream, DeserialisedData
 
     if (parseMode == Parse_Full) {
         switch (blockType) {
-            case BT_SequenceConfig: VN_CHECK(parseBlockSequenceConfig(ctx, stream, output)); break;
-            case BT_GlobalConfig: VN_CHECK(parseBlockGlobalConfig(ctx, stream, output)); break;
-            case BT_PictureConfig: VN_CHECK(parseBlockPictureConfig(ctx, stream, output)); break;
-            case BT_EncodedData: VN_CHECK(parseEncodedData(ctx, stream, output)); break;
-            case BT_EncodedDataTiled: VN_CHECK(parseEncodedDataTiled(ctx, stream, output)); break;
+            case BT_SequenceConfig:
+                VN_CHECK(parseBlockSequenceConfig(stream, deserialisedOut));
+                break;
+            case BT_GlobalConfig:
+                VN_CHECK(parseBlockGlobalConfig(log, stream, deserialisedOut));
+                break;
+            case BT_PictureConfig:
+                VN_CHECK(parseBlockPictureConfig(stream, deserialisedOut));
+                break;
+            case BT_EncodedData:
+                VN_CHECK(parseEncodedData(memory, log, stream, deserialisedOut, pipelineMode));
+                break;
+            case BT_EncodedDataTiled:
+                VN_CHECK(parseEncodedDataTiled(memory, log, stream, deserialisedOut, useOldCodeLengths));
+                break;
             case BT_AdditionalInfo:
-                VN_CHECK(parseBlockAdditionaInfo(ctx, stream, output, blockSize));
+                VN_CHECK(parseBlockAdditionalInfo(log, stream, hdrOut, vuiOut, deinterlacingOut,
+                                                  deserialisedOut, blockSize));
                 break;
             case BT_Filler: VN_CHECK(parseBlockFiller(stream, blockSize)); break;
             default: {
-                VN_WARNING(ctx->log, "Unrecognised block type received, skipping: %u\n", blockType);
+                VN_WARNING(log, "Unrecognised block type received, skipping: %u\n", blockType);
                 bytestreamSeek(stream, blockSize);
                 break;
             }
         }
     } else if (parseMode == Parse_GlobalConfig) {
         if (blockType == BT_GlobalConfig) {
-            VN_CHECK(parseBlockGlobalConfig(ctx, stream, output));
+            VN_CHECK(parseBlockGlobalConfig(log, stream, deserialisedOut));
             res = 1;
         } else {
             bytestreamSeek(stream, blockSize);
         }
     } else {
-        VN_ERROR(ctx->log, "Unrecognised parse_mode specified in parse_block() %u\n", parseMode);
+        VN_ERROR(log, "Unrecognised parse_mode specified in parse_block() %u\n", parseMode);
         return -1;
     }
 
@@ -1900,7 +2014,7 @@ static int32_t parseBlock(Context_t* ctx, ByteStream_t* stream, DeserialisedData
 
     /* Handle block misread. */
     if ((stream->offset - initialOffset) - blockSize) {
-        VN_ERROR(ctx->log, "stream: Block parser error. Initial offset: %u, Current offset: %u, Expected offset: %u\n",
+        VN_ERROR(log, "stream: Block parser error. Initial offset: %u, Current offset: %u, Expected offset: %u\n",
                  initialOffset, stream->offset, initialOffset + blockSize);
         return -1;
     }
@@ -1910,11 +2024,11 @@ static int32_t parseBlock(Context_t* ctx, ByteStream_t* stream, DeserialisedData
 
 /*------------------------------------------------------------------------------*/
 
-void deserialiseInitialise(Context_t* ctx, DeserialisedData_t* data)
+void deserialiseInitialise(Memory_t memory, DeserialisedData_t* data)
 {
     memset(data, 0, sizeof(DeserialisedData_t));
 
-    data->ctx = ctx;
+    data->memory = memory;
     data->chroma = CT420;
     data->baseDepth = Depth8;
     data->enhaDepth = Depth8;
@@ -1930,28 +2044,28 @@ void deserialiseInitialise(Context_t* ctx, DeserialisedData_t* data)
 void deserialiseRelease(DeserialisedData_t* data)
 {
     if (data->unencapsulatedData != NULL) {
-        VN_FREE(data->ctx->memory, data->unencapsulatedData);
+        VN_FREE(data->memory, data->unencapsulatedData);
         data->unencapsulatedData = NULL;
         data->unencapsulatedSize = 0;
     }
 
     if (data->chunks) {
-        VN_FREE(data->ctx->memory, data->chunks);
+        VN_FREE(data->memory, data->chunks);
         data->chunks = NULL;
     }
 }
 
-void deserialiseDump(Context_t* ctx, DeserialisedData_t* data)
+void deserialiseDump(Logger_t log, const char* debugConfigPath, DeserialisedData_t* data)
 {
-    if (ctx == NULL || data == NULL) {
-        VN_ERROR(ctx->log, "Unable to dump, context or data is invalid");
+    if (data == NULL) {
+        VN_ERROR(log, "Unable to dump, data is invalid");
         return;
     }
 
-    FILE* file = fopen(ctx->debugConfigPath, "w");
+    FILE* file = fopen(debugConfigPath, "w");
 
     if (file == NULL) {
-        VN_ERROR(ctx->log, "Unable to open \"%s\"", ctx->debugConfigPath);
+        VN_ERROR(log, "Unable to open \"%s\"", debugConfigPath);
         return;
     }
 
@@ -1995,8 +2109,8 @@ void deserialiseDump(Context_t* ctx, DeserialisedData_t* data)
     fclose(file);
 }
 
-int32_t deserialiseGetTileLayerChunks(DeserialisedData_t* data, int32_t planeIndex, LOQIndex_t loq,
-                                      int32_t tileIndex, Chunk_t** chunks)
+int32_t deserialiseGetTileLayerChunks(const DeserialisedData_t* data, int32_t planeIndex,
+                                      LOQIndex_t loq, int32_t tileIndex, Chunk_t** chunks)
 {
     if (!data || !chunks) {
         return -1;
@@ -2027,7 +2141,7 @@ int32_t deserialiseGetTileLayerChunks(DeserialisedData_t* data, int32_t planeInd
     return 0;
 }
 
-int32_t deserialiseGetTileTemporalChunk(DeserialisedData_t* data, int32_t planeIndex,
+int32_t deserialiseGetTileTemporalChunk(const DeserialisedData_t* data, int32_t planeIndex,
                                         int32_t tileIndex, Chunk_t** chunk)
 {
     if (!data || !chunk) {
@@ -2091,8 +2205,8 @@ void deserialiseCalculateSurfaceProperties(const DeserialisedData_t* data, LOQIn
     *height = calcHeight;
 }
 
-int32_t deserialise(Context_t* ctx, const uint8_t* serialised, uint32_t serialisedSize,
-                    DeserialisedData_t* output, ParseType_t parseMode)
+int32_t deserialise(Memory_t memory, Logger_t log, const uint8_t* serialised, uint32_t serialisedSize,
+                    DeserialisedData_t* deserialisedOut, Context_t* ctxOut, ParseType_t parseMode)
 {
     ByteStream_t stream;
     int32_t res = 0;
@@ -2104,23 +2218,26 @@ int32_t deserialise(Context_t* ctx, const uint8_t* serialised, uint32_t serialis
         return -1;
     }
 
-    output->currentGlobalConfigSet = false;
-    output->currentVnovaConfigSet = false;
-    output->pictureConfigSet = false;
+    deserialisedOut->currentGlobalConfigSet = false;
+    deserialisedOut->currentVnovaConfigSet = false;
+    deserialisedOut->pictureConfigSet = false;
 
-    VN_CHECK(unencapsulate(ctx, output, &stream));
+    VN_CHECK(unencapsulate(memory, log, deserialisedOut, &stream));
 
-    if (bytestreamInitialise(&stream, output->unencapsulatedData, output->unencapsulatedSize) < 0) {
+    if (bytestreamInitialise(&stream, deserialisedOut->unencapsulatedData,
+                             deserialisedOut->unencapsulatedSize) < 0) {
         return -1;
     }
 
     while (bytestreamRemaining(&stream) > 0) {
-        VN_CHECK(parseBlock(ctx, &stream, output, parseMode));
+        VN_CHECK(parseBlock(memory, log, &stream, &(ctxOut->hdrInfo), &(ctxOut->vuiInfo),
+                            &(ctxOut->deinterlacingInfo), deserialisedOut, parseMode,
+                            ctxOut->pipelineMode, ctxOut->useOldCodeLengths));
 
         /* global config hit when using parse_mode == Parse_GlobalConfig skip other blocks. */
         if (res == 1) {
             if (parseMode != Parse_GlobalConfig) {
-                VN_ERROR(ctx->log,
+                VN_ERROR(log,
                          "parse_block returned 1 when parse_mode is not Parse_GlobalConfig. \n");
                 return -1;
             }
@@ -2132,7 +2249,7 @@ int32_t deserialise(Context_t* ctx, const uint8_t* serialised, uint32_t serialis
 
     VN_DEBUG_SYNTAX("------>>> End: %" PRId64 "\n\n", ctx->deserialiseCount);
 
-    ctx->deserialiseCount += 1;
+    ctxOut->deserialiseCount += 1;
 
     return res;
 }

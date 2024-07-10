@@ -1,6 +1,15 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
-// Compuite MD5 checksum
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
+// Compute MD5 checksum
 //
 // See https://en.wikipedia.org/wiki/MD5
 //
@@ -12,47 +21,48 @@
 
 namespace lcevc_dec::utility {
 
-class MD5 {
+class MD5
+{
 public:
-	MD5() { reset(); }
+    MD5() { reset(); }
 
-	// Reset to initial state
-	void reset();
+    // Reset to initial state
+    void reset();
 
-	// Append data to message
-	void update(const uint8_t *data, uint32_t size);
+    // Append data to message
+    void update(const uint8_t* data, uint32_t size);
 
-	// Finish message, and fetch the message's digest as bytes
-	void digest(uint8_t output[16]);
+    // Finish message, and fetch the message's digest as bytes
+    void digest(uint8_t output[16]);
 
-	// Finish message, and fetch the message's digest as a string of hex digits
-	std::string hexDigest();
+    // Finish message, and fetch the message's digest as a string of hex digits
+    std::string hexDigest();
 
 private:
-	// Size of each chunk in bytes
-	static constexpr uint32_t kChunkSize = 64;
+    // Size of each chunk in bytes
+    static constexpr uint32_t kChunkSize = 64;
 
-	// Process one 512 bit chunk of message
-	void chunk(const uint8_t *data);
+    // Process one 512 bit chunk of message
+    void chunk(const uint8_t* data);
 
-	// Finish processing message
-	void finish();
+    // Finish processing message
+    void finish();
 
-	// Current sum
-	uint32_t m_a0{0};
-	uint32_t m_b0{0};
-	uint32_t m_c0{0};
-	uint32_t m_d0{0};
+    // Current sum
+    uint32_t m_a0{0};
+    uint32_t m_b0{0};
+    uint32_t m_c0{0};
+    uint32_t m_d0{0};
 
-	// Length in bits
-	uint64_t m_length{0};
+    // Length in bits
+    uint64_t m_length{0};
 
-	// Pending message data
-	uint8_t m_chunk[kChunkSize]{};
-	uint32_t m_chunkSize{0};
+    // Pending message data
+    uint8_t m_chunk[kChunkSize]{};
+    uint32_t m_chunkSize{0};
 
-	bool m_finished{false};
+    bool m_finished{false};
 };
 
-}
+} // namespace lcevc_dec::utility
 #endif

@@ -1,12 +1,21 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 // Functions for common Picture operations.
 //
 #include "LCEVC/utility/check.h"
+#include "math_utils.h"
 
-#include <LCEVC/lcevc_dec.h>
-#include <LCEVC/utility/picture_layout.h>
 #include <fmt/core.h>
+#include <LCEVC/utility/picture_layout.h>
 
 #include <cassert>
 
@@ -15,35 +24,50 @@ namespace lcevc_dec::utility {
 // Various constants per color format used to work out actual sizes, offsets & strides, and file names
 const struct PictureLayout::Info PictureLayout::kPictureLayoutInfo[] = {
     // clang-format off
-    //                      planes
-    //                      |  validWidthMask
-    //                      |  |  validHeightMask
-    //                      |  |  |  planeWidthShift
-    //                      |  |  |  |             planeHeightShift
-    //                      |  |  |  |             |             alignment
-    //                      |  |  |  |             |             |             interleave
-    //                      |  |  |  |             |             |             |             offset
-    //                      |  |  |  |             |             |             |             |             bits
-    //                      |  |  |  |             |             |             |             |             |   suffix
-    {LCEVC_I420_8,          3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    8,  "_p420.yuv"},
-    {LCEVC_I420_10_LE,      3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    10, "_10bit_p420.yuv"},
-    {LCEVC_I420_12_LE,      3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    12, "_12bit_p420.yuv"},
-    {LCEVC_I420_14_LE,      3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    14, "_14bit_p420.yuv"},
-    {LCEVC_I420_16_LE,      3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    16, "_16bit_p420.yuv"},
-    {LCEVC_YUV420_RASTER_8, 3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    8,  "_p420.yuv"},
-    {LCEVC_NV12_8,          3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 2, 2},    {0, 0, 1},    8,  ".nv12"},
-    {LCEVC_NV21_8,          3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 2, 2},    {0, 1, 0},    8,  ".nv21"},
-    {LCEVC_RGB_8,           3, 0, 0, {0, 0, 0},    {0, 0, 0},    {0, 0, 0},    {3, 3, 3},    {0, 1, 2},    8,  ".rgb"},
-    {LCEVC_BGR_8,           3, 0, 0, {0, 0, 0},    {0, 0, 0},    {0, 0, 0},    {3, 3, 3},    {2, 1, 0},    8,  ".bgr"},
-    {LCEVC_RGBA_8,          4, 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {4, 4, 4, 4}, {0, 1, 2, 3}, 8,  ".rgba"},
-    {LCEVC_BGRA_8,          4, 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {4, 4, 4, 4}, {2, 1, 0, 3}, 8,  ".bgra"},
-    {LCEVC_ARGB_8,          4, 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {4, 4, 4, 4}, {3, 0, 1, 2}, 8,  ".argb"},
-    {LCEVC_ABGR_8,          4, 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {4, 4, 4, 4}, {3, 2, 1, 0}, 8,  ".abgr"},
-    {LCEVC_GRAY_8,          1, 0, 0, {0},          {0},          {0},          {1},          {0},          8,  ".y"},
-    {LCEVC_GRAY_10_LE,      1, 0, 0, {0},          {0},          {0},          {1},          {0},          10, "_10bit.y"},
-    {LCEVC_GRAY_12_LE,      1, 0, 0, {0},          {0},          {0},          {1},          {0},          12, "_12bit.y"},
-    {LCEVC_GRAY_14_LE,      1, 0, 0, {0},          {0},          {0},          {1},          {0},          14, "_14bit.y"},
-    {LCEVC_GRAY_16_LE,      1, 0, 0, {0},          {0},          {0},          {1},          {0},          16, "_16bit.y"},
+    //                      colorSpace
+    //                      |          planes
+    //                      |          |  validWidthMask
+    //                      |          |  |  validHeightMask
+    //                      |          |  |  |  planeWidthShift
+    //                      |          |  |  |  |             planeHeightShift
+    //                      |          |  |  |  |             |             alignment
+    //                      |          |  |  |  |             |             |             interleave
+    //                      |          |  |  |  |             |             |             |             offset
+    //                      |          |  |  |  |             |             |             |             |             bits
+    //                      |          |  |  |  |             |             |             |             |             |   suffix
+    {LCEVC_I420_8,          YUV,       3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    8,  "_p420.yuv"},
+    {LCEVC_I420_10_LE,      YUV,       3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    10, "_10bit_p420.yuv"},
+    {LCEVC_I420_12_LE,      YUV,       3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    12, "_12bit_p420.yuv"},
+    {LCEVC_I420_14_LE,      YUV,       3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    14, "_14bit_p420.yuv"},
+    {LCEVC_I420_16_LE,      YUV,       3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    16, "_16bit_p420.yuv"},
+
+    {LCEVC_I422_8,          YUV,       3, 1, 0, {0, 1, 1},    {0, 0, 0},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    8,  "_p422.yuv"},
+    {LCEVC_I422_10_LE,      YUV,       3, 1, 0, {0, 1, 1},    {0, 0, 0},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    10, "_10bit_p422.yuv"},
+    {LCEVC_I422_12_LE,      YUV,       3, 1, 0, {0, 1, 1},    {0, 0, 0},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    12, "_12bit_p422.yuv"},
+    {LCEVC_I422_14_LE,      YUV,       3, 1, 0, {0, 1, 1},    {0, 0, 0},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    14, "_14bit_p422.yuv"},
+    {LCEVC_I422_16_LE,      YUV,       3, 1, 0, {0, 1, 1},    {0, 0, 0},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    16, "_16bit_p422.yuv"},
+
+    {LCEVC_I444_8,          YUV,       3, 0, 0, {0, 0, 0},    {0, 0, 0},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    8,  "_p444.yuv"},
+    {LCEVC_I444_10_LE,      YUV,       3, 0, 0, {0, 0, 0},    {0, 0, 0},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    10, "_10bit_p444.yuv"},
+    {LCEVC_I444_12_LE,      YUV,       3, 0, 0, {0, 0, 0},    {0, 0, 0},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    12, "_12bit_p444.yuv"},
+    {LCEVC_I444_14_LE,      YUV,       3, 0, 0, {0, 0, 0},    {0, 0, 0},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    14, "_14bit_p444.yuv"},
+    {LCEVC_I444_16_LE,      YUV,       3, 0, 0, {0, 0, 0},    {0, 0, 0},    {0, 0, 0},    {1, 1, 1},    {0, 0, 0},    16, "_16bit_p444.yuv"},
+
+    {LCEVC_NV12_8,          YUV,       3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 2, 2},    {0, 0, 1},    8,  ".nv12"},
+    {LCEVC_NV21_8,          YUV,       3, 1, 1, {0, 1, 1},    {0, 1, 1},    {0, 0, 0},    {1, 2, 2},    {0, 1, 0},    8,  ".nv21"},
+    
+    {LCEVC_RGB_8,           RGB,       3, 0, 0, {0, 0, 0},    {0, 0, 0},    {0, 0, 0},    {3, 3, 3},    {0, 1, 2},    8,  ".rgb"},
+    {LCEVC_BGR_8,           RGB,       3, 0, 0, {0, 0, 0},    {0, 0, 0},    {0, 0, 0},    {3, 3, 3},    {2, 1, 0},    8,  ".bgr"},
+    {LCEVC_RGBA_8,          RGB,       4, 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {4, 4, 4, 4}, {0, 1, 2, 3}, 8,  ".rgba"},
+    {LCEVC_BGRA_8,          RGB,       4, 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {4, 4, 4, 4}, {2, 1, 0, 3}, 8,  ".bgra"},
+    {LCEVC_ARGB_8,          RGB,       4, 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {4, 4, 4, 4}, {3, 0, 1, 2}, 8,  ".argb"},
+    {LCEVC_ABGR_8,          RGB,       4, 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {4, 4, 4, 4}, {3, 2, 1, 0}, 8,  ".abgr"},
+    
+    {LCEVC_GRAY_8,          Greyscale, 1, 0, 0, {0},          {0},          {0},          {1},          {0},          8,  ".y"},
+    {LCEVC_GRAY_10_LE,      Greyscale, 1, 0, 0, {0},          {0},          {0},          {1},          {0},          10, "_10bit.y"},
+    {LCEVC_GRAY_12_LE,      Greyscale, 1, 0, 0, {0},          {0},          {0},          {1},          {0},          12, "_12bit.y"},
+    {LCEVC_GRAY_14_LE,      Greyscale, 1, 0, 0, {0},          {0},          {0},          {1},          {0},          14, "_14bit.y"},
+    {LCEVC_GRAY_16_LE,      Greyscale, 1, 0, 0, {0},          {0},          {0},          {1},          {0},          16, "_16bit.y"},
     // clang-format on
 };
 
@@ -93,6 +117,27 @@ uint8_t PictureLayout::getPlaneWidthShift(LCEVC_ColorFormat format, uint32_t pla
 uint8_t PictureLayout::getPlaneHeightShift(LCEVC_ColorFormat format, uint32_t planeIdx)
 {
     return findLayoutInfo(format).planeHeightShift[planeIdx];
+}
+
+bool PictureLayout::checkValidStrides(const LCEVC_PictureDesc& pictureDesc,
+                                      const uint32_t rowStrides[kMaxPlanes])
+{
+    auto layout = PictureLayout(pictureDesc);
+    for (uint32_t plane = 0; plane < layout.planes(); plane++) {
+        if (rowStrides[plane] < layout.defaultRowStride(plane)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool PictureLayout::getPaddedStrides(const LCEVC_PictureDesc& pictureDesc, uint32_t rowStrides[kMaxPlanes])
+{
+    auto layout = PictureLayout(pictureDesc);
+    for (uint32_t plane = 0; plane < layout.planes(); plane++) {
+        rowStrides[plane] = nextPow2(layout.defaultRowStride(plane));
+    }
+    return true;
 }
 
 PictureLayout::PictureLayout()
@@ -166,7 +211,7 @@ void PictureLayout::generateOffsets()
 
         // Accumulate offset after any interleaving
         if (interleave == 1) {
-            offset += m_rowStrides[plane] * (m_height >> m_layoutInfo->planeWidthShift[plane]);
+            offset += m_rowStrides[plane] * (m_height >> m_layoutInfo->planeHeightShift[plane]);
         }
     }
 
@@ -216,6 +261,30 @@ bool PictureLayout::isCompatible(const PictureLayout& other) const
     }
 
     return true;
+}
+
+bool PictureLayout::isInterleaved() const
+{
+    for (auto i : m_layoutInfo->interleave) {
+        if (i > 1) {
+            return true;
+        }
+    }
+    return false;
+}
+
+uint32_t PictureLayout::planeGroups() const
+{
+    uint32_t interleaveSum = 0;
+    uint32_t plane = 1;
+    for (auto i : m_layoutInfo->interleave) {
+        interleaveSum += i;
+        if (interleaveSum >= m_layoutInfo->planes) {
+            return plane;
+        }
+        plane++;
+    }
+    return m_layoutInfo->planes;
 }
 
 // Construct a vooya/YUView style filename from base

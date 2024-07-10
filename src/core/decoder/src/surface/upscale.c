@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "surface/upscale.h"
 
 #include "common/memory.h"
@@ -17,14 +27,14 @@
  * function if a SIMD function does not yet exists.
  *
  * \return A valid function pointer on success, otherwise NULL. */
-UpscaleHorizontal_t getHorizontalFunction(Context_t* ctx, FixedPoint_t srcFP, FixedPoint_t dstFP,
+UpscaleHorizontal_t getHorizontalFunction(Logger_t log, FixedPoint_t srcFP, FixedPoint_t dstFP,
                                           FixedPoint_t baseFP, Interleaving_t interleaving,
                                           CPUAccelerationFeatures_t preferredAccel)
 {
     VN_UNUSED(preferredAccel);
 
     if (!fixedPointIsValid(srcFP) || !fixedPointIsValid(dstFP)) {
-        VN_ERROR(ctx->log, "Invalid horizontal function request - src_fp, dst_fp is invalid\n");
+        VN_ERROR(log, "Invalid horizontal function request - src_fp, dst_fp is invalid\n");
         return NULL;
     }
 
@@ -58,7 +68,7 @@ UpscaleHorizontal_t getHorizontalFunction(Context_t* ctx, FixedPoint_t srcFP, Fi
  * SIMD function does not yet exists.
  *
  * \return A valid function pointer on success, otherwise NULL. */
-UpscaleVertical_t getVerticalFunction(Context_t* ctx, FixedPoint_t srcFP, FixedPoint_t dstFP,
+UpscaleVertical_t getVerticalFunction(Logger_t log, FixedPoint_t srcFP, FixedPoint_t dstFP,
                                       CPUAccelerationFeatures_t preferredAccel, uint32_t* xStep)
 {
     VN_UNUSED(preferredAccel);
@@ -66,7 +76,7 @@ UpscaleVertical_t getVerticalFunction(Context_t* ctx, FixedPoint_t srcFP, FixedP
     UpscaleVertical_t res = NULL;
 
     if (!fixedPointIsValid(srcFP) || !fixedPointIsValid(dstFP)) {
-        VN_ERROR(ctx->log, "Invalid vertical function request - src_fp or dst_fp is invalid\n");
+        VN_ERROR(log, "Invalid vertical function request - src_fp or dst_fp is invalid\n");
         return NULL;
     }
 
@@ -118,11 +128,12 @@ static int32_t getRequiredStrideAlignment(CPUAccelerationFeatures_t accel)
  * The allocated surface is guaranteed to have memory backing that is large enough for
  * the desired upscale operation - it will not shrink based upon this request.
  *
+ * \param log      Logger
  * \param ctx      Decoder context
  * \param params   The parameters used when upscaling.
  *
  * \return 0 on success, otherwise -1. */
-static int32_t internalInitialise(Context_t* ctx, const UpscaleArgs_t* params)
+static int32_t internalInitialise(Memory_t memory, Logger_t log, Context_t* ctx, const UpscaleArgs_t* params)
 {
     const Surface_t* dst = params->dst;
     const FixedPoint_t fp = dst->type;
@@ -139,18 +150,17 @@ static int32_t internalInitialise(Context_t* ctx, const UpscaleArgs_t* params)
     }
 
     /* Release intermediate surface if its too small */
-    if (!surfaceIsIdle(ctx, &ctx->upscaleIntermediateSurface) &&
-        !surfaceCompatible(ctx, &ctx->upscaleIntermediateSurface, fp, upscaleStride, dst->height,
-                           interleaving)) {
-        surfaceRelease(ctx, &ctx->upscaleIntermediateSurface);
-        assert(surfaceIsIdle(ctx, &ctx->upscaleIntermediateSurface));
+    if (!surfaceIsIdle(&ctx->upscaleIntermediateSurface) &&
+        !surfaceCompatible(&ctx->upscaleIntermediateSurface, fp, upscaleStride, dst->height, interleaving)) {
+        surfaceRelease(memory, &ctx->upscaleIntermediateSurface);
+        assert(surfaceIsIdle(&ctx->upscaleIntermediateSurface));
     }
 
     /* Allocate intermediate upsample buffer, aligning to width of a register */
-    if (surfaceIsIdle(ctx, &ctx->upscaleIntermediateSurface)) {
-        if (surfaceInitialise(ctx, &ctx->upscaleIntermediateSurface, fp, upscaleWidth, dst->height,
-                              upscaleStride, interleaving) != 0) {
-            VN_ERROR(ctx->log, "unable to allocate upsample buffer");
+    if (surfaceIsIdle(&ctx->upscaleIntermediateSurface)) {
+        if (surfaceInitialise(memory, &ctx->upscaleIntermediateSurface, fp, upscaleWidth,
+                              dst->height, upscaleStride, interleaving) != 0) {
+            VN_ERROR(log, "unable to allocate upsample buffer");
             return -1;
         }
     }
@@ -193,7 +203,7 @@ static inline PAMode_t getPAMode(bool paEnabled, bool is2D)
  * hori_func will upscale 2 full width lines at a time, with optional predicted-average
  * and dithering applied.
  *
- * \param ctx            Decoder context
+ * \param dither         Dithering info (null if not wanted)
  * \param horiFunction   The function callback form performing upscaling on 2 rows.
  * \param k              The kernel to upscale with.
  * \param src            The input surface to upscale from.
@@ -204,9 +214,9 @@ static inline PAMode_t getPAMode(bool paEnabled, bool is2D)
  * \param yEnd           The row to end upscaling from (exclusive).
  * \param paMode         The predicted-average mode to use.
  * \param ditherEnabled  When true dithering is applied. */
-static void horizontalTask(Context_t* ctx, UpscaleHorizontal_t horiFunction, const Kernel_t* kernel,
-                           const Surface_t* src, const Surface_t* dst, const Surface_t* base,
-                           uint32_t yStart, uint32_t yEnd, PAMode_t paMode, bool ditherEnabled)
+static void horizontalTask(Dither_t dither, UpscaleHorizontal_t horiFunction,
+                           const Kernel_t* kernel, const Surface_t* src, const Surface_t* dst,
+                           const Surface_t* base, uint32_t yStart, uint32_t yEnd, PAMode_t paMode)
 {
     uint8_t* dstPtrs[2];
     const uint8_t* srcPtrs[2];
@@ -245,7 +255,7 @@ static void horizontalTask(Context_t* ctx, UpscaleHorizontal_t horiFunction, con
             case PAMDisabled:;
         }
 
-        horiFunction(ctx, srcPtrs, dstPtrs, basePtrs, base->width, 0, base->width, kernel, ditherEnabled);
+        horiFunction(dither, srcPtrs, dstPtrs, basePtrs, base->width, 0, base->width, kernel);
     }
 }
 
@@ -255,7 +265,6 @@ static void horizontalTask(Context_t* ctx, UpscaleHorizontal_t horiFunction, con
  * This performs upscaling across a slice of src surface, where each invocation
  * of the vert_func will upscale some number of columns, determined by x_step.
  *
- * \param ctx          Decoder context.
  * \param vertFunction The function callback for performing upscaling for a column.
  * \param k            The kernel to upscale with.
  * \param src          The input surface to upscale from.
@@ -263,9 +272,8 @@ static void horizontalTask(Context_t* ctx, UpscaleHorizontal_t horiFunction, con
  * \param yStart       The row to start upscaling from on the input surface.
  * \param yEnd         The row to end upscaling from on the input surface (exclusive).
  * \param xStep        The number of columns upscaled per invocation of vert_func. */
-static void verticalTask(Context_t* ctx, UpscaleVertical_t vertFunction, const Kernel_t* kernel,
-                         const Surface_t* src, const Surface_t* dst, uint32_t yStart, uint32_t yEnd,
-                         uint32_t xStep)
+static void verticalTask(UpscaleVertical_t vertFunction, const Kernel_t* kernel, const Surface_t* src,
+                         const Surface_t* dst, uint32_t yStart, uint32_t yEnd, uint32_t xStep)
 {
     const uint32_t srcStep = xStep * fixedPointByteSize(src->type);
     const uint32_t dstStep = xStep * fixedPointByteSize(dst->type);
@@ -278,7 +286,7 @@ static void verticalTask(Context_t* ctx, UpscaleVertical_t vertFunction, const K
     uint32_t width = src->width * channelCount;
 
     for (uint32_t x = 0; x < width; x += xStep, srcPtr += srcStep, dstPtr += dstStep) {
-        vertFunction(ctx, srcPtr, src->stride, dstPtr, dst->stride, yStart, rowCount, src->height, kernel);
+        vertFunction(srcPtr, src->stride, dstPtr, dst->stride, yStart, rowCount, src->height, kernel);
     }
 }
 
@@ -321,23 +329,23 @@ int32_t upscaleSlicedJob(const void* submitContext, JobIndex_t index, SliceOffse
         const int32_t vertEnd = (int32_t)(offset.offset + offset.count);
         const uint32_t vertStep = context->colStepping;
 
-        verticalTask(ctx, vertFunction, &context->kernel, src, vertDst, vertStart, vertEnd, vertStep);
+        verticalTask(vertFunction, &context->kernel, src, vertDst, vertStart, vertEnd, vertStep);
     }
 
-    /* NOLINTNEXTLINE(readability-suspicious-call-argument) */
-    horizontalTask(ctx, horiFunction, &context->kernel, horiSrc, dst, src, horiStart, horiEnd,
-                   paMode, context->applyDither);
+    horizontalTask((context->applyDither ? ctx->dither : NULL), horiFunction, &context->kernel,
+                   horiSrc, dst, src, horiStart, horiEnd, paMode);
 
     return 0;
 }
 
 /*! Execute a multi-threaded upscale operation. */
-static bool upscaleExecute(Context_t* ctx, const UpscaleArgs_t* params, Kernel_t kernel)
+static bool upscaleExecute(Memory_t memory, Logger_t log, Context_t* ctx,
+                           const UpscaleArgs_t* params, Kernel_t kernel)
 {
     assert(params->mode != Scale0D);
 
-    if (internalInitialise(ctx, params) < 0) {
-        VN_ERROR(ctx->log, "Failed to initialise upscaler");
+    if (internalInitialise(memory, log, ctx, params) < 0) {
+        VN_ERROR(log, "Failed to initialise upscaler");
         return false;
     }
 
@@ -350,11 +358,11 @@ static bool upscaleExecute(Context_t* ctx, const UpscaleArgs_t* params, Kernel_t
     slicedJobContext.dst = params->dst;
     slicedJobContext.intermediate = is2D ? &ctx->upscaleIntermediateSurface : params->src;
     slicedJobContext.lineFunction =
-        getHorizontalFunction(ctx, slicedJobContext.intermediate->type, params->dst->type,
+        getHorizontalFunction(log, slicedJobContext.intermediate->type, params->dst->type,
                               params->applyPA ? params->src->type : FPCount,
                               params->src->interleaving, params->preferredAccel);
     slicedJobContext.colFunction =
-        is2D ? getVerticalFunction(ctx, params->src->type, slicedJobContext.intermediate->type,
+        is2D ? getVerticalFunction(log, params->src->type, slicedJobContext.intermediate->type,
                                    params->preferredAccel, &slicedJobContext.colStepping)
              : NULL;
     slicedJobContext.kernel = kernel;
@@ -362,12 +370,12 @@ static bool upscaleExecute(Context_t* ctx, const UpscaleArgs_t* params, Kernel_t
     slicedJobContext.applyDither = params->applyDither;
 
     if (!slicedJobContext.lineFunction) {
-        VN_ERROR(ctx->log, "Failed to find upscale horizontal function");
+        VN_ERROR(log, "Failed to find upscale horizontal function");
         return false;
     }
 
     if (is2D && !slicedJobContext.colFunction) {
-        VN_ERROR(ctx->log, "Failed to find upscale vertical function");
+        VN_ERROR(log, "Failed to find upscale vertical function");
         return false;
     }
 
@@ -377,34 +385,34 @@ static bool upscaleExecute(Context_t* ctx, const UpscaleArgs_t* params, Kernel_t
 
 /*------------------------------------------------------------------------------*/
 
-bool upscale(Context_t* ctx, const UpscaleArgs_t* params)
+bool upscale(Memory_t memory, Logger_t log, Context_t* ctx, const UpscaleArgs_t* params)
 {
     Kernel_t kernel;
     const Surface_t* src = params->src;
     const Surface_t* dst = params->dst;
 
-    if (!upscaleGetKernel(ctx, params->type, &kernel)) {
-        VN_ERROR(ctx->log, "upscale: valid kernel not found\n");
+    if (!upscaleGetKernel(log, ctx, params->type, &kernel)) {
+        VN_ERROR(log, "upscale: valid kernel not found\n");
         return false;
     }
 
     if (src == NULL) {
-        VN_ERROR(ctx->log, "upscale: src must not be null\n");
+        VN_ERROR(log, "upscale: src must not be null\n");
         return false;
     }
 
     if (dst == NULL) {
-        VN_ERROR(ctx->log, "upscale: dst must not be null\n");
+        VN_ERROR(log, "upscale: dst must not be null\n");
         return false;
     }
 
     if (src->interleaving != dst->interleaving) {
-        VN_ERROR(ctx->log, "upscale: src and dst must be the same interleaving type\n");
+        VN_ERROR(log, "upscale: src and dst must be the same interleaving type\n");
         return false;
     }
 
     if (kernel.length & 1 || kernel.length > 8) {
-        VN_ERROR(ctx->log, "upscale: kernel length must be multiple of 2 and max 8\n");
+        VN_ERROR(log, "upscale: kernel length must be multiple of 2 and max 8\n");
         return false;
     }
 
@@ -412,17 +420,17 @@ bool upscale(Context_t* ctx, const UpscaleArgs_t* params)
     const FixedPoint_t dstFP = dst->type;
 
     if (fixedPointIsSigned(srcFP) != fixedPointIsSigned(dstFP)) {
-        VN_ERROR(ctx->log, "upscale: cannot convert between signed and unsigned formats\n");
+        VN_ERROR(log, "upscale: cannot convert between signed and unsigned formats\n");
         return false;
     }
 
     if (!fixedPointIsSigned(srcFP) && (bitdepthFromFixedPoint(srcFP) > bitdepthFromFixedPoint(dstFP))) {
-        VN_ERROR(ctx->log, "upscale: src bitdepth must be less than or equal to dst bitdepth - do "
-                           "not currently support demotion conversions\n");
+        VN_ERROR(log, "upscale: src bitdepth must be less than or equal to dst bitdepth - do "
+                      "not currently support demotion conversions\n");
         return false;
     }
 
-    return upscaleExecute(ctx, params, kernel);
+    return upscaleExecute(memory, log, ctx, params, kernel);
 }
 
 /*------------------------------------------------------------------------------*/
@@ -517,7 +525,7 @@ static bool preBakePaUnavailable(const Kernel_t* raw, Kernel_t* baked)
     return false;
 }
 
-static bool preBakePA(Context_t* ctx, KernelPtrInfo_t raw, UpscaleType_t type, Kernel_t* baked)
+static bool preBakePA(Logger_t log, KernelPtrInfo_t raw, UpscaleType_t type, Kernel_t* baked)
 {
     if (!raw.kernel || !raw.paBakingRecipe) {
         return false;
@@ -528,7 +536,7 @@ static bool preBakePA(Context_t* ctx, KernelPtrInfo_t raw, UpscaleType_t type, K
     }
 
     if (!raw.paBakingRecipe(raw.kernel, baked)) {
-        VN_ERROR(ctx->log, "Failed to initialise upscale kernel. pre-baking PA into kernel failed for kernel type=%s, length=%d\n",
+        VN_ERROR(log, "Failed to initialise upscale kernel. pre-baking PA into kernel failed for kernel type=%s, length=%d\n",
                  upscaleTypeToString(type), raw.kernel->length);
         return false;
     }
@@ -577,7 +585,8 @@ const KernelInfo_t kKernelInfos[] = {
 
 /*------------------------------------------------------------------------------*/
 
-static bool upscaleGetKernelUntransformed(Context_t* ctx, UpscaleType_t type, KernelPtrInfo_t* info)
+static bool upscaleGetKernelUntransformed(Logger_t log, Context_t* ctx, UpscaleType_t type,
+                                          KernelPtrInfo_t* info)
 {
     switch (type) {
         case USNearest:
@@ -597,33 +606,33 @@ static bool upscaleGetKernelUntransformed(Context_t* ctx, UpscaleType_t type, Ke
         default:;
     }
 
-    VN_ERROR(ctx->log, "upscale: unknown/unsupported upsample type (%d)\n", type);
+    VN_ERROR(log, "upscale: unknown/unsupported upsample type (%d)\n", type);
     return false;
 }
 
-bool upscaleGetKernel(Context_t* ctx, UpscaleType_t type, Kernel_t* out)
+bool upscaleGetKernel(Logger_t log, Context_t* ctx, UpscaleType_t type, Kernel_t* out)
 {
     KernelPtrInfo_t raw;
 
-    if (!upscaleGetKernelUntransformed(ctx, type, &raw)) {
+    if (!upscaleGetKernelUntransformed(log, ctx, type, &raw)) {
         return false;
     }
 
     if (ctx->useApproximatePA && ctx->deserialised.usePredictedAverage) {
-        return preBakePA(ctx, raw, type, out);
+        return preBakePA(log, raw, type, out);
     }
 
     memoryCopy(out, raw.kernel, sizeof(Kernel_t));
     return true;
 }
 
-bool upscalePAIsEnabled(Context_t* ctx)
+bool upscalePAIsEnabled(Logger_t log, Context_t* ctx)
 {
     const DeserialisedData_t* data = &ctx->deserialised;
     Kernel_t kernel;
     bool isPreBakedPA = false;
 
-    if (upscaleGetKernel(ctx, data->upscale, &kernel)) {
+    if (upscaleGetKernel(log, ctx, data->upscale, &kernel)) {
         isPreBakedPA = kernel.isPreBakedPA;
     }
 

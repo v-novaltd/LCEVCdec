@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_PROFILER_H_
 #define VN_DEC_CORE_PROFILER_H_
 
@@ -6,11 +16,13 @@
 
 /*------------------------------------------------------------------------------*/
 
+typedef struct Logger* Logger_t;
+typedef struct Memory* Memory_t;
 typedef int32_t ProfileID_t;
 typedef struct ProfilerState ProfilerState_t;
 
-int32_t profilerInitialise(Context_t* ctx);
-void profilerRelease(Context_t* ctx);
+int32_t profilerInitialise(ProfilerState_t** profilerOut, Memory_t memory, Logger_t log);
+void profilerRelease(ProfilerState_t** profilerOut, Memory_t memory);
 
 void profilerRegisterThread(ProfilerState_t* profiler, const char* label);
 ProfileID_t profilerRegisterProfile(ProfilerState_t* profiler, const char* label, const char* file,

@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "surface/overlay.h"
 
 #include <images.h>
@@ -81,7 +91,7 @@ static const StaticImageDesc_t* getOverlaySource(int32_t targetWidth)
     return getBestSizeImage(images, sizeof(images) / sizeof(images[0]), targetWidth);
 }
 
-int32_t overlayApply(Context_t* ctx, const OverlayArgs_t* params)
+int32_t overlayApply(Logger_t log, Context_t* ctx, const OverlayArgs_t* params)
 {
     const Surface_t* surf = params->dst;
     FixedPoint_t fp = surf->type;
@@ -100,16 +110,16 @@ int32_t overlayApply(Context_t* ctx, const OverlayArgs_t* params)
         ctx->logoOverlayPositionY + srcHeight > yMax ? yMax - srcHeight : ctx->logoOverlayPositionY;
 
     if (applyPixel == NULL) {
-        VN_ERROR(ctx->log, "Could not find function to apply overlay to pixel type %s\n",
+        VN_ERROR(log, "Could not find function to apply overlay to pixel type %s\n",
                  fixedPointToString(fp));
         return -1;
     }
     if (srcHeight > yMax) {
-        VN_ERROR(ctx->log, "Overlay is too tall (%u pixels) to fit in frame (%u pixels)\n", srcHeight, yMax);
+        VN_ERROR(log, "Overlay is too tall (%u pixels) to fit in frame (%u pixels)\n", srcHeight, yMax);
         return -1;
     }
     if (srcWidth > xMax) {
-        VN_ERROR(ctx->log, "Overlay is too wide (%u pixels) to fit in frame (%u pixels)\n", srcWidth, xMax);
+        VN_ERROR(log, "Overlay is too wide (%u pixels) to fit in frame (%u pixels)\n", srcWidth, xMax);
         return -1;
     }
 

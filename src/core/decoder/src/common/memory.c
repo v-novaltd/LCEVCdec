@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "common/memory.h"
 
 #include "common/log.h"
@@ -19,7 +29,7 @@ typedef struct Memory
     AllocateZeroFunction_t allocZeroFn;
     FreeFunction_t freeFn;
     ReallocFunction_t reallocateFn;
-}* Memory_t;
+} * Memory_t;
 
 typedef enum MemoryAllocationType
 {
@@ -293,8 +303,7 @@ static void memoryTraceRelease(MemoryTrace_t* trace)
     memory->freeFn(memory->userData, trace);
 }
 
-static void memoryReportStats(const MemoryAllocationStats_t* stats, MemoryAllocationType_t type,
-                              Logger_t* log)
+static void memoryReportStats(const MemoryAllocationStats_t* stats, MemoryAllocationType_t type, Logger_t log)
 {
     const size_t averageSize = stats->count ? (stats->totalSize / stats->count) : 0;
     const size_t minSize = stats->count > 0 ? stats->minSize : 0;
@@ -317,7 +326,7 @@ static void memoryReportStats(const MemoryAllocationStats_t* stats, MemoryAlloca
     }
 }
 
-static bool memoryTraceHasLeaks(MemoryTrace_t* trace, Logger_t* log)
+static bool memoryTraceHasLeaks(MemoryTrace_t* trace, Logger_t log)
 {
     /* Log is a special case since we don't free it until after we report (as reporting is
      * performed over the log interface). */

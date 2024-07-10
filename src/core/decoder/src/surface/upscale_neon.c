@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "surface/upscale_neon.h"
 
 #if VN_CORE_FEATURE(NEON)
@@ -437,9 +447,9 @@ static inline void applyDither(int16x8x2_t* values, const int8_t** buffer)
 }
 
 /*! \brief Planar horizontal upscaling of 2 rows. */
-void horizontalU8PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+void horizontalU8PlanarNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                             const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                            const Kernel_t* kernel, bool dither)
+                            const Kernel_t* kernel)
 {
     const int16_t* kernelFwd = kernel->coeffs[0];
     const int16_t* kernelRev = kernel->coeffs[1];
@@ -460,7 +470,7 @@ void horizontalU8PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2
 
     /* Run left edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsLeftValid(&coords)) {
-        horizontalU8Planar(ctx, in, out, base, width, coords.leftStart, coords.leftEnd, kernel, dither);
+        horizontalU8Planar(dither, in, out, base, width, coords.leftStart, coords.leftEnd, kernel);
     }
 
     /* Prime I/O */
@@ -471,8 +481,8 @@ void horizontalU8PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2
     int32_t storeOffset = (int32_t)(coords.start << 1);
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, alignU32(4 * (xEnd - xStart), 16));
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
     }
 
     /* Run middle SIMD loop */
@@ -508,14 +518,14 @@ void horizontalU8PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2
 
     /* Run right edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsRightValid(&coords)) {
-        horizontalU8Planar(ctx, in, out, base, width, coords.rightStart, coords.rightEnd, kernel, dither);
+        horizontalU8Planar(dither, in, out, base, width, coords.rightStart, coords.rightEnd, kernel);
     }
 }
 
 /*! \brief Planar horizontal upscaling of 2 rows. */
-void horizontalS16PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+void horizontalS16PlanarNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                              const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                             const Kernel_t* kernel, bool dither)
+                             const Kernel_t* kernel)
 {
     const int16_t* kernelFwd = kernel->coeffs[0];
     const int16_t* kernelRev = kernel->coeffs[1];
@@ -538,7 +548,7 @@ void horizontalS16PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[
 
     /* Run left edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsLeftValid(&coords)) {
-        horizontalS16Planar(ctx, in, out, base, width, coords.leftStart, coords.leftEnd, kernel, dither);
+        horizontalS16Planar(dither, in, out, base, width, coords.leftStart, coords.leftEnd, kernel);
     }
 
     /* Prime I/O */
@@ -549,8 +559,8 @@ void horizontalS16PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[
     int32_t storeOffset = (int32_t)(coords.start << 1);
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, alignU32(4 * (xEnd - xStart), 16));
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
     }
 
     /* Run middle SIMD loop */
@@ -589,15 +599,15 @@ void horizontalS16PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[
 
     /* Run right edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsRightValid(&coords)) {
-        horizontalS16Planar(ctx, in, out, base, width, coords.rightStart, coords.rightEnd, kernel, dither);
+        horizontalS16Planar(dither, in, out, base, width, coords.rightStart, coords.rightEnd, kernel);
     }
 }
 
 /*! \brief Planar horizontal upscaling of 2 rows. */
-static inline void horizontalU16PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static inline void horizontalU16PlanarNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                            const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                           uint32_t xEnd, const Kernel_t* kernel, bool dither,
-                                           uint16_t maxValue, bool is14Bit)
+                                           uint32_t xEnd, const Kernel_t* kernel, uint16_t maxValue,
+                                           bool is14Bit)
 {
     const int16_t* kernelFwd = kernel->coeffs[0];
     const int16_t* kernelRev = kernel->coeffs[1];
@@ -622,8 +632,7 @@ static inline void horizontalU16PlanarNEON(Context_t* ctx, const uint8_t* in[2],
 
     /* Run left edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsLeftValid(&coords)) {
-        horizontalUNPlanar(ctx, in, out, base, width, coords.leftStart, coords.leftEnd, kernel,
-                           dither, maxValue);
+        horizontalUNPlanar(dither, in, out, base, width, coords.leftStart, coords.leftEnd, kernel, maxValue);
     }
 
     /* Prime I/O */
@@ -634,8 +643,8 @@ static inline void horizontalU16PlanarNEON(Context_t* ctx, const uint8_t* in[2],
     int32_t storeOffset = (int32_t)(coords.start << 1);
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, alignU32(4 * (xEnd - xStart), 16));
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
     }
 
     /* Run middle SIMD loop */
@@ -679,39 +688,38 @@ static inline void horizontalU16PlanarNEON(Context_t* ctx, const uint8_t* in[2],
 
     /* Run right edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsRightValid(&coords)) {
-        horizontalUNPlanar(ctx, in, out, base, width, coords.rightStart, coords.rightEnd, kernel,
-                           dither, maxValue);
+        horizontalUNPlanar(dither, in, out, base, width, coords.rightStart, coords.rightEnd, kernel,
+                           maxValue);
     }
 }
 
 /*! \brief U10 Planar horizontal upscaling of 2 rows. */
-void horizontalU10PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+void horizontalU10PlanarNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                              const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                             const Kernel_t* kernel, bool dither)
+                             const Kernel_t* kernel)
 {
-    horizontalU16PlanarNEON(ctx, in, out, base, width, xStart, xEnd, kernel, dither, 1023, false);
+    horizontalU16PlanarNEON(dither, in, out, base, width, xStart, xEnd, kernel, 1023, false);
 }
 
 /*! \brief U12 Planar horizontal upscaling of 2 rows. */
-void horizontalU12PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+void horizontalU12PlanarNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                              const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                             const Kernel_t* kernel, bool dither)
+                             const Kernel_t* kernel)
 {
-    horizontalU16PlanarNEON(ctx, in, out, base, width, xStart, xEnd, kernel, dither, 4095, false);
+    horizontalU16PlanarNEON(dither, in, out, base, width, xStart, xEnd, kernel, 4095, false);
 }
 
 /*! \brief U14 Planar horizontal upscaling of 2 rows. */
-void horizontalU14PlanarNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+void horizontalU14PlanarNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                              const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                             const Kernel_t* kernel, bool dither)
+                             const Kernel_t* kernel)
 {
-    horizontalU16PlanarNEON(ctx, in, out, base, width, xStart, xEnd, kernel, dither, 16383, true);
+    horizontalU16PlanarNEON(dither, in, out, base, width, xStart, xEnd, kernel, 16383, true);
 }
 
 /*! \brief NV12 horizontal upscaling of 2 rows. */
-void horizontalU8NV12NEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
-                          const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                          const Kernel_t* kernel, bool dither)
+void horizontalU8NV12NEON(Dither_t dither, const uint8_t* in[2], uint8_t* out[2], const uint8_t* base[2],
+                          uint32_t width, uint32_t xStart, uint32_t xEnd, const Kernel_t* kernel)
 {
     const int16_t* kernelFwd = kernel->coeffs[0];
     const int16_t* kernelRev = kernel->coeffs[1];
@@ -736,7 +744,7 @@ void horizontalU8NV12NEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
 
     /* Run left edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsLeftValid(&coords)) {
-        horizontalU8NV12(ctx, in, out, base, width, coords.leftStart, coords.leftEnd, kernel, dither);
+        horizontalU8NV12(dither, in, out, base, width, coords.leftStart, coords.leftEnd, kernel);
     }
 
     /* Prime I/O */
@@ -747,8 +755,8 @@ void horizontalU8NV12NEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
     int32_t storeOffset = (int32_t)(coords.start << 2);
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, alignU32(4 * (xEnd - xStart), 16));
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
     }
 
     /* Run middle SIMD loop */
@@ -798,14 +806,13 @@ void horizontalU8NV12NEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
 
     /* Run right edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsRightValid(&coords)) {
-        horizontalU8NV12(ctx, in, out, base, width, coords.rightStart, coords.rightEnd, kernel, dither);
+        horizontalU8NV12(dither, in, out, base, width, coords.rightStart, coords.rightEnd, kernel);
     }
 }
 
 /*! \brief RGB horizontal upscaling of 2 rows. */
-void horizontalU8RGBNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
-                         const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                         const Kernel_t* kernel, bool dither)
+void horizontalU8RGBNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out[2], const uint8_t* base[2],
+                         uint32_t width, uint32_t xStart, uint32_t xEnd, const Kernel_t* kernel)
 {
     const int16_t* kernelFwd = kernel->coeffs[0];
     const int16_t* kernelRev = kernel->coeffs[1];
@@ -830,7 +837,7 @@ void horizontalU8RGBNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
 
     /* Run left edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsLeftValid(&coords)) {
-        horizontalU8RGB(ctx, in, out, base, width, coords.leftStart, coords.leftEnd, kernel, dither);
+        horizontalU8RGB(dither, in, out, base, width, coords.leftStart, coords.leftEnd, kernel);
     }
 
     /* Prime I/O */
@@ -841,8 +848,8 @@ void horizontalU8RGBNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
     int32_t storeOffset = (int32_t)(coords.start * 6);
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, alignU32(4 * (xEnd - xStart), 16));
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
     }
 
     /* Run middle SIMD loop */
@@ -894,14 +901,13 @@ void horizontalU8RGBNEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
 
     /* Run right edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsRightValid(&coords)) {
-        horizontalU8RGB(ctx, in, out, base, width, coords.rightStart, coords.rightEnd, kernel, dither);
+        horizontalU8RGB(dither, in, out, base, width, coords.rightStart, coords.rightEnd, kernel);
     }
 }
 
 /*! \brief RGBA horizontal upscaling of 2 rows. */
-void horizontalU8RGBANEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
-                          const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
-                          const Kernel_t* kernel, bool dither)
+void horizontalU8RGBANEON(Dither_t dither, const uint8_t* in[2], uint8_t* out[2], const uint8_t* base[2],
+                          uint32_t width, uint32_t xStart, uint32_t xEnd, const Kernel_t* kernel)
 {
     uint32_t x;
     const int16_t* kernelFwd = kernel->coeffs[0];
@@ -927,7 +933,7 @@ void horizontalU8RGBANEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
 
     /* Run left edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsLeftValid(&coords)) {
-        horizontalU8RGBA(ctx, in, out, base, width, coords.leftStart, coords.leftEnd, kernel, dither);
+        horizontalU8RGBA(dither, in, out, base, width, coords.leftStart, coords.leftEnd, kernel);
     }
 
     /* Prime I/O */
@@ -938,8 +944,8 @@ void horizontalU8RGBANEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
     int32_t storeOffset = (int32_t)(coords.start << 3);
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, alignU32(4 * (xEnd - xStart), 16));
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
     }
 
     /* Run middle SIMD loop */
@@ -993,7 +999,7 @@ void horizontalU8RGBANEON(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
 
     /* Run right edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsRightValid(&coords)) {
-        horizontalU8RGBA(ctx, in, out, base, width, coords.rightStart, coords.rightEnd, kernel, dither);
+        horizontalU8RGBA(dither, in, out, base, width, coords.rightStart, coords.rightEnd, kernel);
     }
 }
 
@@ -1088,7 +1094,6 @@ static inline void verticalGetNextPelsN16(const uint8_t* in, uint32_t height, ui
  * This generates 16-pixels worth of output.
  *
  * \param pels            The pixels to upscale from.
- * \param result          Place to store the resultant 16-pixels.
  * \param kernel          The kernel to upscale with
  * \param kernel_length   The length of kernel.
  *
@@ -1211,9 +1216,8 @@ static inline void verticalConvolveU16(int16x8x2_t pels[UCMaxKernelSize], const 
 }
 
 /*! \brief Vertical upscaling of 16 columns. */
-static void verticalU8NEON(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                           uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height,
-                           const Kernel_t* kernel)
+static void verticalU8NEON(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                           uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
     const int16_t* kernelFwd = kernel->coeffs[0];
     const int16_t* kernelRev = kernel->coeffs[1];
@@ -1250,9 +1254,8 @@ static void verticalU8NEON(Context_t* ctx, const uint8_t* in, uint32_t inStride,
 }
 
 /*! \brief S16 vertical upscaling of 16 columns. */
-static void verticalS16NEON(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                            uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height,
-                            const Kernel_t* kernel)
+static void verticalS16NEON(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                            uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
     const int16_t* kernelFwd = kernel->coeffs[0];
     const int16_t* kernelRev = kernel->coeffs[1];
@@ -1295,9 +1298,9 @@ static void verticalS16NEON(Context_t* ctx, const uint8_t* in, uint32_t inStride
 }
 
 /*! \brief U16 vertical upscaling of 16 columns. */
-static inline void verticalU16NEON(Context_t* ctx, const uint8_t* in, uint32_t inStride,
-                                   uint8_t* out, uint32_t outStride, uint32_t y, uint32_t rows,
-                                   uint32_t height, const Kernel_t* kernel, uint16_t maxValue)
+static inline void verticalU16NEON(const uint8_t* in, uint32_t inStride, uint8_t* out,
+                                   uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height,
+                                   const Kernel_t* kernel, uint16_t maxValue)
 {
     const int16_t* kernelFwd = kernel->coeffs[0];
     const int16_t* kernelRev = kernel->coeffs[1];
@@ -1341,24 +1344,24 @@ static inline void verticalU16NEON(Context_t* ctx, const uint8_t* in, uint32_t i
 }
 
 /*! \brief U10 vertical upscaling of 16 columns. */
-void verticalU10NEON(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                     uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalU10NEON(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                     uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalU16NEON(ctx, in, inStride, out, outStride, y, rows, height, kernel, 1023);
+    verticalU16NEON(in, inStride, out, outStride, y, rows, height, kernel, 1023);
 }
 
 /*! \brief U12 vertical upscaling of 16 columns. */
-void verticalU12NEON(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                     uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalU12NEON(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                     uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalU16NEON(ctx, in, inStride, out, outStride, y, rows, height, kernel, 4095);
+    verticalU16NEON(in, inStride, out, outStride, y, rows, height, kernel, 4095);
 }
 
 /*! \brief U14 vertical upscaling of 16 columns. */
-void verticalU14NEON(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                     uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalU14NEON(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                     uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalU16NEON(ctx, in, inStride, out, outStride, y, rows, height, kernel, 16383);
+    verticalU16NEON(in, inStride, out, outStride, y, rows, height, kernel, 16383);
 }
 
 /*------------------------------------------------------------------------------*/

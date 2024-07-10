@@ -1,9 +1,19 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "LCEVC/utility/configure.h"
 
 #include "LCEVC/lcevc_dec.h"
 
+#include <fmt/core.h>
 #include <rapidjson/document.h>
 
 #include <algorithm>
@@ -77,7 +87,7 @@ LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std
         if (!jsonFile) {
             return LCEVC_Error;
         }
-        std::string str {std::istreambuf_iterator<char>(jsonFile), std::istreambuf_iterator<char>()};
+        std::string str{std::istreambuf_iterator<char>(jsonFile), std::istreambuf_iterator<char>()};
         configuration.Parse(str.c_str());
     } else {
         // Raw json
@@ -99,7 +109,10 @@ LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std
                 case ValueType::Int:
                     ret = LCEVC_ConfigureDecoderInt(decoderHandle, item->name.GetString(),
                                                     item->value.GetInt());
-                    break;
+                    if (ret == LCEVC_Success) {
+                        break;
+                    }
+                    // Fall through to float case if int configuration fails
                 case ValueType::Float:
                     ret = LCEVC_ConfigureDecoderFloat(decoderHandle, item->name.GetString(),
                                                       item->value.GetFloat());
@@ -159,6 +172,7 @@ LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std
         }
 
         if (ret != LCEVC_NotFound && ret != LCEVC_Success) {
+            fmt::print("Unknown parameter '{}'\n", item->name.GetString());
             return ret;
         }
     }

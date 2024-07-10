@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_UPSCALE_COMMON_H_
 #define VN_DEC_CORE_UPSCALE_COMMON_H_
 
@@ -6,15 +16,15 @@
 
 /*------------------------------------------------------------------------------*/
 
+typedef struct Dither* Dither_t;
 typedef struct Kernel Kernel_t;
 
-typedef void (*UpscaleHorizontal_t)(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+typedef void (*UpscaleHorizontal_t)(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                     const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                    uint32_t xEnd, const Kernel_t* kernel, bool dither);
+                                    uint32_t xEnd, const Kernel_t* kernel);
 
-typedef void (*UpscaleVertical_t)(Context_t* ctx, const uint8_t* in, uint32_t inStride,
-                                  uint8_t* out, uint32_t outStride, uint32_t y, uint32_t rows,
-                                  uint32_t height, const Kernel_t* kernel);
+typedef void (*UpscaleVertical_t)(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                                  uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel);
 
 /*------------------------------------------------------------------------------*/
 

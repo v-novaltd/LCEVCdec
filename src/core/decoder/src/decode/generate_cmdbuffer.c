@@ -1,8 +1,17 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "decode/generate_cmdbuffer.h"
 
 #include "common/cmdbuffer.h"
-#include "common/simd.h"
 #include "context.h"
 #include "decode/decode_common.h"
 #include "decode/decode_parallel.h"
@@ -13,42 +22,13 @@
 
 /*------------------------------------------------------------------------------*/
 
-/*! \brief Retrieves the correct TU coordinates function to use. */
-static inline TUCoordFunction_t tuCoordsGetFunction(const DeserialisedData_t* data)
-{
-    return (data->temporalEnabled || (data->tileDimensions != TDTNone)) ? &tuCoordsBlockRaster
-                                                                        : &tuCoordsSurfaceRaster;
-}
-
-/*! \brief Used to remap the current DDS residual layout to a scanline ordering to
- *         simplify the usage of cmdbuffers.
- *
- *  \note  This function is fully intended to be removed and is an intermediate
- *         solution as the effort to change the residual memory representation is
- *         significant. */
-static inline void cmdbufferAppendDDS(CmdBuffer_t* cmdbuffer, int16_t x, int16_t y, const int16_t* values)
-{
-    const int16_t tmp[16] = {values[0],  values[1],  values[4],  values[5], values[2],  values[3],
-                             values[6],  values[7],  values[8],  values[9], values[12], values[13],
-                             values[10], values[11], values[14], values[15]};
-
-    cmdBufferAppend(cmdbuffer, x, y, tmp);
-}
-
-/*------------------------------------------------------------------------------*/
-
-void generateCommandBuffers(Context_t* ctx, DecodeParallel_t decode, const DecodeParallelArgs_t* args,
-                            TileState_t* tile, int32_t planeIndex, TransformCoeffs_t* coeffs,
-                            TransformCoeffs_t temporalCoeffs, TUState_t* tuState)
+void generateCommandBuffers(const DeserialisedData_t* data, const DecodeParallelArgs_t* args,
+                            CmdBuffer_t* cmdbuffer, int32_t planeIndex, TransformCoeffs_t* coeffs,
+                            TransformCoeffs_t temporalCoeffs, const BlockClearJumps_t blockClears,
+                            const TUState_t* tuState)
 {
     VN_PROFILE_FUNCTION();
-
-    CmdBuffer_t* cmds[TSCount] = {
-        decodeParallelGetResidualCmdBuffer(decode, planeIndex, TSInter, args->loq),
-        decodeParallelGetResidualCmdBuffer(decode, planeIndex, TSIntra, args->loq),
-    };
-
-    const DeserialisedData_t* data = &ctx->deserialised;
+    assert(cmdbuffer);
     const int32_t numLayers = data->numLayers;
     const TransformType_t transform = transformTypeFromLayerCount(data->numLayers);
     const UserDataConfig_t* userData = &data->userData;
@@ -56,13 +36,15 @@ void generateCommandBuffers(Context_t* ctx, DecodeParallel_t decode, const Decod
     int16_t values[RCLayerMaxCount] = {0};
     uint32_t layerRun[RCLayerMaxCount] = {0};
     uint32_t indices[RCLayerMaxCount] = {0};
+    uint32_t tuIndex = 0;
+    uint32_t lastTuIndex = 0;
+    uint32_t blockClearJumpIndex = 0;
+    // Coordinates are only used when temporal is enabled
     uint32_t x = 0;
     uint32_t y = 0;
-    uint32_t tuIndex = 0;
 
     const ScalingMode_t scaling = (LOQ0 == args->loq) ? args->scalingMode : Scale2D;
     const Dequant_t* dequant = &args->dequant[planeIndex];
-    const TUCoordFunction_t tuCoordsFn = tuCoordsGetFunction(data);
     const DequantTransformFunction_t dequantTransformFn =
         dequantTransformGetFunction(transform, scaling, args->preferredAccel);
 
@@ -80,8 +62,6 @@ void generateCommandBuffers(Context_t* ctx, DecodeParallel_t decode, const Decod
 
     while (tuIndex < tuState->tuTotal) {
         uint32_t minimumRun = UINT_MAX;
-
-        tuCoordsFn(tuState, tuIndex, &x, &y);
 
         /* Run down zero runs for each layer. */
         for (int32_t i = 0; i < numLayers; ++i) {
@@ -145,13 +125,31 @@ void generateCommandBuffers(Context_t* ctx, DecodeParallel_t decode, const Decod
         }
 
         /* Record in command buffer. */
-        CmdBuffer_t* dstCmdBuffer = cmds[temporal];
-
-        if (transform == TransformDDS) {
-            cmdbufferAppendDDS(dstCmdBuffer, (int16_t)x, (int16_t)y, residuals);
-        } else {
-            cmdBufferAppend(dstCmdBuffer, (int16_t)x, (int16_t)y, residuals);
+        CmdBufferCmd_t command = CBCAdd;
+        if (args->loq == LOQ0 && temporal == TSIntra) {
+            command = CBCSet; // TODO: implement setZero in a smart way
         }
+
+        uint32_t currentIndex = tuIndex;
+        if (data->temporalEnabled || data->tileDimensions != TDTNone) {
+            tuCoordsBlockRaster(tuState, tuIndex, &x, &y);
+            if (tuState->block.tuPerBlockRowRightEdge != 0 || y >= tuState->blockAligned.maxWholeBlockY) {
+                currentIndex = tuCoordsBlockAlignedIndex(tuState, x, y);
+            }
+            if (data->temporalEnabled) {
+                while (blockClearJumpIndex < blockClears->count) {
+                    uint32_t nextClearTu = blockClears->jumps[blockClearJumpIndex];
+                    if (nextClearTu > currentIndex) {
+                        break;
+                    }
+                    cmdBufferAppend(cmdbuffer, CBCClear, NULL, nextClearTu - lastTuIndex);
+                    lastTuIndex = nextClearTu;
+                    blockClearJumpIndex++;
+                }
+            }
+        }
+        cmdBufferAppend(cmdbuffer, command, residuals, currentIndex - lastTuIndex);
+        lastTuIndex = currentIndex;
 
         /* Move to next transform */
         tuIndex += (1 + minimumRun);
@@ -163,7 +161,6 @@ void generateCommandBuffers(Context_t* ctx, DecodeParallel_t decode, const Decod
 
         temporalRun -= minimumRun;
     }
-
     VN_PROFILE_STOP();
 }
 

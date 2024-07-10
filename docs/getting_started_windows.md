@@ -8,10 +8,18 @@ The executable to download Git for Windows can be found [here](https://git-scm.c
 
 Install python as a standalone package, that way you can control the version. Ensure that the path is set correctly to be able to run from a shell, and that pip is installed.
 
-Python for Windows is available for download [here](https://www.python.org/downloads/windows/). You should use version 3.7 or greater. Follow the installation instructions and add installed location to `Path` for it be found by other tools.
+Python for Windows is available for download [here](https://www.python.org/downloads/windows/). You should use version 3.7 to 3.11. Follow the installation instructions and add installed location to `Path` for it be found by other tools.
 
 Good instructions on how to install Python virtual environments on Windows machines are available
 [here](http://timmyreilly.azurewebsites.net/python-pip-virtualenv-installation-on-windows/).
+
+Install various requirements:
+
+```shell
+pip install -r requirements.txt
+pip install -r cmake/tools/lint_requirements.txt
+pip install -r src/func_tests/test_requirements.txt
+```
 
 ## CMake
 
@@ -24,7 +32,6 @@ Conan is software that uses python to manage C/C++ packages. You will need to ha
 Conan is installed and configured like so:
 
 ```shell
-pip install -r requirements.txt
 conan config install "https://gitlab.com/v-nova-public/conan-profiles.git" --type=git
 ```
 
@@ -40,15 +47,15 @@ Do **NOT** install Visual Studio's version of Python. Doing so will ruin your da
 
 Do **NOT** install Visual Studio's version of CMake. There must be only 1 version of CMake used in the system and that will be the one installed above.
 
-## Clang-format and Clang-tidy
+## Linting
 
-Clang-format is our linter: it formats the code. It is mandatory to obey clang-format, but you can use `// clang-format off` and `// clang-format on` before and after code that you want clang-format to ignore.
+Clang-format is used to maintain format in C and C++ code. It is mandatory to obey clang-format, but you can use `// clang-format off` and `// clang-format on` before and after code that you want clang-format to ignore. Cmake-format from the `cmakelang` module is used to format cmake files and PEP8 is enforced in python files with flake8 and autopep8.
 
 Clang-tidy provides useful warnings. It is *not* currently mandatory to obey clang-tidy, but it is helpful. If you do violate clang-tidy, you should generally add a comment to disable that particular rule. For example, you can add `NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)` if the next line has a `reinterpret_cast`.
 
-We use LLVM version 14.0.0 for both these, which is available [here](https://github.com/llvm/llvm-project/releases/tag/llvmorg-14.0.0). As always, once downloaded, add its location to `Path`.
+Use LLVM version 14.0.0 for clang-format and clang-tidy, which is available [here](https://github.com/llvm/llvm-project/releases/tag/llvmorg-14.0.0). As always, once downloaded, add its location to `Path`.
 
-It is receommended to integrate both clang-format and clang-tidy into your IDE (this is easy for Visual Studio, and can be done in VS Code if you export compile commands, as described in the build instructions)
+It is recommended to integrate both clang-format and clang-tidy into your IDE (this is easy for Visual Studio, and can be done in VS Code if you export compile commands, as described in the build instructions)
 
 You can also use clang-format from the command line, like so
 
@@ -56,10 +63,13 @@ You can also use clang-format from the command line, like so
 clang-format -i changed_file.cpp
 ```
 
-In PowerShell, the following is a handy command to format every file for which you've committed a change:
+To format all code and copyright headers use
+
 ```shell
-clang-format -i @(git diff master HEAD --name-only *.cpp *.h *.c)
+python cmake/tools/lint.py --all-files
 ```
+
+It is highly recommended to copy the `pre-commit` script from `cmake/tools` to the repo's `.git/hooks` folder to enable automatic linting before each commit. Ensure Git Bash is running within the venv or install the `lint_requirements.txt` globally. 
 
 ## Ninja (optional)
 
@@ -79,17 +89,17 @@ Download Android Studio [here](https://developer.android.com/studio).
 
 Open the SDK Manager, via `Tools/SDK Manager`. On the left, it should say that you're in the `Android SDK` section. At the top of this window, there will be a text bar labelled `Android SDK Location`. Click `edit` to make a folder (for example, `C:/Users/your.name/AppData/Android/Sdk`) and set this as the SDK location. Below, we call this `ANDROID_HOME`. Android Studio should, at this point, force you to download the SDK, and the latest SDK Platform, so do that.
 
-Now, the most important part: download the Android NDK. Return to the `SDK Manager` tool. Again, in the `Android SDK` section, switch from your current tab (which will typically be `SDK Platforms`) to the `SDK Tools` tab. On the lower right, tick "show package details". Now, in the main window, find `NDK (side-by-side)`, expand it, and select version 21.4.7075529. Click `Apply`, and the NDK should start downloading immediately.
+Now, the most important part: download the Android NDK. Return to the `SDK Manager` tool. Again, in the `Android SDK` section, switch from your current tab (which will typically be `SDK Platforms`) to the `SDK Tools` tab. On the lower right, tick "show package details". Now, in the main window, find `NDK (side-by-side)`, expand it, and select version 25.2.9519653. Click `Apply`, and the NDK should start downloading immediately.
 
 Finally, set the following environment variables:
 
 `ANDROID_HOME` = whatever you used as the SDK location earlier.  
-`ANDROID_NDK_PATH` = `%ANDROID_HOME%\ndk\21.4.7075529`  
+`ANDROID_NDK_PATH` = `%ANDROID_HOME%\ndk\25.2.9519653`  
 `ANDROID_NDK` = `%ANDROID_NDK%`
 
 `ANDROID_HOME` is used by Android Studio, `ANDROID_NDK_PATH` is used by our conan-related files (`create_all_android_conan_profiles.py`), and `ANDROID_NDK` is used by our cmake-related files (`android_ndk.toolchain.cmake`).
 
-NDK 21.4.7075529 is the minimum NDK, but newer ones should, in theory, also work.
+NDK 25.2.9519653 is the version tested in CI and known to work, but newer revisions of NDK 25 should also work, e.g. 25.3.* should be compatible (as long as the compiler major version remains the same) but 26.*.* would not be as that has moved to LLVM 17.
 
 ## Emscripten (optional)
 

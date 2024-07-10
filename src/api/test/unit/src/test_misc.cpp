@@ -1,6 +1,15 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-// This tests clock.h, decoder_config.h, picture_lock.h and buffer_manager.h
+// This tests decoder_config.h, picture_lock.h and buffer_manager.h
 
 // Define this so that we can reach both the internal headers (which are NOT in a dll) AND some
 // handy functions from the actual interface of the API (which normally WOULD be in a dll).
@@ -8,15 +17,13 @@
 
 #include "utils.h"
 
-#include <LCEVC/lcevc_dec.h>
 #include <buffer_manager.h>
-#include <clock.h>
 #include <decoder_config.h>
 #include <gtest/gtest.h>
+#include <LCEVC/lcevc_dec.h>
 #include <picture.h>
 #include <picture_lock.h>
 
-#include <memory>
 #include <thread>
 
 using namespace lcevc_dec::decoder;
@@ -35,13 +42,11 @@ public:
         config.set("dither_strength", 1);
         config.set("dpi_pipeline_mode", 1);
         config.set("dpi_threads", 1);
-        config.set("log_level", LogType_Verbose);
+        config.set("log_level", static_cast<int32_t>(LogLevel::Trace));
         config.set("results_queue_cap", 1);
         config.set("loq_unprocessed_cap", 1);
-        config.set("passthrough_mode",
-                   static_cast<int32_t>(lcevc_dec::api_utility::DILPassthroughPolicy::Disable));
-        config.set("predicted_average_method",
-                   static_cast<int32_t>(lcevc_dec::api_utility::PredictedAverageMethod::None));
+        config.set("passthrough_mode", static_cast<int32_t>(PassthroughPolicy::Disable));
+        config.set("predicted_average_method", static_cast<int32_t>(PredictedAverageMethod::None));
         config.set("pss_surface_fp_setting", 1);
         config.set("events", events);
     }
@@ -49,20 +54,6 @@ public:
     DecoderConfig config;
     const std::vector<int32_t> events = {LCEVC_Log, LCEVC_Exit};
 };
-
-TEST(ClockTest, IncrementValid)
-{
-    // Clock is accurate to 1% over 10ms when started and stopped at the 'same time' as chrono
-    std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
-    Clock clock;
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    uint64_t duration = std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::high_resolution_clock::now() - start)
-                            .count();
-    uint64_t clockDuration = clock.getTimeSinceStart();
-    EXPECT_GE(duration + 100, clockDuration);
-    EXPECT_LE(duration - 100, clockDuration);
-}
 
 TEST_F(ConfigFixture, NonDefaultValid)
 {
@@ -90,8 +81,7 @@ TEST_F(ConfigFixture, UnderPAMethodInvalid)
 
 TEST_F(ConfigFixture, OverPAMethodInvalid)
 {
-    config.set("predicted_average_method",
-               static_cast<int32_t>(lcevc_dec::api_utility::PredictedAverageMethod::COUNT) + 1);
+    config.set("predicted_average_method", static_cast<int32_t>(PredictedAverageMethod::COUNT) + 1);
     EXPECT_FALSE(config.validate());
 }
 

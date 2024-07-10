@@ -1,13 +1,27 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 /** \file apply_residual.c
  * Residual application functions
  */
 
 #include "decode/decode_serial.h"
 
+#include "common/cmdbuffer.h"
 #include "common/memory.h"
 #include "common/profiler.h"
+#include "common/stats.h"
+#include "common/tile.h"
 #include "context.h"
+#include "decode/apply_cmdbuffer.h"
 #include "decode/decode_common.h"
 #include "decode/dequant.h"
 #include "decode/entropy.h"
@@ -16,6 +30,7 @@
 #include "surface/blit.h"
 
 #include <assert.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -33,564 +48,239 @@ enum
 typedef struct ResidualArgs
 {
     Surface_t* dst;
-    int32_t skip;
-    int32_t offset;
     Highlight_t* highlight;
+    uint32_t skip;
+    uint32_t offset;
 } ResidualArgs_t;
 
 /*------------------------------------------------------------------------------*/
 
-/* Add inverse to U8.0 buffer and write back. */
-static void addResidualsDD_U8(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    Surface_t* dst = args->dst;
-    uint8_t* pel = dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    int32_t pelFP[4];
+#define VN_RESIDUAL_FN_BOILERPLATE(dataType) \
+    Surface_t* dst = args->dst;              \
+    dataType* pel = (dataType*)dst->data;    \
+    const uint32_t stride = dst->stride;     \
+    const uint32_t skip = args->skip;        \
+    pel += args->offset + (x * skip) + (y * stride);
 
-    assert(dst->type == FPU8);
+#define VN_DEFINE_ADD_RESIDUALS_DD(bits, dataType)                                                             \
+    static void addResidualsDD_U##bits(ResidualArgs_t* args, uint32_t x, uint32_t y, const int16_t* residuals) \
+    {                                                                                                          \
+        VN_RESIDUAL_FN_BOILERPLATE(dataType)                                                                   \
+        assert(dst->type == FPU##bits);                                                                        \
+        int32_t pelFP[4];                                                                                      \
+                                                                                                               \
+        /* Load pel and convert to S8_7 */                                                                     \
+        pelFP[0] = fpU##bits##ToS##bits(pel[0]);                                                               \
+        pelFP[1] = fpU##bits##ToS##bits(pel[skip]);                                                            \
+        pelFP[2] = fpU##bits##ToS##bits(pel[stride]);                                                          \
+        pelFP[3] = fpU##bits##ToS##bits(pel[skip + stride]);                                                   \
+                                                                                                               \
+        /* Apply & write back */                                                                               \
+        pel[0] = fpS##bits##ToU##bits(pelFP[0] + residuals[0]);                                                \
+        pel[skip] = fpS##bits##ToU##bits(pelFP[1] + residuals[1]);                                             \
+        pel[stride] = fpS##bits##ToU##bits(pelFP[2] + residuals[2]);                                           \
+        pel[skip + stride] = fpS##bits##ToU##bits(pelFP[3] + residuals[3]);                                    \
+    }
 
-    /* Load pel and convert to S8_7 */
-    pelFP[0] = fpU8ToS8(pel[offset]);
-    pelFP[1] = fpU8ToS8(pel[offset + skip]);
-    pelFP[2] = fpU8ToS8(pel[offset + stride]);
-    pelFP[3] = fpU8ToS8(pel[offset + skip + stride]);
-
-    /* Apply & write back */
-    pel[offset] = fpS8ToU8(pelFP[0] + residuals[0]);
-    pel[offset + skip] = fpS8ToU8(pelFP[1] + residuals[1]);
-    pel[offset + stride] = fpS8ToU8(pelFP[2] + residuals[2]);
-    pel[offset + skip + stride] = fpS8ToU8(pelFP[3] + residuals[3]);
-}
-
-/* Add inverse to U10.0 buffer and write back. */
-static void addResidualsDD_U10(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    Surface_t* dst = args->dst;
-    uint16_t* pel = (uint16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    int32_t pelFP[4];
-
-    assert(dst->type == FPU10);
-
-    /* Load pel and convert to S10_5 */
-    pelFP[0] = fpU10ToS10(pel[offset]);
-    pelFP[1] = fpU10ToS10(pel[offset + skip]);
-    pelFP[2] = fpU10ToS10(pel[offset + stride]);
-    pelFP[3] = fpU10ToS10(pel[offset + skip + stride]);
-
-    /* Apply & write back */
-    pel[offset] = fpS10ToU10(pelFP[0] + residuals[0]);
-    pel[offset + skip] = fpS10ToU10(pelFP[1] + residuals[1]);
-    pel[offset + stride] = fpS10ToU10(pelFP[2] + residuals[2]);
-    pel[offset + skip + stride] = fpS10ToU10(pelFP[3] + residuals[3]);
-}
-
-/* Add inverse to U12.0 buffer and write back. */
-static void addResidualsDD_U12(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    Surface_t* dst = args->dst;
-    uint16_t* pel = (uint16_t*)args->dst;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    int32_t pelFP[4];
-
-    assert(dst->type == FPU12);
-
-    /* Load pel and convert to S12_3 */
-    pelFP[0] = fpU12ToS12(pel[offset]);
-    pelFP[1] = fpU12ToS12(pel[offset + skip]);
-    pelFP[2] = fpU12ToS12(pel[offset + stride]);
-    pelFP[3] = fpU12ToS12(pel[offset + skip + stride]);
-
-    /* Apply & write back */
-    pel[offset] = fpS12ToU12(pelFP[0] + residuals[0]);
-    pel[offset + skip] = fpS12ToU12(pelFP[1] + residuals[1]);
-    pel[offset + stride] = fpS12ToU12(pelFP[2] + residuals[2]);
-    pel[offset + skip + stride] = fpS12ToU12(pelFP[3] + residuals[3]);
-}
-
-/* Add inverse to U14.0 buffer and write back. */
-static void addResidualsDD_U14(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    Surface_t* dst = args->dst;
-    uint16_t* pel = (uint16_t*)args->dst;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    int32_t pelFP[4];
-
-    assert(dst->type == FPU14);
-
-    /* Load pel and convert to S14_1 */
-    pelFP[0] = fpU14ToS14(pel[offset]);
-    pelFP[1] = fpU14ToS14(pel[offset + skip]);
-    pelFP[2] = fpU14ToS14(pel[offset + stride]);
-    pelFP[3] = fpU14ToS14(pel[offset + skip + stride]);
-
-    /* Apply & write back */
-    pel[offset] = fpS14ToU14(pelFP[0] + residuals[0]);
-    pel[offset + skip] = fpS14ToU14(pelFP[1] + residuals[1]);
-    pel[offset + stride] = fpS14ToU14(pelFP[2] + residuals[2]);
-    pel[offset + skip + stride] = fpS14ToU14(pelFP[3] + residuals[3]);
-}
+VN_DEFINE_ADD_RESIDUALS_DD(8, uint8_t)
+VN_DEFINE_ADD_RESIDUALS_DD(10, uint16_t)
+VN_DEFINE_ADD_RESIDUALS_DD(12, uint16_t)
+VN_DEFINE_ADD_RESIDUALS_DD(14, uint16_t)
 
 /* Add inverse to S8.7/S10.5/S12.3/S14.1 buffer and write back. */
-static void addResidualsDD_S16(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
+static void addResidualsDD_S16(ResidualArgs_t* args, uint32_t x, uint32_t y, const int16_t* residuals)
 {
-    Surface_t* dst = args->dst;
-    int16_t* pel = (int16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
+    VN_RESIDUAL_FN_BOILERPLATE(int16_t)
 
     assert((dst->type == FPS8) || (dst->type == FPS10) || (dst->type == FPS12) || (dst->type == FPS14));
 
     /* Add inverse to S8.7/S10.5/S12.3/S14.1 buffer. */
-    pel[offset] = saturateS16(pel[offset] + residuals[0]);
-    pel[offset + skip] = saturateS16(pel[offset + skip] + residuals[1]);
-    pel[offset + stride] = saturateS16(pel[offset + stride] + residuals[2]);
-    pel[offset + skip + stride] = saturateS16(pel[offset + skip + stride] + residuals[3]);
+    pel[0] = saturateS16(pel[0] + residuals[0]);
+    pel[skip] = saturateS16(pel[skip] + residuals[1]);
+    pel[stride] = saturateS16(pel[stride] + residuals[2]);
+    pel[skip + stride] = saturateS16(pel[skip + stride] + residuals[3]);
 }
 
 /* Write inverse to S8.7/S10.5/S12.3/S14.1 buffer. */
-static void writeResidualsDD_S16(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
+static void writeResidualsDD_S16(ResidualArgs_t* args, uint32_t x, uint32_t y, const int16_t* residuals)
 {
-    Surface_t* dst = args->dst;
-    int16_t* pel = (int16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
+    VN_RESIDUAL_FN_BOILERPLATE(int16_t)
 
     assert((dst->type == FPS8) || (dst->type == FPS10) || (dst->type == FPS12) || (dst->type == FPS14));
 
     /* Write out. */
-    pel[offset] = residuals[0];
-    pel[offset + skip] = residuals[1];
-    pel[offset + stride] = residuals[2];
-    pel[offset + skip + stride] = residuals[3];
+    pel[0] = residuals[0];
+    pel[skip] = residuals[1];
+    pel[stride] = residuals[2];
+    pel[skip + stride] = residuals[3];
 }
 
-/* Write highlight colour to U8.0 buffer. */
-static void writeHighlightDD_U8(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    VN_UNUSED(residuals);
+#define VN_DEFINE_WRITE_HIGHLIGHT_DD(fpType, dataType, val)                                    \
+    static void writeHighlightDD_##fpType(ResidualArgs_t* args, uint32_t x, uint32_t y,        \
+                                          const int16_t* residuals)                            \
+    {                                                                                          \
+        VN_UNUSED(residuals);                                                                  \
+                                                                                               \
+        VN_RESIDUAL_FN_BOILERPLATE(dataType)                                                   \
+        assert(fixedPointByteSize(dst->type) == sizeof(dataType));                             \
+                                                                                               \
+        const dataType highlight = (dataType)args->highlight->val;                             \
+                                                                                               \
+        /* Ugly bodge way of checking that we don't have a signed/unsigned mismatch. This will \
+         * only catch mismatches where the signed thing is negative, but that's the only times \
+         * this matters anyway*/                                                               \
+        assert((int64_t)args->highlight->val == (int64_t)highlight);                           \
+                                                                                               \
+        /* Write out. */                                                                       \
+        pel[0] = highlight;                                                                    \
+        pel[skip] = highlight;                                                                 \
+        pel[stride] = highlight;                                                               \
+        pel[skip + stride] = highlight;                                                        \
+    }
 
-    Surface_t* dst = args->dst;
-    uint8_t* pel = dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    const uint8_t highlight = (uint8_t)args->highlight->valUnsigned;
-
-    assert(dst->type == FPU8);
-
-    pel[offset] = highlight;
-    pel[offset + skip] = highlight;
-    pel[offset + stride] = highlight;
-    pel[offset + skip + stride] = highlight;
-}
-
-/* Write highlight colour to U10.0/U12.0/U14.0 buffer. */
-static void writeHighlightDD_U16(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    VN_UNUSED(residuals);
-
-    Surface_t* dst = args->dst;
-    uint16_t* pel = (uint16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    const uint16_t highlight = args->highlight->valUnsigned;
-
-    assert((dst->type == FPU10) || (dst->type == FPU12) || (dst->type == FPU14));
-
-    pel[offset] = highlight;
-    pel[offset + skip] = highlight;
-    pel[offset + stride] = highlight;
-    pel[offset + skip + stride] = highlight;
-}
-
-/* Write highlight colour to S8.7/S10.5/S12.3/S14.1 buffer. */
-static void writeHighlightDD_S16(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    VN_UNUSED(residuals);
-
-    Surface_t* dst = args->dst;
-    int16_t* pel = (int16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    const int16_t highlight = args->highlight->valSigned;
-
-    assert((dst->type == FPS8) || (dst->type == FPS10) || (dst->type == FPS12) || (dst->type == FPS14));
-
-    pel[offset] = highlight;
-    pel[offset + skip] = highlight;
-    pel[offset + stride] = highlight;
-    pel[offset + skip + stride] = highlight;
-}
+VN_DEFINE_WRITE_HIGHLIGHT_DD(U8, uint8_t, valUnsigned)
+VN_DEFINE_WRITE_HIGHLIGHT_DD(U16, uint16_t, valUnsigned)
+VN_DEFINE_WRITE_HIGHLIGHT_DD(S16, int16_t, valSigned)
 
 /*------------------------------------------------------------------------------*/
 
-/* Add inverse to U8.0 buffer and write back. */
-static void addResidualsDDS_U8(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    Surface_t* dst = args->dst;
-    uint8_t* pel = (uint8_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    int32_t pelFP[16];
+#define VN_DEFINE_ADD_RESIDUALS_DDS(bits, dataType)                                                             \
+    static void addResidualsDDS_U##bits(ResidualArgs_t* args, uint32_t x, uint32_t y, const int16_t* residuals) \
+    {                                                                                                           \
+        VN_RESIDUAL_FN_BOILERPLATE(dataType)                                                                    \
+                                                                                                                \
+        assert(dst->type == FPU##bits);                                                                         \
+        int32_t pelFP[16];                                                                                      \
+                                                                                                                \
+        /* Load pel and convert to S##bits##.7 */                                                               \
+        pelFP[0] = fpU##bits##ToS##bits(pel[0]);                                                                \
+        pelFP[1] = fpU##bits##ToS##bits(pel[skip]);                                                             \
+        pelFP[2] = fpU##bits##ToS##bits(pel[stride]);                                                           \
+        pelFP[3] = fpU##bits##ToS##bits(pel[skip + stride]);                                                    \
+        pelFP[4] = fpU##bits##ToS##bits(pel[2 * skip]);                                                         \
+        pelFP[5] = fpU##bits##ToS##bits(pel[3 * skip]);                                                         \
+        pelFP[6] = fpU##bits##ToS##bits(pel[2 * skip + stride]);                                                \
+        pelFP[7] = fpU##bits##ToS##bits(pel[3 * skip + stride]);                                                \
+        pelFP[8] = fpU##bits##ToS##bits(pel[2 * stride]);                                                       \
+        pelFP[9] = fpU##bits##ToS##bits(pel[skip + 2 * stride]);                                                \
+        pelFP[10] = fpU##bits##ToS##bits(pel[3 * stride]);                                                      \
+        pelFP[11] = fpU##bits##ToS##bits(pel[skip + 3 * stride]);                                               \
+        pelFP[12] = fpU##bits##ToS##bits(pel[2 * skip + 2 * stride]);                                           \
+        pelFP[13] = fpU##bits##ToS##bits(pel[3 * skip + 2 * stride]);                                           \
+        pelFP[14] = fpU##bits##ToS##bits(pel[2 * skip + 3 * stride]);                                           \
+        pelFP[15] = fpU##bits##ToS##bits(pel[3 * skip + 3 * stride]);                                           \
+                                                                                                                \
+        /* Apply & write back */                                                                                \
+        pel[0] = fpS##bits##ToU##bits(pelFP[0] + residuals[0]);                                                 \
+        pel[skip] = fpS##bits##ToU##bits(pelFP[1] + residuals[1]);                                              \
+        pel[stride] = fpS##bits##ToU##bits(pelFP[2] + residuals[2]);                                            \
+        pel[skip + stride] = fpS##bits##ToU##bits(pelFP[3] + residuals[3]);                                     \
+        pel[2 * skip] = fpS##bits##ToU##bits(pelFP[4] + residuals[4]);                                          \
+        pel[3 * skip] = fpS##bits##ToU##bits(pelFP[5] + residuals[5]);                                          \
+        pel[2 * skip + stride] = fpS##bits##ToU##bits(pelFP[6] + residuals[6]);                                 \
+        pel[3 * skip + stride] = fpS##bits##ToU##bits(pelFP[7] + residuals[7]);                                 \
+        pel[2 * stride] = fpS##bits##ToU##bits(pelFP[8] + residuals[8]);                                        \
+        pel[skip + 2 * stride] = fpS##bits##ToU##bits(pelFP[9] + residuals[9]);                                 \
+        pel[3 * stride] = fpS##bits##ToU##bits(pelFP[10] + residuals[10]);                                      \
+        pel[skip + 3 * stride] = fpS##bits##ToU##bits(pelFP[11] + residuals[11]);                               \
+        pel[2 * skip + 2 * stride] = fpS##bits##ToU##bits(pelFP[12] + residuals[12]);                           \
+        pel[3 * skip + 2 * stride] = fpS##bits##ToU##bits(pelFP[13] + residuals[13]);                           \
+        pel[2 * skip + 3 * stride] = fpS##bits##ToU##bits(pelFP[14] + residuals[14]);                           \
+        pel[3 * skip + 3 * stride] = fpS##bits##ToU##bits(pelFP[15] + residuals[15]);                           \
+    }
 
-    assert(dst->type == FPU8);
-
-    /* Load pel and convert to S8.7 */
-    pelFP[0] = fpU8ToS8(pel[offset]);
-    pelFP[1] = fpU8ToS8(pel[offset + skip]);
-    pelFP[2] = fpU8ToS8(pel[offset + stride]);
-    pelFP[3] = fpU8ToS8(pel[offset + skip + stride]);
-    pelFP[4] = fpU8ToS8(pel[offset + 2 * skip]);
-    pelFP[5] = fpU8ToS8(pel[offset + 3 * skip]);
-    pelFP[6] = fpU8ToS8(pel[offset + 2 * skip + stride]);
-    pelFP[7] = fpU8ToS8(pel[offset + 3 * skip + stride]);
-    pelFP[8] = fpU8ToS8(pel[offset + 2 * stride]);
-    pelFP[9] = fpU8ToS8(pel[offset + skip + 2 * stride]);
-    pelFP[10] = fpU8ToS8(pel[offset + 3 * stride]);
-    pelFP[11] = fpU8ToS8(pel[offset + skip + 3 * stride]);
-    pelFP[12] = fpU8ToS8(pel[offset + 2 * skip + 2 * stride]);
-    pelFP[13] = fpU8ToS8(pel[offset + 3 * skip + 2 * stride]);
-    pelFP[14] = fpU8ToS8(pel[offset + 2 * skip + 3 * stride]);
-    pelFP[15] = fpU8ToS8(pel[offset + 3 * skip + 3 * stride]);
-
-    /* Apply & write back */
-    pel[offset] = fpS8ToU8(pelFP[0] + residuals[0]);
-    pel[offset + skip] = fpS8ToU8(pelFP[1] + residuals[1]);
-    pel[offset + stride] = fpS8ToU8(pelFP[2] + residuals[2]);
-    pel[offset + skip + stride] = fpS8ToU8(pelFP[3] + residuals[3]);
-    pel[offset + 2 * skip] = fpS8ToU8(pelFP[4] + residuals[4]);
-    pel[offset + 3 * skip] = fpS8ToU8(pelFP[5] + residuals[5]);
-    pel[offset + 2 * skip + stride] = fpS8ToU8(pelFP[6] + residuals[6]);
-    pel[offset + 3 * skip + stride] = fpS8ToU8(pelFP[7] + residuals[7]);
-    pel[offset + 2 * stride] = fpS8ToU8(pelFP[8] + residuals[8]);
-    pel[offset + skip + 2 * stride] = fpS8ToU8(pelFP[9] + residuals[9]);
-    pel[offset + 3 * stride] = fpS8ToU8(pelFP[10] + residuals[10]);
-    pel[offset + skip + 3 * stride] = fpS8ToU8(pelFP[11] + residuals[11]);
-    pel[offset + 2 * skip + 2 * stride] = fpS8ToU8(pelFP[12] + residuals[12]);
-    pel[offset + 3 * skip + 2 * stride] = fpS8ToU8(pelFP[13] + residuals[13]);
-    pel[offset + 2 * skip + 3 * stride] = fpS8ToU8(pelFP[14] + residuals[14]);
-    pel[offset + 3 * skip + 3 * stride] = fpS8ToU8(pelFP[15] + residuals[15]);
-}
-
-/* Add inverse to U10.0 buffer and write back. */
-static void addResidualsDDS_U10(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    Surface_t* dst = args->dst;
-    uint16_t* pel = (uint16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    int32_t pelFP[16];
-
-    assert(dst->type == FPU10);
-
-    /* Load pel and convert to S10.5 */
-    pelFP[0] = fpU10ToS10(pel[offset]);
-    pelFP[1] = fpU10ToS10(pel[offset + skip]);
-    pelFP[2] = fpU10ToS10(pel[offset + stride]);
-    pelFP[3] = fpU10ToS10(pel[offset + skip + stride]);
-    pelFP[4] = fpU10ToS10(pel[offset + 2 * skip]);
-    pelFP[5] = fpU10ToS10(pel[offset + 3 * skip]);
-    pelFP[6] = fpU10ToS10(pel[offset + 2 * skip + stride]);
-    pelFP[7] = fpU10ToS10(pel[offset + 3 * skip + stride]);
-    pelFP[8] = fpU10ToS10(pel[offset + 2 * stride]);
-    pelFP[9] = fpU10ToS10(pel[offset + skip + 2 * stride]);
-    pelFP[10] = fpU10ToS10(pel[offset + 3 * stride]);
-    pelFP[11] = fpU10ToS10(pel[offset + skip + 3 * stride]);
-    pelFP[12] = fpU10ToS10(pel[offset + 2 * skip + 2 * stride]);
-    pelFP[13] = fpU10ToS10(pel[offset + 3 * skip + 2 * stride]);
-    pelFP[14] = fpU10ToS10(pel[offset + 2 * skip + 3 * stride]);
-    pelFP[15] = fpU10ToS10(pel[offset + 3 * skip + 3 * stride]);
-
-    /* Apply & write back */
-    pel[offset] = fpS10ToU10(pelFP[0] + residuals[0]);
-    pel[offset + skip] = fpS10ToU10(pelFP[1] + residuals[1]);
-    pel[offset + stride] = fpS10ToU10(pelFP[2] + residuals[2]);
-    pel[offset + skip + stride] = fpS10ToU10(pelFP[3] + residuals[3]);
-    pel[offset + 2 * skip] = fpS10ToU10(pelFP[4] + residuals[4]);
-    pel[offset + 3 * skip] = fpS10ToU10(pelFP[5] + residuals[5]);
-    pel[offset + 2 * skip + stride] = fpS10ToU10(pelFP[6] + residuals[6]);
-    pel[offset + 3 * skip + stride] = fpS10ToU10(pelFP[7] + residuals[7]);
-    pel[offset + 2 * stride] = fpS10ToU10(pelFP[8] + residuals[8]);
-    pel[offset + skip + 2 * stride] = fpS10ToU10(pelFP[9] + residuals[9]);
-    pel[offset + 3 * stride] = fpS10ToU10(pelFP[10] + residuals[10]);
-    pel[offset + skip + 3 * stride] = fpS10ToU10(pelFP[11] + residuals[11]);
-    pel[offset + 2 * skip + 2 * stride] = fpS10ToU10(pelFP[12] + residuals[12]);
-    pel[offset + 3 * skip + 2 * stride] = fpS10ToU10(pelFP[13] + residuals[13]);
-    pel[offset + 2 * skip + 3 * stride] = fpS10ToU10(pelFP[14] + residuals[14]);
-    pel[offset + 3 * skip + 3 * stride] = fpS10ToU10(pelFP[15] + residuals[15]);
-}
-
-/* Add inverse to U12.0 buffer and write back. */
-static void addResidualsDDS_U12(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    Surface_t* dst = args->dst;
-    uint16_t* pel = (uint16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    int32_t pelFP[16];
-
-    assert(dst->type == FPU12);
-
-    /* Load pel and convert to S12.3 */
-    pelFP[0] = fpU12ToS12(pel[offset]);
-    pelFP[1] = fpU12ToS12(pel[offset + skip]);
-    pelFP[2] = fpU12ToS12(pel[offset + stride]);
-    pelFP[3] = fpU12ToS12(pel[offset + skip + stride]);
-    pelFP[4] = fpU12ToS12(pel[offset + 2 * skip]);
-    pelFP[5] = fpU12ToS12(pel[offset + 3 * skip]);
-    pelFP[6] = fpU12ToS12(pel[offset + 2 * skip + stride]);
-    pelFP[7] = fpU12ToS12(pel[offset + 3 * skip + stride]);
-    pelFP[8] = fpU12ToS12(pel[offset + 2 * stride]);
-    pelFP[9] = fpU12ToS12(pel[offset + skip + 2 * stride]);
-    pelFP[10] = fpU12ToS12(pel[offset + 3 * stride]);
-    pelFP[11] = fpU12ToS12(pel[offset + skip + 3 * stride]);
-    pelFP[12] = fpU12ToS12(pel[offset + 2 * skip + 2 * stride]);
-    pelFP[13] = fpU12ToS12(pel[offset + 3 * skip + 2 * stride]);
-    pelFP[14] = fpU12ToS12(pel[offset + 2 * skip + 3 * stride]);
-    pelFP[15] = fpU12ToS12(pel[offset + 3 * skip + 3 * stride]);
-
-    /* Apply & write back */
-    pel[offset] = fpS12ToU12(pelFP[0] + residuals[0]);
-    pel[offset + skip] = fpS12ToU12(pelFP[1] + residuals[1]);
-    pel[offset + stride] = fpS12ToU12(pelFP[2] + residuals[2]);
-    pel[offset + skip + stride] = fpS12ToU12(pelFP[3] + residuals[3]);
-    pel[offset + 2 * skip] = fpS12ToU12(pelFP[4] + residuals[4]);
-    pel[offset + 3 * skip] = fpS12ToU12(pelFP[5] + residuals[5]);
-    pel[offset + 2 * skip + stride] = fpS12ToU12(pelFP[6] + residuals[6]);
-    pel[offset + 3 * skip + stride] = fpS12ToU12(pelFP[7] + residuals[7]);
-    pel[offset + 2 * stride] = fpS12ToU12(pelFP[8] + residuals[8]);
-    pel[offset + skip + 2 * stride] = fpS12ToU12(pelFP[9] + residuals[9]);
-    pel[offset + 3 * stride] = fpS12ToU12(pelFP[10] + residuals[10]);
-    pel[offset + skip + 3 * stride] = fpS12ToU12(pelFP[11] + residuals[11]);
-    pel[offset + 2 * skip + 2 * stride] = fpS12ToU12(pelFP[12] + residuals[12]);
-    pel[offset + 3 * skip + 2 * stride] = fpS12ToU12(pelFP[13] + residuals[13]);
-    pel[offset + 2 * skip + 3 * stride] = fpS12ToU12(pelFP[14] + residuals[14]);
-    pel[offset + 3 * skip + 3 * stride] = fpS12ToU12(pelFP[15] + residuals[15]);
-}
-
-/* Add inverse to U14.0 buffer and write back. */
-static void addResidualsDDS_U14(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    Surface_t* dst = args->dst;
-    uint16_t* pel = (uint16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    int32_t pelFP[16];
-
-    assert(dst->type == FPU14);
-
-    /* Load pel and convert to S14.1 */
-    pelFP[0] = fpU14ToS14(pel[offset]);
-    pelFP[1] = fpU14ToS14(pel[offset + skip]);
-    pelFP[2] = fpU14ToS14(pel[offset + stride]);
-    pelFP[3] = fpU14ToS14(pel[offset + skip + stride]);
-    pelFP[4] = fpU14ToS14(pel[offset + 2 * skip]);
-    pelFP[5] = fpU14ToS14(pel[offset + 3 * skip]);
-    pelFP[6] = fpU14ToS14(pel[offset + 2 * skip + stride]);
-    pelFP[7] = fpU14ToS14(pel[offset + 3 * skip + stride]);
-    pelFP[8] = fpU14ToS14(pel[offset + 2 * stride]);
-    pelFP[9] = fpU14ToS14(pel[offset + skip + 2 * stride]);
-    pelFP[10] = fpU14ToS14(pel[offset + 3 * stride]);
-    pelFP[11] = fpU14ToS14(pel[offset + skip + 3 * stride]);
-    pelFP[12] = fpU14ToS14(pel[offset + 2 * skip + 2 * stride]);
-    pelFP[13] = fpU14ToS14(pel[offset + 3 * skip + 2 * stride]);
-    pelFP[14] = fpU14ToS14(pel[offset + 2 * skip + 3 * stride]);
-    pelFP[15] = fpU14ToS14(pel[offset + 3 * skip + 3 * stride]);
-
-    /* Apply & write back */
-    pel[offset] = fpS14ToU14(pelFP[0] + residuals[0]);
-    pel[offset + skip] = fpS14ToU14(pelFP[1] + residuals[1]);
-    pel[offset + stride] = fpS14ToU14(pelFP[2] + residuals[2]);
-    pel[offset + skip + stride] = fpS14ToU14(pelFP[3] + residuals[3]);
-    pel[offset + 2 * skip] = fpS14ToU14(pelFP[4] + residuals[4]);
-    pel[offset + 3 * skip] = fpS14ToU14(pelFP[5] + residuals[5]);
-    pel[offset + 2 * skip + stride] = fpS14ToU14(pelFP[6] + residuals[6]);
-    pel[offset + 3 * skip + stride] = fpS14ToU14(pelFP[7] + residuals[7]);
-    pel[offset + 2 * stride] = fpS14ToU14(pelFP[8] + residuals[8]);
-    pel[offset + skip + 2 * stride] = fpS14ToU14(pelFP[9] + residuals[9]);
-    pel[offset + 3 * stride] = fpS14ToU14(pelFP[10] + residuals[10]);
-    pel[offset + skip + 3 * stride] = fpS14ToU14(pelFP[11] + residuals[11]);
-    pel[offset + 2 * skip + 2 * stride] = fpS14ToU14(pelFP[12] + residuals[12]);
-    pel[offset + 3 * skip + 2 * stride] = fpS14ToU14(pelFP[13] + residuals[13]);
-    pel[offset + 2 * skip + 3 * stride] = fpS14ToU14(pelFP[14] + residuals[14]);
-    pel[offset + 3 * skip + 3 * stride] = fpS14ToU14(pelFP[15] + residuals[15]);
-}
+VN_DEFINE_ADD_RESIDUALS_DDS(8, uint8_t)
+VN_DEFINE_ADD_RESIDUALS_DDS(10, uint16_t)
+VN_DEFINE_ADD_RESIDUALS_DDS(12, uint16_t)
+VN_DEFINE_ADD_RESIDUALS_DDS(14, uint16_t)
 
 /* Add inverse to S8.7/S10.5/S12.3/S14.1 buffer and write back. */
-static void addResidualsDDS_S16(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
+static void addResidualsDDS_S16(ResidualArgs_t* args, uint32_t x, uint32_t y, const int16_t* residuals)
 {
-    Surface_t* dst = args->dst;
-    int16_t* pel = (int16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    const int32_t min = -32768;
-    const int32_t max = 32767;
+    VN_RESIDUAL_FN_BOILERPLATE(int16_t)
 
     assert((dst->type == FPS8) || (dst->type == FPS10) || (dst->type == FPS12) || (dst->type == FPS14));
 
     /* Add inverse to S8.7/S10.4/S12.3/S14.1 buffer. */
     /* clang-format off */
-	pel[offset]                         = (int16_t)clampS32((pel[offset] + residuals[0]), min, max);
-	pel[offset + skip]                  = (int16_t)clampS32((pel[offset + skip] + residuals[1]), min, max);
-	pel[offset + stride]                = (int16_t)clampS32((pel[offset + stride] + residuals[2]), min, max);
-	pel[offset + skip + stride]         = (int16_t)clampS32((pel[offset + skip + stride] + residuals[3]), min, max);
-	pel[offset + 2 * skip]              = (int16_t)clampS32((pel[offset + 2 * skip] + residuals[4]), min, max);
-	pel[offset + 3 * skip]              = (int16_t)clampS32((pel[offset + 3 * skip] + residuals[5]), min, max);
-	pel[offset + 2 * skip + stride]     = (int16_t)clampS32((pel[offset + 2 * skip + stride] + residuals[6]), min, max);
-	pel[offset + 3 * skip + stride]     = (int16_t)clampS32((pel[offset + 3 * skip + stride] + residuals[7]), min, max);
-	pel[offset + 2 * stride]            = (int16_t)clampS32((pel[offset + 2 * stride] + residuals[8]), min, max);
-	pel[offset + skip + 2 * stride]     = (int16_t)clampS32((pel[offset + skip + 2 * stride] + residuals[9]), min, max);
-	pel[offset + 3 * stride]            = (int16_t)clampS32((pel[offset + 3 * stride] + residuals[10]), min, max);
-	pel[offset + skip + 3 * stride]     = (int16_t)clampS32((pel[offset + skip + 3 * stride] + residuals[11]), min, max);
-	pel[offset + 2 * skip + 2 * stride] = (int16_t)clampS32((pel[offset + 2 * skip + 2 * stride] + residuals[12]), min, max);
-	pel[offset + 3 * skip + 2 * stride] = (int16_t)clampS32((pel[offset + 3 * skip + 2 * stride] + residuals[13]), min, max);
-	pel[offset + 2 * skip + 3 * stride] = (int16_t)clampS32((pel[offset + 2 * skip + 3 * stride] + residuals[14]), min, max);
-	pel[offset + 3 * skip + 3 * stride] = (int16_t)clampS32((pel[offset + 3 * skip + 3 * stride] + residuals[15]), min, max);
+	pel[0]                     = saturateS16(pel[0] + residuals[0]);
+	pel[skip]                  = saturateS16(pel[skip] + residuals[1]);
+	pel[stride]                = saturateS16(pel[stride] + residuals[2]);
+	pel[skip + stride]         = saturateS16(pel[skip + stride] + residuals[3]);
+	pel[2 * skip]              = saturateS16(pel[2 * skip] + residuals[4]);
+	pel[3 * skip]              = saturateS16(pel[3 * skip] + residuals[5]);
+	pel[2 * skip + stride]     = saturateS16(pel[2 * skip + stride] + residuals[6]);
+	pel[3 * skip + stride]     = saturateS16(pel[3 * skip + stride] + residuals[7]);
+	pel[2 * stride]            = saturateS16(pel[2 * stride] + residuals[8]);
+	pel[skip + 2 * stride]     = saturateS16(pel[skip + 2 * stride] + residuals[9]);
+	pel[3 * stride]            = saturateS16(pel[3 * stride] + residuals[10]);
+	pel[skip + 3 * stride]     = saturateS16(pel[skip + 3 * stride] + residuals[11]);
+	pel[2 * skip + 2 * stride] = saturateS16(pel[2 * skip + 2 * stride] + residuals[12]);
+	pel[3 * skip + 2 * stride] = saturateS16(pel[3 * skip + 2 * stride] + residuals[13]);
+	pel[2 * skip + 3 * stride] = saturateS16(pel[2 * skip + 3 * stride] + residuals[14]);
+	pel[3 * skip + 3 * stride] = saturateS16(pel[3 * skip + 3 * stride] + residuals[15]);
     /* clang-format on */
 }
 
 /* Write inverse to S8.7/S10.5/S12.3/S14.1 buffer. */
-static void writeResidualsDDS_S16(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
+static void writeResidualsDDS_S16(ResidualArgs_t* args, uint32_t x, uint32_t y, const int16_t* residuals)
 {
-    Surface_t* dst = args->dst;
-    int16_t* pel = (int16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
+    VN_RESIDUAL_FN_BOILERPLATE(int16_t)
 
     assert((dst->type == FPS8) || (dst->type == FPS10) || (dst->type == FPS12) || (dst->type == FPS14));
 
     /* Write out. */
-    pel[offset] = residuals[0];
-    pel[offset + skip] = residuals[1];
-    pel[offset + stride] = residuals[2];
-    pel[offset + skip + stride] = residuals[3];
-    pel[offset + 2 * skip] = residuals[4];
-    pel[offset + 3 * skip] = residuals[5];
-    pel[offset + 2 * skip + stride] = residuals[6];
-    pel[offset + 3 * skip + stride] = residuals[7];
-    pel[offset + 2 * stride] = residuals[8];
-    pel[offset + skip + 2 * stride] = residuals[9];
-    pel[offset + 3 * stride] = residuals[10];
-    pel[offset + skip + 3 * stride] = residuals[11];
-    pel[offset + 2 * skip + 2 * stride] = residuals[12];
-    pel[offset + 3 * skip + 2 * stride] = residuals[13];
-    pel[offset + 2 * skip + 3 * stride] = residuals[14];
-    pel[offset + 3 * skip + 3 * stride] = residuals[15];
+    pel[0] = residuals[0];
+    pel[skip] = residuals[1];
+    pel[stride] = residuals[2];
+    pel[skip + stride] = residuals[3];
+    pel[2 * skip] = residuals[4];
+    pel[3 * skip] = residuals[5];
+    pel[2 * skip + stride] = residuals[6];
+    pel[3 * skip + stride] = residuals[7];
+    pel[2 * stride] = residuals[8];
+    pel[skip + 2 * stride] = residuals[9];
+    pel[3 * stride] = residuals[10];
+    pel[skip + 3 * stride] = residuals[11];
+    pel[2 * skip + 2 * stride] = residuals[12];
+    pel[3 * skip + 2 * stride] = residuals[13];
+    pel[2 * skip + 3 * stride] = residuals[14];
+    pel[3 * skip + 3 * stride] = residuals[15];
 }
 
-/* Write highlight colour to U8.0 buffer. */
-static void writeHighlightDDS_U8(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    VN_UNUSED(residuals);
+#define VN_DEFINE_WRITE_HIGHLIGHT_DDS(fpType, dataType, val)                             \
+    static void writeHighlightDDS_##fpType(ResidualArgs_t* args, uint32_t x, uint32_t y, \
+                                           const int16_t* residuals)                     \
+    {                                                                                    \
+        VN_UNUSED(residuals);                                                            \
+        VN_RESIDUAL_FN_BOILERPLATE(dataType)                                             \
+        const dataType highlight = (dataType)args->highlight->val;                       \
+                                                                                         \
+        pel[0] = highlight;                                                              \
+        pel[skip] = highlight;                                                           \
+        pel[stride] = highlight;                                                         \
+        pel[skip + stride] = highlight;                                                  \
+        pel[2 * skip] = highlight;                                                       \
+        pel[3 * skip] = highlight;                                                       \
+        pel[2 * skip + stride] = highlight;                                              \
+        pel[3 * skip + stride] = highlight;                                              \
+        pel[2 * stride] = highlight;                                                     \
+        pel[skip + 2 * stride] = highlight;                                              \
+        pel[3 * stride] = highlight;                                                     \
+        pel[skip + 3 * stride] = highlight;                                              \
+        pel[2 * skip + 2 * stride] = highlight;                                          \
+        pel[3 * skip + 2 * stride] = highlight;                                          \
+        pel[2 * skip + 3 * stride] = highlight;                                          \
+        pel[3 * skip + 3 * stride] = highlight;                                          \
+    }
 
-    Surface_t* dst = args->dst;
-    uint8_t* pel = dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    const uint8_t highlight = (uint8_t)args->highlight->valUnsigned;
-
-    pel[offset] = highlight;
-    pel[offset + skip] = highlight;
-    pel[offset + stride] = highlight;
-    pel[offset + skip + stride] = highlight;
-    pel[offset + 2 * skip] = highlight;
-    pel[offset + 3 * skip] = highlight;
-    pel[offset + 2 * skip + stride] = highlight;
-    pel[offset + 3 * skip + stride] = highlight;
-    pel[offset + 2 * stride] = highlight;
-    pel[offset + skip + 2 * stride] = highlight;
-    pel[offset + 3 * stride] = highlight;
-    pel[offset + skip + 3 * stride] = highlight;
-    pel[offset + 2 * skip + 2 * stride] = highlight;
-    pel[offset + 3 * skip + 2 * stride] = highlight;
-    pel[offset + 2 * skip + 3 * stride] = highlight;
-    pel[offset + 3 * skip + 3 * stride] = highlight;
-}
-
-/* Write highlight colour to U10.0/U12.0/U14.0 buffer. */
-static void writeHighlightDDS_U16(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    VN_UNUSED(residuals);
-
-    Surface_t* dst = args->dst;
-    uint16_t* pel = (uint16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    const uint16_t highlight = args->highlight->valUnsigned;
-
-    pel[offset] = highlight;
-    pel[offset + skip] = highlight;
-    pel[offset + stride] = highlight;
-    pel[offset + skip + stride] = highlight;
-    pel[offset + 2 * skip] = highlight;
-    pel[offset + 3 * skip] = highlight;
-    pel[offset + 2 * skip + stride] = highlight;
-    pel[offset + 3 * skip + stride] = highlight;
-    pel[offset + 2 * stride] = highlight;
-    pel[offset + skip + 2 * stride] = highlight;
-    pel[offset + 3 * stride] = highlight;
-    pel[offset + skip + 3 * stride] = highlight;
-    pel[offset + 2 * skip + 2 * stride] = highlight;
-    pel[offset + 3 * skip + 2 * stride] = highlight;
-    pel[offset + 2 * skip + 3 * stride] = highlight;
-    pel[offset + 3 * skip + 3 * stride] = highlight;
-}
-
-/* Write highlight colour to S8.7/S10.5/S12.3/S14.1 buffer. */
-static void writeHighlightDDS_S16(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals)
-{
-    VN_UNUSED(residuals);
-
-    Surface_t* dst = args->dst;
-    int16_t* pel = (int16_t*)dst->data;
-    const int32_t stride = (int32_t)dst->stride;
-    const int32_t skip = args->skip;
-    const int32_t offset = args->offset + (x * skip) + (y * stride);
-    const int16_t highlight = args->highlight->valSigned;
-
-    pel[offset] = highlight;
-    pel[offset + skip] = highlight;
-    pel[offset + stride] = highlight;
-    pel[offset + skip + stride] = highlight;
-    pel[offset + 2 * skip] = highlight;
-    pel[offset + 3 * skip] = highlight;
-    pel[offset + 2 * skip + stride] = highlight;
-    pel[offset + 3 * skip + stride] = highlight;
-    pel[offset + 2 * stride] = highlight;
-    pel[offset + skip + 2 * stride] = highlight;
-    pel[offset + 3 * stride] = highlight;
-    pel[offset + skip + 3 * stride] = highlight;
-    pel[offset + 2 * skip + 2 * stride] = highlight;
-    pel[offset + 3 * skip + 2 * stride] = highlight;
-    pel[offset + 2 * skip + 3 * stride] = highlight;
-    pel[offset + 3 * skip + 3 * stride] = highlight;
-}
+VN_DEFINE_WRITE_HIGHLIGHT_DDS(U8, uint8_t, valUnsigned)
+VN_DEFINE_WRITE_HIGHLIGHT_DDS(U16, uint16_t, valUnsigned)
+VN_DEFINE_WRITE_HIGHLIGHT_DDS(S16, int16_t, valSigned)
 
 /*------------------------------------------------------------------------------*/
 
-typedef void (*ResidualFunction_t)(ResidualArgs_t* args, int32_t x, int32_t y, const int16_t* residuals);
+typedef void (*ResidualFunction_t)(ResidualArgs_t* args, uint32_t x, uint32_t y, const int16_t* residuals);
 
 typedef struct ApplyResidualFunctions
 {
@@ -638,76 +328,68 @@ static inline ResidualFunction_t getResidualFunction(ResidualMode_t mode, bool b
 typedef struct ConvertArgs
 {
     Surface_t* src;
-    int32_t srcSkip;
-    int32_t srcOffset;
+    uint32_t srcSkip;
+    uint32_t srcOffset;
     Surface_t* dst;
-    int32_t dstSkip;
-    int32_t dstOffset;
+    uint32_t dstSkip;
+    uint32_t dstOffset;
 } ConvertArgs_t;
 
-/* Converts S87 value in a source buffer to an S8 representation in the dest buffer for a DD transform */
-static void convertDD_S87_S8(ConvertArgs_t* args, int32_t x, int32_t y)
-{
-    Surface_t* src = args->src;
-    Surface_t* dst = args->dst;
-    uint8_t* dstPels = (uint8_t*)dst->data;
-    const int16_t* srcPels = (const int16_t*)src->data;
-    const int32_t dstStride = (int32_t)dst->stride;
-    const int32_t srcStride = (int32_t)src->stride;
-    const int32_t dstSkip = args->dstSkip;
-    const int32_t srcSkip = args->srcSkip;
-    const uint32_t dstOffset = args->dstOffset + (x * dstSkip) + (y * dstStride);
-    const uint32_t srcOffset = args->srcOffset + (x * srcSkip) + (y * srcStride);
+#define VN_CONVERT_FN_BOILERPLATE(srcVarType, dstVarType)         \
+    Surface_t* src = args->src;                                   \
+    Surface_t* dst = args->dst;                                   \
+    dstVarType* dstPels = (dstVarType*)dst->data;                 \
+    const srcVarType* srcPels = (const srcVarType*)src->data;     \
+    const uint32_t dstStride = dst->stride;                       \
+    const uint32_t srcStride = src->stride;                       \
+    const uint32_t dstSkip = args->dstSkip;                       \
+    const uint32_t srcSkip = args->srcSkip;                       \
+    dstPels += args->dstOffset + (x * dstSkip) + (y * dstStride); \
+    srcPels += args->srcOffset + (x * srcSkip) + (y * srcStride);
 
+/* Converts S87 value in a source buffer to an S8 representation in the dest buffer for a DD transform */
+static void convertDD_S87_S8(ConvertArgs_t* args, uint32_t x, uint32_t y)
+{
+    VN_CONVERT_FN_BOILERPLATE(int16_t, uint8_t)
     assert(src->type == FPS8);
 
     /* clang-format off */
-	dstPels[dstOffset]                       = (uint8_t)(srcPels[srcOffset] >> 8);
-	dstPels[dstOffset + dstSkip]             = (uint8_t)(srcPels[srcOffset + srcSkip] >> 8);
-	dstPels[dstOffset + dstStride]           = (uint8_t)(srcPels[srcOffset + srcStride] >> 8);
-	dstPels[dstOffset + dstSkip + dstStride] = (uint8_t)(srcPels[srcOffset + srcSkip + srcStride] >> 8);
+	dstPels[0]                   = (uint8_t)(srcPels[0] >> 8);
+	dstPels[dstSkip]             = (uint8_t)(srcPels[srcSkip] >> 8);
+	dstPels[dstStride]           = (uint8_t)(srcPels[srcStride] >> 8);
+	dstPels[dstSkip + dstStride] = (uint8_t)(srcPels[srcSkip + srcStride] >> 8);
     /* clang-format on */
 }
 
 /* Converts S87 value in a source buffer to an S8 representation in the dest buffer for a DDS transform */
-static void convertDDS_S87_S8(ConvertArgs_t* args, int32_t x, int32_t y)
+static void convertDDS_S87_S8(ConvertArgs_t* args, uint32_t x, uint32_t y)
 {
-    Surface_t* src = args->src;
-    Surface_t* dst = args->dst;
-    uint8_t* dstPels = (uint8_t*)dst->data;
-    const int16_t* srcPels = (const int16_t*)src->data;
-    const int32_t dstStride = (int32_t)dst->stride;
-    const int32_t srcStride = (int32_t)src->stride;
-    const int32_t dstSkip = args->dstSkip;
-    const int32_t srcSkip = args->srcSkip;
-    const int32_t dstOffset = args->dstOffset + (x * dstSkip) + (y * dstStride);
-    const int32_t srcOffset = args->srcOffset + (x * srcSkip) + (y * srcStride);
-
+    VN_CONVERT_FN_BOILERPLATE(int16_t, uint8_t)
     assert(src->type == FPS8);
 
     /* clang-format off */
-	dstPels[dstOffset]                               = (uint8_t)(srcPels[srcOffset] >> 8);
-	dstPels[dstOffset + dstSkip]                     = (uint8_t)(srcPels[srcOffset + srcSkip] >> 8);
-	dstPels[dstOffset + dstStride]                   = (uint8_t)(srcPels[srcOffset + srcStride] >> 8);
-	dstPels[dstOffset + dstSkip + dstStride]         = (uint8_t)(srcPels[srcOffset + srcSkip + srcStride] >> 8);
-	dstPels[dstOffset + 2 * dstSkip]                 = (uint8_t)(srcPels[srcOffset + 2 * srcSkip] >> 8);
-	dstPels[dstOffset + 3 * dstSkip]                 = (uint8_t)(srcPels[srcOffset + 3 * srcSkip] >> 8);
-	dstPels[dstOffset + 2 * dstSkip + dstStride]     = (uint8_t)(srcPels[srcOffset + 2 * srcSkip + srcStride] >> 8);
-	dstPels[dstOffset + 3 * dstSkip + dstStride]     = (uint8_t)(srcPels[srcOffset + 3 * srcSkip + srcStride] >> 8);
-	dstPels[dstOffset + 2 * dstStride]               = (uint8_t)(srcPels[srcOffset + 2 * srcStride] >> 8);
-	dstPels[dstOffset + dstSkip + 2 * dstStride]     = (uint8_t)(srcPels[srcOffset + srcSkip + 2 * srcStride] >> 8);
-	dstPels[dstOffset + 3 * dstStride]               = (uint8_t)(srcPels[srcOffset + 3 * srcStride] >> 8);
-	dstPels[dstOffset + dstSkip + 3 * dstStride]     = (uint8_t)(srcPels[srcOffset + srcSkip + 3 * srcStride] >> 8);
-	dstPels[dstOffset + 2 * dstSkip + 2 * dstStride] = (uint8_t)(srcPels[srcOffset + 2 * srcSkip + 2 * srcStride] >> 8);
-	dstPels[dstOffset + 3 * dstSkip + 2 * dstStride] = (uint8_t)(srcPels[srcOffset + 3 * srcSkip + 2 * srcStride] >> 8);
-	dstPels[dstOffset + 2 * dstSkip + 3 * dstStride] = (uint8_t)(srcPels[srcOffset + 2 * srcSkip + 3 * srcStride] >> 8);
-	dstPels[dstOffset + 3 * dstSkip + 3 * dstStride] = (uint8_t)(srcPels[srcOffset + 3 * srcSkip + 3 * srcStride] >> 8);
+	dstPels[0]                           = (uint8_t)(srcPels[0] >> 8);
+	dstPels[dstSkip]                     = (uint8_t)(srcPels[srcSkip] >> 8);
+	dstPels[dstStride]                   = (uint8_t)(srcPels[srcStride] >> 8);
+	dstPels[dstSkip + dstStride]         = (uint8_t)(srcPels[srcSkip + srcStride] >> 8);
+	dstPels[2 * dstSkip]                 = (uint8_t)(srcPels[2 * srcSkip] >> 8);
+	dstPels[3 * dstSkip]                 = (uint8_t)(srcPels[3 * srcSkip] >> 8);
+	dstPels[2 * dstSkip + dstStride]     = (uint8_t)(srcPels[2 * srcSkip + srcStride] >> 8);
+	dstPels[3 * dstSkip + dstStride]     = (uint8_t)(srcPels[3 * srcSkip + srcStride] >> 8);
+	dstPels[2 * dstStride]               = (uint8_t)(srcPels[2 * srcStride] >> 8);
+	dstPels[dstSkip + 2 * dstStride]     = (uint8_t)(srcPels[srcSkip + 2 * srcStride] >> 8);
+	dstPels[3 * dstStride]               = (uint8_t)(srcPels[3 * srcStride] >> 8);
+	dstPels[dstSkip + 3 * dstStride]     = (uint8_t)(srcPels[srcSkip + 3 * srcStride] >> 8);
+	dstPels[2 * dstSkip + 2 * dstStride] = (uint8_t)(srcPels[2 * srcSkip + 2 * srcStride] >> 8);
+	dstPels[3 * dstSkip + 2 * dstStride] = (uint8_t)(srcPels[3 * srcSkip + 2 * srcStride] >> 8);
+	dstPels[2 * dstSkip + 3 * dstStride] = (uint8_t)(srcPels[2 * srcSkip + 3 * srcStride] >> 8);
+	dstPels[3 * dstSkip + 3 * dstStride] = (uint8_t)(srcPels[3 * srcSkip + 3 * srcStride] >> 8);
     /* clang-format on */
 }
 
 /*------------------------------------------------------------------------------*/
 
-typedef void (*ConvertFunction_t)(ConvertArgs_t* args, int32_t x, int32_t y);
+typedef void (*ConvertFunction_t)(ConvertArgs_t* args, uint32_t x, uint32_t y);
 
 static const ConvertFunction_t kConvertTable[2] = {convertDD_S87_S8, convertDDS_S87_S8};
 
@@ -715,7 +397,7 @@ static inline ConvertFunction_t getConvertFunction(bool bDDS) { return kConvertT
 
 /* ----------------------------------------------------------------------------*/
 
-static void clearPatch(Surface_t* dst, uint32_t x, uint32_t y, uint32_t elementSize,
+static void clearBlock(Surface_t* dst, uint32_t x, uint32_t y, uint32_t elementSize,
                        uint32_t patchWidth, uint32_t patchHeight)
 {
     assert(dst);
@@ -724,14 +406,14 @@ static void clearPatch(Surface_t* dst, uint32_t x, uint32_t y, uint32_t elementS
     const uint32_t height = dst->height;
     const uint32_t stride = dst->stride;
     const uint32_t byteCount = minU32(patchWidth, width - x) * elementSize;
-    const uint32_t y_max = minU32(y + patchHeight, height);
+    const uint32_t yMax = minU32(y + patchHeight, height);
     const uint32_t step = stride * elementSize;
 
     uint8_t* pels = &dst->data[(y * stride * elementSize) + (x * elementSize)];
 
     assert(x < width);
 
-    for (; y < y_max; y++) {
+    for (; y < yMax; y++) {
         memset(pels, 0, byteCount);
         pels += step;
     }
@@ -739,115 +421,88 @@ static void clearPatch(Surface_t* dst, uint32_t x, uint32_t y, uint32_t elementS
 
 /* ----------------------------------------------------------------------------*/
 
-/*! \brief Helper function for remapping the current DDS residual layout to a scanline
- *         ordering to simplify the usage of cmdbuffers.
- *
- *  \note  This function is fully intended to be removed and is an intermediate
- *         solution as the effort to change the residual memory representation is
- *         significant. */
-static inline void cmdbufferAppendDDS(CmdBuffer_t* cmdbuffer, int16_t x, int16_t y, const int16_t* values)
-{
-    const int16_t tmp[16] = {values[0],  values[1],  values[4],  values[5], values[2],  values[3],
-                             values[6],  values[7],  values[8],  values[9], values[12], values[13],
-                             values[10], values[11], values[14], values[15]};
-
-    cmdBufferAppend(cmdbuffer, x, y, tmp);
-}
-
-/* ----------------------------------------------------------------------------*/
-
-int32_t prepareLayerDecoders(Context_t* ctx, TileState_t* tile,
+int32_t prepareLayerDecoders(Logger_t log, const TileState_t* tile,
                              EntropyDecoder_t residualDecoders[RCLayerCountDDS],
-                             EntropyDecoder_t* temporalDecoder, int32_t layerCount)
+                             EntropyDecoder_t* temporalDecoder, int32_t layerCount, bool useOldCodeLengths)
 {
-    int32_t res;
+    int32_t res = 0;
 
     if (tile->chunks) {
         for (int32_t layerIdx = 0; layerIdx < layerCount; ++layerIdx) {
-            VN_CHECK(entropyInitialise(ctx, &residualDecoders[layerIdx], &tile->chunks[layerIdx], EDTDefault));
+            VN_CHECK(entropyInitialise(log, &residualDecoders[layerIdx], &tile->chunks[layerIdx],
+                                       EDTDefault, useOldCodeLengths));
         }
     }
 
     if (tile->temporalChunk) {
-        VN_CHECK(entropyInitialise(ctx, temporalDecoder, tile->temporalChunk, EDTTemporal));
+        VN_CHECK(entropyInitialise(log, temporalDecoder, tile->temporalChunk, EDTTemporal, useOldCodeLengths));
     }
 
     return 0;
-}
-
-void releaseLayerDecoders(EntropyDecoder_t residualDecoders[RCLayerCountDDS], EntropyDecoder_t* temporalDecoder)
-{
-    for (int32_t layerIdx = 0; layerIdx < RCLayerCountDDS; ++layerIdx) {
-        entropyRelease(&residualDecoders[layerIdx]);
-    }
-
-    entropyRelease(temporalDecoder);
 }
 
 /* ----------------------------------------------------------------------------*/
 
-typedef struct CacheTileData
-{
-    TileState_t* tiles;
-    int32_t tileCount;
-} CacheTileData_t;
-
 typedef struct DecodeSerial
 {
     Memory_t memory;
-    CacheTileData_t tiles[AC_MaxResidualParallel];
-    bool generateCmdBuffers;
-    CmdBuffer_t* cmdBufferIntra[LOQEnhancedCount]; /**< Intra command buffer for both enhanced LOQ. */
-    CmdBuffer_t* cmdBufferInter;                   /**< Inter command buffer for LOQ-0. */
-    CmdBuffer_t* cmdBufferClear;                   /**< Clear tile command buffer for LOQ-0. */
-}* DecodeSerial_t;
-
-static int32_t tilesCheckAlloc(Context_t* ctx, int32_t planeIndex, int32_t tileCount)
-{
-    /* Validate args. */
-    if (planeIndex < 0 || planeIndex > AC_MaxResidualParallel) {
-        return -1;
-    }
-
-    if (tileCount < 0) {
-        return -1;
-    }
-
-    CacheTileData_t* tileData = &ctx->decodeSerial->tiles[planeIndex];
-
-    if (tileData->tileCount != tileCount) {
-        TileState_t* newPtr = VN_REALLOC_T_ARR(ctx->memory, tileData->tiles, TileState_t, tileCount);
-
-        if (!newPtr) {
-            return -1;
-        }
-
-        tileData->tiles = newPtr;
-        tileData->tileCount = tileCount;
-
-        memset(tileData->tiles, 0, tileCount * sizeof(TileState_t));
-    }
-
-    return 0;
-}
+    CacheTileData_t tileDataPerPlane[AC_MaxResidualParallel];
+} * DecodeSerial_t;
 
 /*------------------------------------------------------------------------------*/
 
 typedef struct ApplyResidualJobData
 {
     Context_t* ctx;
+    Memory_t memory;
+    Logger_t log;
     uint32_t plane;
     LOQIndex_t loq;
     const Dequant_t* dequant;
     FieldType_t fieldType;
     bool temporal;
+    bool tuCoordsAreInSurfaceRasterOrder;
     Surface_t* dst;
     uint32_t dstChannel;
     TileState_t* tiles;
-    int32_t tileCount;
+    uint32_t tileCount;
 } ApplyResidualJobData_t;
 
 /*------------------------------------------------------------------------------*/
+
+static inline int32_t entropyDecodeAllLayers(const uint8_t numLayers, const bool decoderExists,
+                                             const int32_t tuTotal,
+                                             EntropyDecoder_t residualDecoders[RCLayerCountDDS],
+                                             int32_t zerosOut[RCLayerCountDDS],
+                                             int16_t coeffsOut[RCLayerCountDDS], int32_t* minZeroCountOut)
+{
+    int32_t coeffsNonZeroMask = 0;
+    for (uint8_t layer = 0; layer < numLayers; layer++) {
+        if (zerosOut[layer] > 0) {
+            zerosOut[layer]--;
+            coeffsOut[layer] = 0;
+        } else if (decoderExists) {
+            const int32_t layerZero = entropyDecode(&residualDecoders[layer], &coeffsOut[layer]);
+            zerosOut[layer] = (layerZero == EntropyNoData) ? (tuTotal - 1) : layerZero;
+            if (zerosOut[layer] < 0) {
+                return zerosOut[layer];
+            }
+
+            /* set i-th bit if nonzero */
+            coeffsNonZeroMask |= ((coeffsOut[layer] != 0) << layer);
+        } else {
+            /* No decoder, skip over whole surface. */
+            zerosOut[layer] = tuTotal - 1;
+            coeffsOut[layer] = 0;
+        }
+
+        /* Calculate lowest common zero run */
+        if (*minZeroCountOut > zerosOut[layer]) {
+            *minZeroCountOut = zerosOut[layer];
+        }
+    }
+    return coeffsNonZeroMask;
+}
 
 static int32_t applyResidualJob(void* jobData)
 {
@@ -859,9 +514,13 @@ static int32_t applyResidualJob(void* jobData)
     /* general */
     const LOQIndex_t loq = applyData->loq;
     const Dequant_t* dequant = applyData->dequant;
+    const bool applyTemporal = applyData->temporal;
     const uint8_t numLayers = data->numLayers;
     const bool dds = data->transform == TransformDDS;
+    const uint8_t tuWidthShift = dds ? 2 : 1; /* The width, log2, of the transform unit */
+    const bool temporalReducedSignalling = data->temporalUseReducedSignalling;
     const ScalingMode_t scaling = (LOQ0 == loq) ? data->scalingModes[LOQ0] : Scale2D;
+    const bool tuCoordsAreInSurfaceRasterOrder = applyData->tuCoordsAreInSurfaceRasterOrder;
     PlaneSurfaces_t* plane = &ctx->planes[applyData->plane];
 
     /* user data */
@@ -869,22 +528,8 @@ static int32_t applyResidualJob(void* jobData)
 
     /* temporal */
     Surface_t* temporalSurface = NULL;
-    uint8_t* temporalBlockSignal = NULL;
-
-    /* cmdbuffer */
-    const uint8_t generateCmdBuffers = ctx->generateCmdBuffers;
-    CmdBuffer_t* cmdBufIntra = ctx->decodeSerial->cmdBufferIntra[loq];
-    CmdBuffer_t* cmdBufInter = (loq == LOQ0) ? ctx->decodeSerial->cmdBufferInter : NULL;
-    CmdBuffer_t* cmdBufClear = (loq == LOQ0) ? ctx->decodeSerial->cmdBufferClear : NULL;
-
-    /* decoders (outer scope for error-exit condition) */
-    EntropyDecoder_t residualDecoders[RCLayerCountDDS] = {{0}};
-    EntropyDecoder_t temporalDecoder = {0};
 
     /* functions */
-    TransformFunction_t transformFn;
-    ResidualFunction_t applyFn;
-    ResidualFunction_t writeFn;
     ResidualArgs_t residualArgs = {0};
     ConvertFunction_t convertFn = NULL;
     ConvertArgs_t convertArgs = {0};
@@ -902,11 +547,11 @@ static int32_t applyResidualJob(void* jobData)
             residualArgs.dst =
                 (loq == LOQ0) ? &plane->temporalBuffer[applyData->fieldType] : &plane->basePixels;
         }
-    } else if (applyData->temporal) {
+    } else if (applyTemporal) {
         residualArgs.dst = &plane->temporalBuffer[applyData->fieldType];
     } else if (applyData->dst) {
-            /* Use the external surface stride. */
-            residualArgs.dst = applyData->dst;
+        /* Use the external surface stride. */
+        residualArgs.dst = applyData->dst;
     } else {
         /* NULL pointers for destination surfaces is a feature request to allow just a temporal
            update, to facilitate a frame-drop mechanism by an integration. Such a decode does not
@@ -915,23 +560,14 @@ static int32_t applyResidualJob(void* jobData)
         return 0;
     }
 
-    /* Setup residual function. @todo: Caller could provide surfaces they wish to write to. */
-    transformFn = transformGetFunction(data->transform, scaling, ctx->cpuFeatures);
-    applyFn = getResidualFunction(residualMode, dds, residualArgs.dst->type);
-    writeFn = getResidualFunction(RM_Write, dds, residualArgs.dst->type);
-
+    /* Setup residual functions, and conversion if needed. @todo: Caller could provide surfaces
+     * they wish to write to. */
+    TransformFunction_t transformFn = transformGetFunction(data->transform, scaling, ctx->cpuFeatures);
+    ResidualFunction_t applyFn = getResidualFunction(residualMode, dds, residualArgs.dst->type);
+    ResidualFunction_t writeFn = getResidualFunction(RM_Write, dds, residualArgs.dst->type);
     VN_CHECKJ(surfaceGetChannelSkipOffset(residualArgs.dst, applyData->dstChannel,
                                           &residualArgs.skip, &residualArgs.offset));
 
-    if (loq == LOQ0 && applyData->temporal) {
-        if (ctx->generateSurfaces && ctx->useExternalSurfaces && !ctx->convertS8) {
-            temporalSurface = &plane->externalSurfaces[loq];
-        } else {
-            temporalSurface = &plane->temporalBuffer[applyData->fieldType];
-        }
-    }
-
-    /* Setup conversion if needed. */
     if (ctx->generateSurfaces && ctx->convertS8) {
         convertFn = getConvertFunction(dds);
 
@@ -949,84 +585,64 @@ static int32_t applyResidualJob(void* jobData)
                                               &convertArgs.dstSkip, &convertArgs.dstOffset));
     }
 
-    for (int32_t tileIndex = 0; tileIndex < applyData->tileCount; ++tileIndex) {
+    /* Setup temporalSurface if needed. */
+    if (loq == LOQ0 && applyTemporal) {
+        if (ctx->generateSurfaces && ctx->useExternalSurfaces && !ctx->convertS8) {
+            temporalSurface = &plane->externalSurfaces[loq];
+        } else {
+            temporalSurface = &plane->temporalBuffer[applyData->fieldType];
+        }
+    }
+
+    for (uint32_t tileIndex = 0; tileIndex < applyData->tileCount; ++tileIndex) {
         int16_t coeffs[RCLayerCountDDS] = {0};
         int16_t residuals[RCLayerCountDDS] = {0};
         int32_t zeros[RCLayerCountDDS] = {0}; /* Current zero run in each layer */
         int32_t temporalRun = 0;              /* Current symbol run in temporal layer */
         uint32_t tuIndex = 0;
-        TUState_t tuArg = {0};
+        uint32_t lastTuIndex = 0;
+        TUState_t tuState = {0};
         TileState_t* tile = &applyData->tiles[tileIndex];
         uint32_t x = tile->x;
         uint32_t y = tile->y;
-        uint8_t decodedTemporalSignal = 0;
-        bool decodedIntraBlockStart = 0;
-        uint16_t coeffsNonzeroMask = 0;
+        const bool tileHasTemporalDecode = (tile->temporalChunk != NULL);
+        const bool tileHasEntropyDecode = (tile->chunks != NULL);
+        CmdBuffer_t* cmdBuffer = tile->cmdBuffer;
+        TemporalSignal_t temporal = TSInter;
+        int32_t clearBlockQueue = 0;
+        int32_t coeffsNonzeroMask = 0;
+        bool clearBlockRemainder = false;
 
         /* Setup decoders */
-        VN_CHECKJ(prepareLayerDecoders(ctx, tile, residualDecoders, &temporalDecoder, numLayers));
+        EntropyDecoder_t residualDecoders[RCLayerCountDDS] = {{0}};
+        EntropyDecoder_t temporalDecoder = {0};
+        VN_CHECKJ(prepareLayerDecoders(applyData->log, tile, residualDecoders, &temporalDecoder,
+                                       numLayers, ctx->useOldCodeLengths));
 
         /* Setup TU */
-        VN_CHECKJ(tuStateInitialise(&tuArg, tile, dds ? 4 : 2));
-
-        if (loq == LOQ0 && applyData->temporal && data->temporalUseReducedSignalling &&
-            (data->temporalStepWidthModifier != 0)) {
-            const uint32_t blockCount = tuArg.block.blocksPerRow * tuArg.block.blocksPerCol;
-            temporalBlockSignal = VN_CALLOC_T_ARR(ctx->memory, uint8_t, blockCount);
-        }
+        VN_CHECKJ(tuStateInitialise(&tuState, tile->width, tile->height, tile->x, tile->y, tuWidthShift));
 
         /* Break loop once tile is fully decoded. */
         while (true) {
-            int32_t minZeroCount = INT_MAX;
-            TemporalSignal_t temporal = TSInter;
-            const bool blockStart = (x % BSTemporal == 0) && (y % BSTemporal == 0);
-
             /* Decode bitstream and track zero runs */
-            for (uint32_t i = 0; i < numLayers; i++) {
-                if (zeros[i] > 0) {
-                    --zeros[i];
-                    coeffs[i] = 0;
-
-                    /* clear i-th bit */
-                    coeffsNonzeroMask &= ~(1 << i);
-                } else {
-                    if (tile->chunks) {
-                        const int32_t layerZero = entropyDecode(&residualDecoders[i], &coeffs[i]);
-                        zeros[i] = (layerZero == EntropyNoData) ? (int32_t)(tuArg.tuTotal - 1) : layerZero;
-                        VN_CHECKJ(zeros[i]);
-
-                        /* set i-th bit */
-                        coeffsNonzeroMask |= (1 << i);
-                    } else {
-                        /* No decoder, skip over whole surface. */
-                        zeros[i] = tuArg.tuTotal - 1;
-                        coeffs[i] = 0;
-                    }
-                }
-
-                /* Calculate lowest common zero run */
-                if (minZeroCount > zeros[i]) {
-                    minZeroCount = zeros[i];
-                }
-            }
+            int32_t minZeroCount = INT_MAX;
+            coeffsNonzeroMask =
+                entropyDecodeAllLayers(numLayers, tileHasEntropyDecode, (int32_t)tuState.tuTotal,
+                                       residualDecoders, zeros, coeffs, &minZeroCount);
+            VN_CHECKJ(coeffsNonzeroMask);
 
             /* Perform user data modification if needed. */
             stripUserData(loq, userData, coeffs);
 
             /* Decode temporal and track temporal run */
-            if (applyData->temporal && tile->temporalChunk) {
-                if (temporalRun > 0) {
-                    --temporalRun;
-                } else {
-                    int32_t temporalCount =
-                        entropyDecodeTemporal(&temporalDecoder, &decodedTemporalSignal);
+            const bool blockStart = (x % BSTemporal == 0) && (y % BSTemporal == 0);
+            if (clearBlockQueue == 0 && tileHasTemporalDecode && applyTemporal) {
+                if (temporalRun <= 0) {
+                    temporalRun = entropyDecodeTemporal(&temporalDecoder, &temporal);
+                    clearBlockRemainder = false;
 
-                    decodedIntraBlockStart = 0;
-
-                    if (temporalCount == EntropyNoData) {
-                        temporalRun = (int32_t)tuArg.tuTotal;
-                    } else {
-                        temporalRun = temporalCount;
+                    if (temporalRun == EntropyNoData) {
+                        temporalRun = (int32_t)tuState.tuTotal;
                     }
 
                     /* Decrement run by 1 if just decoded. Temporal signal run is inclusive
@@ -1034,133 +650,111 @@ static int32_t applyResidualJob(void* jobData)
                        All the processing assumes the run is the number after the current
                        symbol */
                     if (temporalRun <= 0) {
-                        VN_ERROR(ctx->log, "invalid temporal_run value %d\n", temporalRun);
+                        VN_ERROR(applyData->log, "invalid temporal_run value %d\n", temporalRun);
                         res = -1; /* show we failed */
                         break;    /* exit while(true) loop */
                     }
-                    temporalRun -= 1;
                 }
-
-                /* Load up currently decoded temporal signal. */
-                temporal = (TemporalSignal_t)decodedTemporalSignal;
+                temporalRun--;
 
                 /* Process the intra blocks when running reduced signaling. This can occur
-                 * at any point during a temporal run of Intra signals. So must be tracked
+                 * at any point during a temporal run of Intra signals, so must be tracked
                  * and only performed when the first Intra signal to touch a block start
-                 * is encountered, all subsequent Intra signals are guaranteed to be
+                 * is encountered. All subsequent Intra signals are guaranteed to be
                  * block start signals so consider them here. */
-                if (data->temporalUseReducedSignalling && (decodedTemporalSignal == TSIntra) &&
-                    blockStart && !decodedIntraBlockStart) {
-                    uint32_t blockTUIndex = tuIndex;
-                    uint32_t blockX = x;
-                    uint32_t blockY = y;
-                    uint32_t blockTUCount, block_width, block_height;
-                    uint32_t temporalCount = temporalRun + 1; /* Reintroduce the initial decremented 1. */
-
-                    /* Prepare state for block run. */
+                if (blockStart && temporal == TSIntra && temporalReducedSignalling) {
+                    /* Given that temporalRun holds the number of blocks that need clearing, set the
+                     * clearBlockQueue correctly and calculate the number of TUs until that point
+                     * to keep temporalRun accurate until the final clear. */
+                    clearBlockQueue = temporalRun + 1;
                     temporalRun = 0;
-                    decodedIntraBlockStart = 1;
+                    uint32_t futureX = x;
+                    uint32_t futureY = y;
 
-                    while (temporalCount) {
-                        tuCoordsBlockDetails(&tuArg, blockX, blockY, &block_width, &block_height,
-                                             &blockTUCount);
-                        temporalRun += blockTUCount;
-
-                        if (generateCmdBuffers && cmdBufClear) {
-                            cmdBufferAppendCoord(cmdBufClear, (int16_t)blockX, (int16_t)blockY);
-                        } else {
-                            /* Reset block on temporal surface */
-                            clearPatch(temporalSurface, blockX, blockY, sizeof(int16_t),
-                                       block_width, block_height);
-
-                            if (ctx->generateSurfaces && ctx->convertS8) {
-                                clearPatch(convertArgs.dst, blockX, blockY, sizeof(uint8_t),
-                                           block_width, block_height);
-                            }
-                        }
-
-                        /* Update block signaling. */
-                        if (temporalBlockSignal) {
-                            uint32_t blockIndex;
-                            VN_CHECKJ(tuCoordsBlockIndex(&tuArg, blockX, blockY, &blockIndex));
-                            temporalBlockSignal[blockIndex] = TSIntra;
-                        }
-
-                        /* Move onto next block signal. */
-                        temporalCount--;
-
-                        if (temporalCount) {
-                            blockTUIndex += blockTUCount;
-                            if (tuCoordsBlockRaster(&tuArg, blockTUIndex, &blockX, &blockY) < 0) {
-                                res = -1;
-                                VN_ERROR(ctx->log, "Error obtaining temporal block coords, index: %d\n",
-                                         blockTUIndex);
-                                goto error_exit;
-                            }
-                        }
+                    for (int32_t block = clearBlockQueue; block > 0; block--) {
+                        uint32_t futureBlockTUCount = 0;
+                        tuBlockTuCount(&tuState, futureX, futureY, &futureBlockTUCount);
+                        temporalRun += (int32_t)futureBlockTUCount;
+                        tuCoordsBlockRaster(&tuState, tuIndex + temporalRun, &futureX, &futureY);
                     }
-
-                    /* Similar to run decode, reduce run by 1. */
-                    temporalRun -= 1;
                 }
+            }
 
-                /* Calculate lowest common run of zeros. We can jump over temporal runs
-                 * if we're running Inter, as we don't need to clear each transform. Or
-                 * if we've already processed all intra block in this temporal run and
-                 * cleared them up front. */
-                if (temporal == TSInter || decodedIntraBlockStart) {
-                    if (minZeroCount > temporalRun) {
-                        minZeroCount = temporalRun;
-                    }
+            uint32_t blockWidth = 0;
+            uint32_t blockHeight = 0;
+            uint32_t blockTUCount = 0;
+            tuCoordsBlockDetails(&tuState, x, y, &blockWidth, &blockHeight, &blockTUCount);
+            bool clearedBlock = false;
+
+            /* Handle clearing (either clear the block, or generate a "clear" command). */
+            if (blockStart && clearBlockQueue > 0) {
+                if (cmdBuffer) {
+                    uint32_t blockAlignedIndex = tuCoordsBlockAlignedIndex(&tuState, x, y);
+                    cmdBufferAppend(cmdBuffer, CBCClear, NULL, blockAlignedIndex - lastTuIndex);
+                    lastTuIndex = blockAlignedIndex;
                 } else {
-                    assert(temporal == TSIntra);
-                    minZeroCount = 0;
+                    /* Reset block on temporal surface */
+                    clearBlock(temporalSurface, x, y, sizeof(int16_t), blockWidth, blockHeight);
+
+                    if (convertFn) {
+                        clearBlock(convertArgs.dst, x, y, sizeof(uint8_t), blockWidth, blockHeight);
+                    }
                 }
 
-                /* When running reduced signaling, and the temporal step-width modifier
-                 * is not 0 (implied by temporal_block_signal being valid) then we need
-                 * to check if the block is intra, if so then the signal is intra too. */
-                if (data->temporalUseReducedSignalling && temporalBlockSignal) {
-                    uint32_t blockIndex;
-                    VN_CHECKJ(tuCoordsBlockIndex(&tuArg, x, y, &blockIndex));
-
-                    if (temporalBlockSignal[blockIndex] == TSIntra) {
-                        /* As a temporal_block_signal can only be Intra if the blocks
-                         * have been processed there is no need to modify min_zero_cnt. */
-                        temporal = TSIntra;
-                    }
+                clearedBlock = true;
+                clearBlockQueue--;
+                if (clearBlockQueue == 0) {
+                    clearBlockRemainder = true;
                 }
             }
 
             /* Only actually apply if there is some meaningful data and the operation
              * will have side-effects. */
-            if (!applyData->temporal || temporal != TSInter || coeffsNonzeroMask != 0) {
-                /* Apply SW to coeffs - this is not performed in decode loop as the temporal
-                 * signal residual could be zero (implied inter), however the block signal
-                 * could be intra. */
-                for (uint32_t i = 0; i < numLayers; i++) {
-                    const int16_t coeffSign = (coeffs[i] > 0) ? 1 : ((coeffs[i] < 0) ? (-1) : 0);
-                    coeffs[i] *= dequant->stepWidth[temporal][i];            /* Simple dequant */
-                    coeffs[i] += (coeffSign * dequant->offset[temporal][i]); /* Applying dead zone */
-                }
+            if ((coeffsNonzeroMask != 0) || (!clearedBlock && (!applyTemporal || temporal == TSIntra))) {
+                if (coeffsNonzeroMask != 0) {
+                    /* Apply SW to coeffs - this is not performed in decode loop as the temporal
+                     * signal residual could be zero (implied inter), however the block signal
+                     * could be intra. */
 
-                /* Inverse hadamard */
-                transformFn(coeffs, residuals);
-
-                /* Apply deblocking coefficients when enabled. */
-                if ((LOQ1 == loq) && dds && data->deblock.enabled) {
-                    deblockResiduals(&data->deblock, residuals);
-                }
-
-                if (generateCmdBuffers) {
-                    CmdBuffer_t* dstCmdBuffer =
-                        ((temporal == TSInter) && (loq == LOQ0)) ? cmdBufInter : cmdBufIntra;
-
-                    if (dds) {
-                        cmdbufferAppendDDS(dstCmdBuffer, (int16_t)x, (int16_t)y, residuals);
-                    } else {
-                        cmdBufferAppend(dstCmdBuffer, (int16_t)x, (int16_t)y, residuals);
+                    for (uint8_t layer = 0; layer < numLayers; layer++) {
+                        const int16_t coeffSign = (coeffs[layer] > 0) ? 1 : (coeffs[layer] >> 15);
+                        coeffs[layer] *= dequant->stepWidth[temporal][layer]; /* Simple dequant */
+                        coeffs[layer] +=
+                            (coeffSign * dequant->offset[temporal][layer]); /* Applying dead zone */
                     }
+
+                    /* Inverse hadamard */
+                    transformFn(coeffs, residuals);
+
+                    /* Apply deblocking coefficients when enabled. */
+                    if ((LOQ1 == loq) && dds && data->deblock.enabled) {
+                        deblockResiduals(&data->deblock, residuals);
+                    }
+                } else {
+                    memset(residuals, 0, RCLayerCountDDS * sizeof(int16_t));
+                }
+
+                if (cmdBuffer) {
+                    CmdBufferCmd_t command = CBCAdd;
+                    if (coeffsNonzeroMask == 0 && temporal == TSIntra) {
+                        command = CBCSetZero;
+                    } else if (loq == LOQ0 &&
+                               (temporal == TSIntra || clearBlockQueue > 0 || clearBlockRemainder)) {
+                        command = CBCSet;
+                    }
+
+                    /* TODO: This code can be refactored so that we don't do this. Specifically,
+                     * we can calculate the tuIndex so that it accounts for block alignment when
+                     * generating command buffers. In particular, tuCoordsBlockAlignedRaster should
+                     * be able to generate tuIndices from x/y coords. */
+                    uint32_t currentIndex = tuIndex;
+                    if (!tuCoordsAreInSurfaceRasterOrder &&
+                        (tuState.block.tuPerBlockRowRightEdge != 0 || y >= tuState.blockAligned.maxWholeBlockY ||
+                         tuState.xOffset != 0 || tuState.yOffset != 0)) {
+                        currentIndex = tuCoordsBlockAlignedIndex(&tuState, x, y);
+                    }
+                    cmdBufferAppend(cmdBuffer, command, residuals, currentIndex - lastTuIndex);
+                    lastTuIndex = currentIndex;
                 } else {
                     if (temporal == TSInter) {
                         applyFn(&residualArgs, x, y, residuals);
@@ -1175,18 +769,49 @@ static int32_t applyResidualJob(void* jobData)
                 }
             }
 
-            /* Surface traversal. Move onto the next coord, skipping as many as we can.
-             * tu_index will always step at least one unit. */
-            tuIndex += (1 + minZeroCount);
+            /* Logic for finding the next tuIndex to jump to, keeping temporalRun accurate. Note:
+             * if not tileHasTemporal, that's the start of a temporal surface or LOQ1, no special
+             * logic. */
+            if (tileHasTemporalDecode) {
+                if (clearedBlock) {
+                    /* After clear block has just been run, increment to the next residual or
+                     * start of the next block to clear or resume the next temporal run */
+                    minZeroCount = minS32(minZeroCount, (int32_t)blockTUCount - 1);
+                    temporalRun -= minZeroCount + 1;
+                } else if (clearBlockQueue > 0) {
+                    /* Case for an upcoming clear block or residual, whichever comes first */
+                    const uint32_t yRemaining =
+                        ((blockHeight - (y & (BSTemporal - 1))) >> tuWidthShift) - 1;
+                    const uint32_t xRemaining =
+                        ((blockWidth - (x & (BSTemporal - 1))) >> tuWidthShift) - 1;
+                    const int32_t nextBlockStart =
+                        (int32_t)((yRemaining * (blockWidth >> tuWidthShift)) + xRemaining);
 
-            if (data->temporalEnabled || (data->tileDimensions != TDTNone)) {
-                res = tuCoordsBlockRaster(&tuArg, tuIndex, &x, &y);
-
-                if (applyData->temporal && tile->temporalChunk) {
+                    minZeroCount = minS32(nextBlockStart, minZeroCount);
+                    temporalRun -= minZeroCount + 1;
+                } else if (temporal == TSInter || (clearBlockRemainder && minZeroCount > temporalRun)) {
+                    /* Normal operation when not in a clear block, move to the next new residual or
+                     * end of the temporal run */
+                    minZeroCount = minS32(minZeroCount, temporalRun);
+                    temporalRun -= minZeroCount;
+                } else if (!clearBlockRemainder) {
+                    /* Always just increment one TU after an Intra TU */
+                    assert(temporal == TSIntra);
+                    minZeroCount = 0;
+                } else {
+                    /* Case when applying residuals to the last block in a run of clear blocks, keep
+                     * temporalRun accurate and move to the next residual */
                     temporalRun -= minZeroCount;
                 }
+            }
+
+            tuIndex += minZeroCount + 1;
+
+            /* Update the x, y variables from the tuIndex */
+            if (tuCoordsAreInSurfaceRasterOrder) {
+                res = tuCoordsSurfaceRaster(&tuState, tuIndex, &x, &y);
             } else {
-                res = tuCoordsSurfaceRaster(&tuArg, tuIndex, &x, &y);
+                res = tuCoordsBlockRaster(&tuState, tuIndex, &x, &y);
             }
 
             VN_CHECKJ(res);
@@ -1195,18 +820,22 @@ static int32_t applyResidualJob(void* jobData)
                 break;
             }
 
-            for (uint32_t i = 0; i < numLayers; ++i) {
-                zeros[i] -= minZeroCount;
+            if (minZeroCount > 0) {
+                /* Note: if you're tempted to "optimise" this by loop-unrolling, to do 4 operations
+                 * at once, don't worry. Compilers are smart enough to do this already (and indeed,
+                 * they even turn this into SIMD code, if they have SIMD). */
+                for (uint8_t layer = 0; layer < numLayers; layer++) {
+                    zeros[layer] -= minZeroCount;
+                }
             }
         }
 
-        releaseLayerDecoders(residualDecoders, &temporalDecoder);
-        VN_FREE(ctx->memory, temporalBlockSignal);
+        if (cmdBuffer) {
+            cmdBufferSplit(cmdBuffer);
+        }
     }
 
 error_exit:
-    releaseLayerDecoders(residualDecoders, &temporalDecoder);
-    VN_FREE(ctx->memory, temporalBlockSignal);
     VN_PROFILE_STOP();
     return (res < 0) ? res : 0;
 }
@@ -1219,7 +848,6 @@ static int32_t applyResidualExecute(Context_t* ctx, const DecodeSerialArgs_t* pa
     ThreadManager_t* threadManager = &ctx->threadManager;
     DeserialisedData_t* data = &ctx->deserialised;
     const LOQIndex_t loq = params->loq;
-    const bool temporalEnabled = (loq == LOQ0) && data->temporalEnabled;
     const int32_t planeCount = data->numPlanes;
     ApplyResidualJobData_t threadData[AC_MaxResidualParallel] = {{0}};
     int32_t planeIndex = 0;
@@ -1229,46 +857,32 @@ static int32_t applyResidualExecute(Context_t* ctx, const DecodeSerialArgs_t* pa
     VN_PROFILE_START_DYNAMIC("apply_residual_execute %s", loqIndexToString(loq));
 
     for (; planeIndex < planeCount && planeIndex < RCMaxPlanes; planeIndex += 1) {
-        CacheTileData_t* tileCache = &ctx->decodeSerial->tiles[planeIndex];
-        const int32_t planeWidth = (int32_t)params->dst[planeIndex]->width;
-        const int32_t planeHeight = (int32_t)params->dst[planeIndex]->height;
-        const int32_t tileCount = data->tileCount[planeIndex][loq];
-        const int32_t tileWidth = data->tileWidth[planeIndex];
-        const int32_t tileHeight = data->tileHeight[planeIndex];
+        CacheTileData_t* tileCache = &ctx->decodeSerial[loq]->tileDataPerPlane[planeIndex];
+        VN_CHECKJ(tileDataInitialize(tileCache, params->memory, data, planeIndex, loq));
 
-        VN_CHECKJ(tilesCheckAlloc(ctx, planeIndex, tileCount));
-
-        for (int32_t tileIndex = 0; tileIndex < tileCount; ++tileIndex) {
+        for (uint32_t tileIndex = 0; tileIndex < tileCache->tileCount; ++tileIndex) {
             TileState_t* tile = &tileCache->tiles[tileIndex];
 
-            const int32_t tileIndexX = tileIndex % data->tilesAcross[planeIndex][loq];
-            const int32_t tileIndexY = tileIndex / data->tilesAcross[planeIndex][loq];
-
-            assert(tileIndexY < data->tilesDown[planeIndex][loq]);
-
-            tile->x = tileIndexX * tileWidth;
-            tile->y = tileIndexY * tileHeight;
-            tile->width = minS32(tileWidth, planeWidth - tile->x);
-            tile->height = minS32(tileHeight, planeHeight - tile->y);
-
-            VN_CHECKJ(deserialiseGetTileLayerChunks(data, planeIndex, loq, tileIndex, &tile->chunks));
-
-            if (loq == LOQ0) {
-                VN_CHECKJ(deserialiseGetTileTemporalChunk(data, planeIndex, tileIndex, &tile->temporalChunk));
-            } else {
-                tile->temporalChunk = NULL;
+            if (ctx->generateCmdBuffers) {
+                if (!tile->cmdBuffer) {
+                    cmdBufferInitialise(params->memory, &tile->cmdBuffer, ctx->applyCmdBufferThreads);
+                }
+                cmdBufferReset(tile->cmdBuffer, ctx->deserialised.numLayers);
             }
         }
 
         threadData[planeIndex].dequant = contextGetDequant(ctx, planeIndex, loq);
         threadData[planeIndex].ctx = ctx;
+        threadData[planeIndex].memory = params->memory;
+        threadData[planeIndex].log = params->log;
         threadData[planeIndex].dst = params->dst[planeIndex];
         threadData[planeIndex].plane = planeIndex;
         threadData[planeIndex].loq = loq;
         threadData[planeIndex].fieldType = data->fieldType;
-        threadData[planeIndex].temporal = temporalEnabled;
+        threadData[planeIndex].temporal = params->applyTemporal;
+        threadData[planeIndex].tuCoordsAreInSurfaceRasterOrder = params->tuCoordsAreInSurfaceRasterOrder;
         threadData[planeIndex].tiles = tileCache->tiles;
-        threadData[planeIndex].tileCount = tileCount;
+        threadData[planeIndex].tileCount = tileCache->tileCount;
     }
 
     res = threadingExecuteJobs(threadManager, applyResidualJob, threadData, planeIndex,
@@ -1283,77 +897,92 @@ error_exit:
 
 int32_t decodeSerial(Context_t* ctx, const DecodeSerialArgs_t* params)
 {
-    DecodeSerial_t decode = ctx->decodeSerial;
+    DecodeSerial_t decode = ctx->decodeSerial[params->loq];
 
     if (!decode) {
-        VN_ERROR(ctx->log, "Attempted to perform decoding without initialising the decoder");
+        VN_ERROR(params->log, "Attempted to perform decoding without initialising the decoder");
         return -1;
     }
 
-    /* Check that the plane configurations are valid. Either Y or YUV must be present. */
-    int32_t planeCheck = 0;
-    for (int32_t i = 0; i < 3; ++i) {
-        planeCheck |= (params->dst[i] != NULL) ? (1 << i) : 0;
-    }
+    if (!ctx->generateCmdBuffers) {
+        /* Check that the plane configurations are valid. Either Y or YUV must be present. */
+        int32_t planeCheck = 0;
+        for (int32_t i = 0; i < 3; ++i) {
+            planeCheck |= (params->dst[i] != NULL) ? (1 << i) : 0;
+        }
 
-    if ((planeCheck != 1) && (planeCheck != 7)) {
-        VN_ERROR(ctx->log, "No destination surfaces supplied\n");
-        return -1;
+        if ((planeCheck != 1) && (planeCheck != 7)) {
+            VN_ERROR(params->log, "No destination surfaces supplied\n");
+            return -1;
+        }
     }
 
     /* Ensure LOQ is valid. */
     if (params->loq != LOQ0 && params->loq != LOQ1) {
-        VN_ERROR(ctx->log, "Supplied LOQ is invalid, must be LOQ-0 or LOQ-1\n");
+        VN_ERROR(params->log, "Supplied LOQ is invalid, must be LOQ-0 or LOQ-1\n");
         return -1;
     }
 
-    if (decode->generateCmdBuffers) {
-        if (params->loq == LOQ1) {
-            cmdBufferReset(decode->cmdBufferIntra[LOQ1], ctx->deserialised.numLayers);
-        } else {
-            cmdBufferReset(decode->cmdBufferIntra[LOQ0], ctx->deserialised.numLayers);
-            cmdBufferReset(decode->cmdBufferInter, ctx->deserialised.numLayers);
-            cmdBufferReset(decode->cmdBufferClear, 0);
-        }
-    }
+    FrameStats_t frameStats = params->stats;
+    VN_FRAMESTATS_RECORD_START(
+        frameStats, (params->loq == LOQ0 ? STSerialDecodeLOQ0Start : STSerialDecodeLOQ1Start));
+    int32_t res = 0;
+    VN_CHECK(applyResidualExecute(ctx, params));
+    VN_FRAMESTATS_RECORD_STOP(frameStats,
+                              (params->loq == LOQ0 ? STSerialDecodeLOQ0Stop : STSerialDecodeLOQ1Stop));
 
-    return applyResidualExecute(ctx, params);
-}
+    if (ctx->applyCmdBuffers) {
+        const Highlight_t* highlight = &ctx->highlightState[params->loq];
+        VN_FRAMESTATS_RECORD_START(frameStats, (params->loq == LOQ0 ? STApplyLOQ0Start : STApplyLOQ1Start));
+        /* TODO: thread this per-plane? That's the way that applyResidualExecute is threaded. */
+        for (uint32_t planeIdx = 0; planeIdx < AC_MaxResidualParallel; planeIdx++) {
+            const CacheTileData_t* tileData = &decode->tileDataPerPlane[planeIdx];
+            const uint32_t tileCount = tileData->tileCount;
+            for (uint32_t tileIndex = 0; tileIndex < tileCount; ++tileIndex) {
+                const TileState_t* tile = &tileData->tiles[tileIndex];
+                const Surface_t* cmdBufferDst =
+                    (params->applyTemporal ? &ctx->planes[planeIdx].temporalBuffer[FTTop]
+                                           : params->dst[planeIdx]);
 
-bool decodeSerialInitialize(Memory_t memory, DecodeSerial_t* decode, bool generateCmdBuffers)
-{
-    DecodeSerial_t result = VN_CALLOC_T(memory, struct DecodeSerial);
-
-    if (!result) {
-        return false;
-    }
-
-    result->memory = memory;
-
-    if (generateCmdBuffers) {
-        for (int32_t i = 0; i < LOQEnhancedCount; ++i) {
-            if (!cmdBufferInitialise(memory, &result->cmdBufferIntra[i], CBTResiduals)) {
-                goto error_exit;
+                VN_CHECK(applyCmdBuffer(params->log, ctx->threadManager, tile, cmdBufferDst,
+                                        params->tuCoordsAreInSurfaceRasterOrder, ctx->cpuFeatures,
+                                        highlight));
             }
         }
+        VN_FRAMESTATS_RECORD_STOP(frameStats, (params->loq == LOQ0 ? STApplyLOQ0Stop : STApplyLOQ1Stop));
 
-        if (!cmdBufferInitialise(memory, &result->cmdBufferInter, CBTResiduals)) {
-            goto error_exit;
+        if (params->loq == LOQ0) {
+            size_t totalSize = 0;
+            for (uint32_t planeIdx = 0; planeIdx < AC_MaxResidualParallel; planeIdx++) {
+                const CacheTileData_t* tileData = &decode->tileDataPerPlane[planeIdx];
+                const uint32_t tileCount = tileData->tileCount;
+                for (uint32_t tileIndex = 0; tileIndex < tileCount; ++tileIndex) {
+                    const TileState_t* tile = &tileData->tiles[tileIndex];
+                    totalSize += cmdBufferGetSize(tile->cmdBuffer);
+                }
+            }
+            VN_FRAMESTATS_RECORD_VALUE(frameStats, STCmdBufferSize, totalSize);
         }
-
-        if (!cmdBufferInitialise(memory, &result->cmdBufferClear, CBTCoordinates)) {
-            goto error_exit;
-        }
+        VN_PROFILE_STOP();
     }
 
-    result->generateCmdBuffers = generateCmdBuffers;
+    return res;
+}
 
-    *decode = result;
+bool decodeSerialInitialize(Memory_t memory, DecodeSerial_t* decodes)
+{
+    for (uint32_t loq = 0; loq < LOQEnhancedCount; loq++) {
+        DecodeSerial_t result = VN_CALLOC_T(memory, struct DecodeSerial);
+
+        if (!result) {
+            return false;
+        }
+
+        result->memory = memory;
+
+        decodes[loq] = result;
+    }
     return true;
-
-error_exit:
-    decodeSerialRelease(result);
-    return false;
 }
 
 void decodeSerialRelease(DecodeSerial_t decode)
@@ -1365,36 +994,37 @@ void decodeSerialRelease(DecodeSerial_t decode)
     Memory_t memory = decode->memory;
 
     for (int32_t i = 0; i < AC_MaxResidualParallel; ++i) {
-        VN_FREE(memory, decode->tiles[i].tiles);
+        CacheTileData_t* tileData = &decode->tileDataPerPlane[i];
+        const uint32_t tileCount = tileData->tileCount;
+        for (uint32_t tileIdx = 0; tileIdx < tileCount; tileIdx++) {
+            CmdBuffer_t* cmdBuffer = tileData->tiles[tileIdx].cmdBuffer;
+            cmdBufferFree(cmdBuffer);
+        }
+        VN_FREE(memory, tileData->tiles);
     }
-
-    for (int32_t i = 0; i < LOQEnhancedCount; ++i) {
-        cmdBufferFree(decode->cmdBufferIntra[i]);
-    }
-
-    cmdBufferFree(decode->cmdBufferInter);
-    cmdBufferFree(decode->cmdBufferClear);
 
     VN_FREE(memory, decode);
 }
 
-CmdBuffer_t* decodeSerialGetTileClearCmdBuffer(const DecodeSerial_t decode)
+uint32_t decodeSerialGetTileCount(const DecodeSerial_t decode, uint8_t planeIdx)
 {
-    return decode->cmdBufferClear;
+    return decode->tileDataPerPlane[planeIdx].tileCount;
 }
 
-CmdBuffer_t* decodeSerialGetResidualCmdBuffer(const DecodeSerial_t decode,
-                                              TemporalSignal_t temporal, LOQIndex_t loq)
+TileState_t* decodeSerialGetTile(const DecodeSerial_t decode, uint8_t planeIdx)
 {
-    if (temporal == TSInter) {
-        return decode->cmdBufferInter;
-    }
+    return decode->tileDataPerPlane[planeIdx].tiles;
+}
 
-    if (temporal == TSIntra) {
-        return decode->cmdBufferIntra[loq];
-    }
+CmdBuffer_t* decodeSerialGetCmdBuffer(const DecodeSerial_t decode, uint8_t planeIdx, uint8_t tileIdx)
+{
+    return decode->tileDataPerPlane[planeIdx].tiles[tileIdx].cmdBuffer;
+}
 
-    return NULL;
+CmdBufferEntryPoint_t* decodeSerialGetCmdBufferEntryPoint(const DecodeSerial_t decode, uint8_t planeIdx,
+                                                          uint8_t tileIdx, uint16_t entryPointIndex)
+{
+    return &decodeSerialGetCmdBuffer(decode, planeIdx, tileIdx)->entryPoints[entryPointIndex];
 }
 
 /*------------------------------------------------------------------------------*/

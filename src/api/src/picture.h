@@ -1,16 +1,27 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_API_PICTURE_H_
 #define VN_API_PICTURE_H_
 
 #include "handle.h"
 #include "interface.h"
-#include "uPictureFormatDesc.h"
-#include "uTimestamps.h"
-#include "uTypes.h"
+#include "LCEVC/lcevc_dec.h"
+#include "LCEVC/utility/picture_layout.h"
+#include "timestamps.h"
 
 #include <array>
 #include <memory>
 #include <string>
+#include <vector>
 
 // ------------------------------------------------------------------------------------------------
 
@@ -25,14 +36,15 @@ class Decoder;
 class Picture;
 class PictureLock;
 
-using PictureBuffer = lcevc_dec::api_utility::DataBuffer;
+using PictureBuffer = std::vector<uint8_t>;
+using PictureLayout = lcevc_dec::utility::PictureLayout;
 
 // - Picture --------------------------------------------------------------------------------------
 
 class Picture
 {
 protected:
-    static constexpr uint8_t kMaxNumPlanes = lcevc_dec::api_utility::PictureFormatDesc::kMaxNumPlanes;
+    static constexpr uint8_t kMaxNumPlanes = PictureLayout::kMaxPlanes;
 
 public:
     Picture() = default;
@@ -66,33 +78,33 @@ public:
     virtual bool setDesc(const LCEVC_PictureDesc& newDesc);
 
     // Note: All widths and heights are always post-cropping (whereas strides and memory sizes are
-    // independent from cropping).
-    uint32_t getWidth() const { return m_desc.GetWidth() - (m_crop.left + m_crop.right); }
-    uint32_t getHeight() const { return m_desc.GetHeight() - (m_crop.top + m_crop.bottom); }
-    uint32_t getBitdepth() const { return m_desc.GetBitDepth(); }
-    uint32_t getBytedepth() const { return m_desc.GetByteDepth(); }
-    uint32_t getNumPlanes() const { return m_desc.GetPlaneCount(); }
+    // independent of cropping).
+    uint32_t getWidth() const { return m_layout.width() - (m_crop.left + m_crop.right); }
+    uint32_t getHeight() const { return m_layout.height() - (m_crop.top + m_crop.bottom); }
+    uint8_t getBitdepth() const { return m_layout.sampleBits(); }
+    uint8_t getBytedepth() const { return m_layout.sampleSize(); }
+    uint8_t getNumPlanes() const { return m_layout.planes(); }
     uint32_t getPlaneWidth(uint32_t planeIndex) const
     {
-        return m_desc.GetPlaneWidth(planeIndex) -
-               ((m_crop.left + m_crop.right) >> planeHorizontalShift(m_desc.GetFormat(), planeIndex));
+        return m_layout.planeWidth(planeIndex) -
+               ((m_crop.left + m_crop.right) >> m_layout.getPlaneWidthShift(m_layout.format(), planeIndex));
     }
     uint32_t getPlaneHeight(uint32_t planeIndex) const
     {
-        return m_desc.GetPlaneHeight(planeIndex) -
-               ((m_crop.top + m_crop.bottom) >> planeVerticalShift(m_desc.GetFormat(), planeIndex));
+        return m_layout.planeHeight(planeIndex) -
+               ((m_crop.top + m_crop.bottom) >> m_layout.getPlaneHeightShift(m_layout.format(), planeIndex));
     }
     uint32_t getPlaneWidthBytes(uint32_t planeIndex) const { return getPlaneWidth(planeIndex) * getBytedepth(); }
     uint32_t getPlaneBytesPerPixel(uint32_t planeIndex) const
     {
         // Bytes per pixel, where "UVUVUV" is considered 3 pixels wide. So, that's samples per
         // pixel times bytes per sample.
-        return m_desc.GetPlanePixelStride(planeIndex) * m_desc.GetByteDepth();
+        return m_layout.sampleStride(planeIndex);
     }
     uint32_t getPlaneByteStride(uint32_t planeIndex) const
     {
         // Bytes per row for this plane (also called row byte stride).
-        return m_desc.GetPlaneStrideBytes(planeIndex);
+        return m_layout.rowStride(planeIndex);
     }
     uint32_t getPlaneSampleStride(uint32_t planeIndex) const
     {
@@ -100,9 +112,9 @@ public:
         // (bytes/row) / (bytes/sample) = samples/row
         // An equivalent formula would be (samples/pixel)*(pixels/row)=samples/row, like so:
         // return m_pictureDesc.GetPlaneStridePixels(i) * m_pictureDesc.GetPlanePixelStride(i);
-        return m_desc.GetPlaneStrideBytes(planeIndex) / m_desc.GetByteDepth();
+        return m_layout.rowStride(planeIndex) / m_layout.sampleSize();
     }
-    uint32_t getPlaneMemorySize(uint32_t planeIndex) const { return m_desc.GetPlaneMemorySize(planeIndex); }
+    uint32_t getPlaneMemorySize(uint32_t planeIndex) const { return m_layout.planeSize(planeIndex); }
     uint8_t* getPlaneFirstSample(uint32_t planeIdx) { return internalGetPlaneFirstSample(planeIdx); }
     const uint8_t* getPlaneFirstSample(uint32_t planeIdx) const { return internalGetPlaneFirstSample(planeIdx); }
 
@@ -130,9 +142,7 @@ public:
 protected:
     void setName(const std::string& name);
 
-    virtual bool
-    setDesc(const LCEVC_PictureDesc& newDesc,
-            const uint32_t planeStridesBytes[lcevc_dec::api_utility::PictureFormatDesc::kMaxNumPlanes]);
+    virtual bool setDesc(const LCEVC_PictureDesc& newDesc, const uint32_t rowStridesBytes[kMaxNumPlanes]);
 
     bool isLocked() const { return m_lock != kInvalidHandle; }
 
@@ -142,32 +152,35 @@ protected:
 
     uint32_t getRequiredSize() const;
 
-    static uint32_t planeHorizontalShift(lcevc_dec::api_utility::PictureFormat::Enum format,
-                                         uint32_t planeIndex);
-    static uint32_t planeVerticalShift(lcevc_dec::api_utility::PictureFormat::Enum format,
-                                       uint32_t planeIndex);
-
-    lcevc_dec::api_utility::PictureFormatDesc m_desc = {};
+    PictureLayout m_layout = {};
 
 private:
     // This initializer is NOT lazy: it will set the desc without checking if it's changed or not.
-    bool initializeDesc(
-        const LCEVC_PictureDesc& desc,
-        const uint32_t planeStridesPixels[lcevc_dec::api_utility::PictureFormatDesc::kMaxNumPlanes] = nullptr);
+    bool initializeDesc(const LCEVC_PictureDesc& desc,
+                        const uint32_t rowStridesBytes[kMaxNumPlanes] = nullptr);
 
     // Identifying data
-    uint64_t m_timehandle = lcevc_dec::api_utility::kInvalidTimehandle;
+    uint64_t m_timehandle = kInvalidTimehandle;
     void* m_userData = nullptr;
     std::string m_name = "unknown";
 
+    struct Margins
+    {
+        uint32_t left;
+        uint32_t top;
+        uint32_t right;
+        uint32_t bottom;
+    };
+
     // Format information
-    ColorRange m_colorRange = ColorRange::Unknown;
-    MatrixCoefficients m_matrixCoefficients = MatrixCoefficients::Unknown;
-    TransferCharacteristics m_transferCharacteristics = TransferCharacteristics::Unknown;
+    LCEVC_ColorRange m_colorRange = LCEVC_ColorRange_Unknown;
+    LCEVC_ColorPrimaries m_colorPrimaries = LCEVC_ColorPrimaries_Unspecified;
+    LCEVC_MatrixCoefficients m_matrixCoefficients = LCEVC_MatrixCoefficients_Unspecified;
+    LCEVC_TransferCharacteristics m_transferCharacteristics = LCEVC_TransferCharacteristics_Unspecified;
+    LCEVC_HDRStaticInfo m_hdrStaticInfo = {};
     uint8_t m_publicFlags = 0;
-    HDRStaticInfo m_hdrStaticInfo = {};
     AspectRatio m_sampleAspectRatio = {1, 1};
-    lcevc_dec::api_utility::Margins m_crop = {};
+    Margins m_crop = {};
 
     // State
     Handle<PictureLock> m_lock = kInvalidHandle;
@@ -201,8 +214,7 @@ protected:
     bool descsMatch(const LCEVC_PictureDesc& newDesc, const LCEVC_PicturePlaneDesc* newPlaneDescArr,
                     const LCEVC_PictureBufferDesc* newBufferDesc);
 
-    bool setDesc(const LCEVC_PictureDesc& newDesc,
-                 const uint32_t planeStridesPixels[lcevc_dec::api_utility::PictureFormatDesc::kMaxNumPlanes]) override;
+    bool setDesc(const LCEVC_PictureDesc& newDesc, const uint32_t rowStridesBytes[kMaxNumPlanes]) override;
 
     uint8_t* getBuffer() const final { return (m_bufferDesc ? m_bufferDesc->data : nullptr); }
     uint8_t* internalGetPlaneFirstSample(uint32_t planeIdx) const final;

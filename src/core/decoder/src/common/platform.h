@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_PLATFORM_H_
 #define VN_DEC_CORE_PLATFORM_H_
 
@@ -53,7 +63,7 @@
  * Variable alignment, v can contain a normal variable declaration, a contains the
  * alignment needed for this variable. E.g.
  *
- *		VNAlign(static const some_array[10], 16) = {0};
+ *		VN_ALIGN(static const some_array[10], 16) = {0};
  *
  * This would align some_array to a 16 byte boundary and default it to 0.
  *-----------------------------------------------------------------------------*/
@@ -82,16 +92,11 @@
 #define VN_CHECK(p) \
     res = (p);      \
     if (res < 0)    \
-        return res;
+    return res
 
 #define VN_CHECKJ(p) \
     res = (p);       \
     if (res < 0)     \
-        goto error_exit;
-
-/*------------------------------------------------------------------------------
- * Used to flag a variable is unused such that the linter will no longer complain.
- *-----------------------------------------------------------------------------*/
-#define VN_UNUSED(v) (void)(v)
+    goto error_exit
 
 #endif /* VN_DEC_CORE_PLATFORM_H_ */

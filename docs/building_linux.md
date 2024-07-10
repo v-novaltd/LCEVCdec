@@ -47,8 +47,8 @@ python3 [CONAN_HOME]/android/create_all_android_conan_profiles.py
 
 mkdir _build
 cd _build
-export ANDROID_NDK=${ANDROID_SDK_HOME}/ndk/21.4.7075529 # cmake needs this
-export ANDROID_NDK_PATH=${ANDROID_SDK_HOME}/ndk/21.4.7075529 # conan needs this
+export ANDROID_NDK=${ANDROID_SDK_HOME}/ndk/25.2.9519653 # cmake needs this
+export ANDROID_NDK_PATH=${ANDROID_SDK_HOME}/ndk/25.2.9519653 # conan needs this
 conan install .. --profile=android-armeabi-v7a-api-30-Release --build=missing
 cmake -G Ninja -DANDROID_ABI=armeabi-v7a -DANDROID_PLATFORM=30 -DCMAKE_BUILD_TYPE=Release --toolchain=../cmake/toolchains/android_ndk.toolchain.cmake ..
 cmake --build .
@@ -90,4 +90,4 @@ conan remove lcevc_dec
 conan export .
 ```
 
-This will produce dynamic libaries (`.so` files) in `_build/install/lib`, and will also allow you to add `lcevc_dec` as a conan depedency in your player (such as in a `conanfile.py` or `conanfile.txt`). No static library is produced for the Decoder as a whole by these steps, although static libraries for certain utility libraries are emitted.
+This will produce dynamic libaries (`.so` files) in `_build/install/lib`, and will also allow you to add `lcevc_dec` as a conan depedency in your player (such as in a `conanfile.py` or `conanfile.txt`). By default, shared libraries will be produced for the API and core targets and static libraries for all other targets. To force static libraries for all targets use the CMake option `-DBUILD_SHARED_LIBS=OFF`. 

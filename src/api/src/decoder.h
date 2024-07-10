@@ -1,10 +1,19 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_API_DECODER_H_
 #define VN_API_DECODER_H_
 
 #include "accel_context.h"
 #include "buffer_manager.h"
-#include "clock.h"
 #include "decoder_config.h"
 #include "event_manager.h"
 #include "handle.h"
@@ -13,20 +22,25 @@
 #include "picture_lock.h"
 #include "pool.h"
 
-#include <LCEVC/PerseusDecoder.h>
 #include <LCEVC/lcevc_dec.h>
+#include <LCEVC/PerseusDecoder.h>
+#include <LCEVC/utility/chrono.h>
 
-#include <map>
+#include <cassert>
+#include <cstdint>
+#include <deque>
+#include <memory>
 #include <queue>
+#include <utility>
 
 // ------------------------------------------------------------------------------------------------
 
 // Forward declarations
 struct LCEVC_AccelContext;
+struct LCEVC_AccelContextHandle;
 struct LCEVC_DecodeInformation;
 struct LCEVC_DecoderHandle;
 struct LCEVC_PictureHandle;
-struct LCEVC_AccelContextHandle;
 struct LCEVC_PictureLockHandle;
 
 namespace lcevc_dec::decoder {
@@ -55,21 +69,22 @@ struct BaseData
 struct Result
 {
     Result(Handle<Picture> handleIn, LCEVC_ReturnCode returnCodeIn, uint16_t discontinuityCountIn,
-           int64_t timestamp, bool skipped)
+           const DecodeInformation& decodeInfoIn)
         : pictureHandle(handleIn)
         , returnCode(returnCodeIn)
         , discontinuityCount(discontinuityCountIn)
-        , decodeInfo(timestamp)
+        , decodeInfo(decodeInfoIn)
     {
-        decodeInfo.skipped = skipped;
-
         // Note that we never have an invalid handle, even failed decodes get a handle (think of it
         // like "who failed?").
-        VNAssert(pictureHandle != kInvalidHandle);
-
-        // All skips are considered "successes":
-        VNAssert(!skipped || returnCode == LCEVC_Success);
+        assert(pictureHandle != kInvalidHandle);
     }
+
+    Result(Handle<Picture> handleIn, LCEVC_ReturnCode returnCodeIn, uint16_t discontinuityCountIn,
+           int64_t timestamp, bool skipped)
+        : Result(handleIn, returnCodeIn, discontinuityCountIn, DecodeInformation(timestamp, skipped))
+    {}
+
     Handle<Picture> pictureHandle;
     LCEVC_ReturnCode returnCode;
     uint16_t discontinuityCount;
@@ -80,6 +95,8 @@ struct Result
 
 class Decoder
 {
+    using Clock = lcevc_dec::utility::ScopedTimer<lcevc_dec::utility::MicroSecond>;
+
 public:
     Decoder(const LCEVC_AccelContextHandle& accelContext, LCEVC_DecoderHandle& apiHandle);
     ~Decoder();
@@ -111,6 +128,7 @@ public:
 
     // "Trick-play"
     LCEVC_ReturnCode flush();
+    LCEVC_ReturnCode peek(int64_t timestamp, uint32_t& widthOut, uint32_t& heightOut);
     LCEVC_ReturnCode skip(int64_t timestamp);
     LCEVC_ReturnCode synchronize(bool dropPending);
 
@@ -167,12 +185,15 @@ private:
     bool getNextDecodeData(BaseData& nextBase,
                            std::shared_ptr<const perseus_decoder_stream>& nextProcessedLcevcData,
                            Handle<Picture>& nextOutput);
-    bool shouldPassthrough(bool timeout, bool forcePassthrough, bool lcevcAvailable,
-                           bool& shouldFailOut) const;
+
+    // First bool is whether or not this configuration should passthrough, second bool is whether
+    // or not it should fail.
+    std::pair<bool, bool> shouldPassthroughOrFail(bool timeout, bool lcevcAvailable) const;
     void tryToQueueDecodes();
     Result& populateDecodeResult(Handle<Picture> decodeDest, const BaseData& baseData, bool lcevcAvailable,
                                  bool shouldFail, bool shouldPassthrough, bool wasTimeout);
     Result* findDecodeResult(uint64_t timehandle);
+    BaseData* findBaseData(uint64_t timehandle);
     LCEVC_ReturnCode doDecode(const BaseData& baseData, const perseus_decoder_stream* processedLcevcData,
                               Handle<Picture> decodeDest, Result*& resultOut);
     LCEVC_ReturnCode decodePassthrough(const BaseData& baseData, Picture& decodeDest);
@@ -182,9 +203,13 @@ private:
                                      const Picture& basePic);
     std::shared_ptr<Picture> decodeEnhanceGetBase(Picture& originalBase,
                                                   const perseus_decoder_stream& processedLcevcData);
-    static bool decodeEnhanceSetupCoreImages(Picture& basePic, Picture& enhancedPic,
-                                             perseus_image& baseOut, perseus_image& enhancedOut);
+    std::shared_ptr<Picture> decodeEnhanceGetIntermediate(std::shared_ptr<Picture> basePicture,
+                                                          const perseus_decoder_stream& processedLcevcData);
+    static bool decodeEnhanceSetupCoreImages(Picture& basePic, std::shared_ptr<Picture> intermediatePicture,
+                                             Picture& enhancedPic, perseus_image& baseOut,
+                                             perseus_image& intermediateOut, perseus_image& enhancedOut);
     LCEVC_ReturnCode decodeEnhanceCore(uint64_t timehandle, const perseus_image& coreBase,
+                                       const perseus_image& coreIntermediate,
                                        const perseus_image& coreEnhanced,
                                        const perseus_decoder_stream& processedLcevcData);
 
@@ -225,7 +250,7 @@ private:
     Pool<Picture> m_picturePool;
 
     // Containers:
-    std::queue<BaseData> m_baseContainer; // Input
+    std::deque<BaseData> m_baseContainer; // Input
     std::queue<Handle<Picture>> m_pendingOutputContainer; // Between input and output (cap = unprocessed lcevc data cap)
     LcevcProcessor m_lcevcProcessor;   // Holds unprocessed and processed LCEVC data.
     std::deque<Result> m_resultsQueue; // Output (cap = processed lcevc data cap)

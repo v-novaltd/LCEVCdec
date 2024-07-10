@@ -1,23 +1,45 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_DECODE_PARALLEL_H_
 #define VN_DEC_CORE_DECODE_PARALLEL_H_
 
+#include "common/tile.h"
 #include "common/types.h"
+#include "decode/transform_coeffs.h"
 
 /*------------------------------------------------------------------------------*/
 
 typedef struct CmdBuffer CmdBuffer_t;
+typedef struct CmdBufferEntryPoint CmdBufferEntryPoint_t;
+typedef struct Context Context_t;
 typedef struct Deblock Deblock_t;
 typedef struct Dequant Dequant_t;
 typedef struct DeserialisedData DeserialisedData_t;
 typedef struct FrameStats* FrameStats_t;
 typedef struct Highlight Highlight_t;
+typedef struct Logger* Logger_t;
 typedef struct Memory* Memory_t;
 typedef struct Surface Surface_t;
+typedef struct ThreadManager ThreadManager_t;
 
 /*------------------------------------------------------------------------------*/
 
-typedef struct DecodeParallel* DecodeParallel_t;
+typedef struct DecodeParallel
+{
+    Memory_t memory;
+    TransformCoeffs_t coeffs[RCLayerMaxCount];
+    TransformCoeffs_t temporalCoeffs;
+    CacheTileData_t tileCache[RCMaxPlanes];
+} * DecodeParallel_t;
 
 /*! \brief Allocates and prepares an instance of DecodeParallel_t.
  *
@@ -27,24 +49,12 @@ bool decodeParallelInitialize(Memory_t memory, DecodeParallel_t* decode);
 /*! \brief Releases and deallocates an instance of DecodeParallel_t. */
 void decodeParallelRelease(DecodeParallel_t decode);
 
-/*! \brief Retrieve the command buffer for a given plane and temporal signal type.
- *
- *  \note The contents of the returned CmdBuffer are only valid after a call to
- *        decodeParallel. A subsequent call to `decodeParallel` will potentially
- *        invalidate the returned CmdBuffer_t. */
-CmdBuffer_t* decodeParallelGetResidualCmdBuffer(DecodeParallel_t decode, int32_t plane,
-                                                TemporalSignal_t temporal, LOQIndex_t loq);
-
-/*! \brief Retrieve the temporal tile clear command buffer for a given plane.
- *
- *  \note The contents of the returned CmdBuffer are only valid after a call to
- *        decodeParallel. A subsequent call to `decodeParallel` will potentially
- *        invalidate the returned CmdBuffer_t. */
-CmdBuffer_t* decodeParallelGetTileClearCmdBuffer(DecodeParallel_t decode, int32_t plane);
-
 /*! \brief Contains all the parameters needed to perform residual decoding. */
 typedef struct DecodeParallelArgs
 {
+    DeserialisedData_t* deserialised;
+    Logger_t log;
+    ThreadManager_t* threadManager;
     Surface_t* dst[3]; /**< Destination surfaces for this LOQ to apply residuals to. */
     LOQIndex_t loq; /**< LOQ to apply residuals to. The destination surface dimensions must adhere to expected dimensions of the LOQ. */
     ScalingMode_t scalingMode; /**< The scaling mode used to scale to the `loq` */
@@ -53,6 +63,8 @@ typedef struct DecodeParallelArgs
     FrameStats_t stats; /**< [optional] Frame stats for recording useful decoding information. */
     Deblock_t* deblock; /**< Deblocking parameters to use, only needed for LOQ-1. */
     Highlight_t* highlight; /**< [optional] Highlight state to apply, overrides residual application and writes saturated values into the destination surface. */
+    bool useOldCodeLengths;
+    bool applyTemporal;
 } DecodeParallelArgs_t;
 
 /*! \brief Perform residual decoding using the supplied parameters.
@@ -72,6 +84,10 @@ typedef struct DecodeParallelArgs
  */
 int32_t decodeParallel(Context_t* ctx, DecodeParallel_t decode, const DecodeParallelArgs_t* args);
 
+CmdBuffer_t* decodeParallelGetCmdBuffer(DecodeParallel_t decode, int32_t plane, uint8_t tileIdx);
+
+CmdBufferEntryPoint_t* decodeParallelGetCmdBufferEntryPoint(DecodeParallel_t decode, uint8_t planeIdx,
+                                                            uint8_t tileIdx, uint16_t entryPointIndex);
 /*------------------------------------------------------------------------------*/
 
 #endif /* VN_DEC_CORE_DECODE_PARALLEL_H_ */

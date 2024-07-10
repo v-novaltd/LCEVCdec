@@ -1,4 +1,13 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 // This tests api/include/LCEVC/lcevc_dec.h against corrupt streams.
 //
@@ -13,8 +22,8 @@
 #include "data.h"
 #include "utils.h"
 
-#include <LCEVC/lcevc_dec.h>
 #include <gtest/gtest.h>
+#include <LCEVC/lcevc_dec.h>
 
 #include <algorithm>
 #include <array>
@@ -150,6 +159,10 @@ public:
     {
         // Create with all default configs, no events.
         ASSERT_EQ(LCEVC_CreateDecoder(&m_decHdl, {}), LCEVC_Success);
+
+        // Disable logging so we don't get spammed with "bad stream" messages.
+        ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_decHdl, "log_level", 0), LCEVC_Success);
+        ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_decHdl, "core_threads", 1), LCEVC_Success);
         ASSERT_EQ(LCEVC_InitializeDecoder(m_decHdl), LCEVC_Success);
 
         LCEVC_DefaultPictureDesc(&m_inputDesc, LCEVC_I420_8, 960, 540);

@@ -1,66 +1,81 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
-#include "LCEVC/lcevc_dec.h"
-//
-#include "LCEVC/utility/base_decoder.h"
-#include "LCEVC/utility/check.h"
-#include "LCEVC/utility/configure.h"
-#include "LCEVC/utility/md5.h"
-#include "LCEVC/utility/picture_functions.h"
-#include "LCEVC/utility/picture_layout.h"
-#include "LCEVC/utility/picture_lock.h"
-#include "LCEVC/utility/raw_writer.h"
-#include "LCEVC/utility/types.h"
-#include "LCEVC/utility/types_cli11.h"
-#include "bin_writer.h"
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-//
-#include <CLI/CLI.hpp>
-#include <fmt/core.h>
-#include <fmt/ostream.h>
-#include <xxhash.h>
-//
+#include "bin_writer.h"
 #include "hash.h"
 
+#include <CLI/CLI.hpp> // NOLINT(misc-include-cleaner)
+#include <fmt/core.h>
+#include <fmt/ostream.h>
+#include <LCEVC/lcevc_dec.h>
+#include <LCEVC/utility/base_decoder.h>
+#include <LCEVC/utility/check.h>
+#include <LCEVC/utility/chrono.h>
+#include <LCEVC/utility/configure.h>
+#include <LCEVC/utility/picture_functions.h>
+#include <LCEVC/utility/picture_layout.h>
+#include <LCEVC/utility/raw_writer.h>
+
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
+#include <limits>
+#include <map>
 #include <memory>
+#include <ostream>
 #include <string>
-#include <string_view>
 #include <vector>
 
 using namespace lcevc_dec::utility;
 
 // Check if an LCEVC handle is null
 template <typename H>
-bool isNull(H handle)
+inline bool isNull(H handle)
 {
     return handle.hdl == 0;
 }
 
 int main(int argc, char** argv)
 {
+    // Inputs
     std::string inputFile;
     std::string inputFormat;
     std::string inputLcevcFile;
     std::string inputBaseFile;
     LCEVC_ColorFormat baseFormat{};
-    bool baseExternal = false;
+    bool baseExternal{false};
+    // Outputs
     std::string outputRawFile;
     std::string outputBaseRawFile;
     std::string outputBinFile;
     std::string outputHashFile;
     std::string outputOplFile;
     std::string hashType;
+    uint32_t outputFrameLimit{0};
+    // Decoding config
     std::string configurationJson;
+    int32_t ditherStrength{-1};
+    bool simulatePadding{false};
     bool verbose{false};
 
-    CLI::App app{"LCEVC_DEC Test Harness"};
+    CLI::App app{"LCEVCdec Test Harness"};
+    // Input
     app.add_option("-i,--input", inputFile, "Input file");
+    app.add_option(",--input-format", inputFormat, "Override input stream format");
     app.add_option("-l,--lcevc", inputLcevcFile, "Input LCEVC file, BIN");
     app.add_option("-b,--base", inputBaseFile, "Input base file, RAW");
-    app.add_option(",--input-format", inputFormat, "Override input stream format");
     app.add_option("-f,--base-format", baseFormat, "Override input file base format")->default_val(LCEVC_ColorFormat_Unknown);
     app.add_flag("--base-external", baseExternal, "Use externally allocated memory for base pictures.");
+    // Output
     app.add_option("-o,--output", outputRawFile, "Output file, RAW");
     app.add_option("--output-base", outputBaseRawFile, "Output base file, RAW");
     app.add_option("--output-bin", outputBinFile, "Output enhancement file, BIN");
@@ -68,8 +83,14 @@ int main(int argc, char** argv)
     app.add_option("--output-opl", outputOplFile,
                    "Output hashes per frame, per plane as CSV (Conformance OPL format)");
     app.add_option("-t,--hash-type", hashType, "Type of hash to use: xxhash or md5")->default_val("xxhash");
+    app.add_option("--output-limit", outputFrameLimit, "Output frame limit");
+    // Decoding config
     app.add_option("-c,--configuration", configurationJson,
                    "JSON configuration (Inline json, or json filename)");
+    app.add_option("--dither-strength", ditherStrength,
+                   "Dither strength with which to override the stream's dithering");
+    app.add_flag("--simulate-padding", simulatePadding,
+                 "Pad input stride rounded to the next power of 2 of the surface width");
     app.add_flag("-v,--verbose", verbose, "Enable verbose logging");
 
     try {
@@ -82,29 +103,25 @@ int main(int argc, char** argv)
     std::unique_ptr<BaseDecoder> baseDecoder;
 
     if (!inputFile.empty()) {
-        baseDecoder = createBaseDecoderLibAV(inputFile, inputFormat, baseFormat);
+        baseDecoder = createBaseDecoderLibAV(inputFile, inputFormat, baseFormat, verbose);
+        if (!baseDecoder) {
+            fmt::print("Could not open input {}\n", inputFile);
+            return EXIT_FAILURE;
+        }
     } else if (!inputLcevcFile.empty() && !inputBaseFile.empty()) {
         baseDecoder = createBaseDecoderBin(inputBaseFile, inputLcevcFile);
+        if (!baseDecoder) {
+            fmt::print("Could not open input.\nBase: {}\nLCEVC: {}\n", inputBaseFile, inputLcevcFile);
+            return EXIT_FAILURE;
+        }
     } else {
         fmt::print("No input specified\n");
         return EXIT_FAILURE;
     }
 
-    if (!baseDecoder) {
-        fmt::print("Could not open input {}\n", inputLcevcFile);
-        return EXIT_FAILURE;
-    }
-
-    // RAW outputs
+    // RAW outputs - initialised once picture layouts are known
     std::unique_ptr<RawWriter> outputBaseRaw;
-    if (!outputBaseRawFile.empty()) {
-        outputBaseRaw = createRawWriter(outputBaseRawFile);
-    }
-
     std::unique_ptr<RawWriter> outputRaw;
-    if (!outputRawFile.empty()) {
-        outputRaw = createRawWriter(outputRawFile);
-    }
 
     // Overall Hashing
     std::unique_ptr<std::ostream> outputHash;
@@ -148,12 +165,25 @@ int main(int argc, char** argv)
 
     // Apply a JSON config
     if (!configurationJson.empty()) {
-        configureDecoderFromJson(decoder, configurationJson);
+        if (configureDecoderFromJson(decoder, configurationJson) != LCEVC_Success) {
+            fmt::print("JSON configuration error - invalid parameter name or type in JSON\n");
+            return EXIT_FAILURE;
+        }
     }
 
-    // Simple command line option for verbose logging
+    if (simulatePadding && !baseExternal) {
+        fmt::print("base-external must be enabled when using simulate-padding\n");
+        return EXIT_FAILURE;
+    }
+
+    // Configure LCEVC_Decoder
+
     if (verbose) {
-        LCEVC_ConfigureDecoderInt(decoder, "log_level", 5);
+        // Simple command line option for verbose logging
+        VN_LCEVC_CHECK(LCEVC_ConfigureDecoderInt(decoder, "log_level", LCEVC_LogTrace));
+    }
+    if (ditherStrength > -1) {
+        VN_LCEVC_CHECK(LCEVC_ConfigureDecoderInt(decoder, "dither_strength", ditherStrength));
     }
 
     VN_LCEVC_CHECK(LCEVC_InitializeDecoder(decoder));
@@ -167,15 +197,23 @@ int main(int argc, char** argv)
 
     LCEVC_PictureDesc outputDesc;
     // Use 2x2 as a safe small size
+    //    LCEVC_DefaultPictureDesc(&outputDesc, LCEVC_NV12_8, 2, 2);
     LCEVC_DefaultPictureDesc(&outputDesc, baseDecoder->description().colorFormat, 2, 2);
     VN_LCEVC_CHECK(LCEVC_AllocPicture(decoder, &outputDesc, &outputPicture));
 
     // Output frame counter
     uint32_t inputEnhancedCount{0};
     uint32_t outputFrameCount{0};
+    MilliSecondF64 latencyTotal{0};
+    std::map<int64_t, TimePoint> frameStartMap = {};
+    std::vector<TimePoint> frameEndTimes = {};
 
     // Frame loop - consume data from base
     while (baseDecoder->update()) {
+        if (outputFrameLimit > 0 && outputFrameCount >= outputFrameLimit) {
+            break;
+        }
+
         // Make sure LCEVC data is sent before base frame
         if (baseDecoder->hasEnhancement()) {
             // Fetch encoded enhancement data from base decoder
@@ -191,6 +229,7 @@ int main(int argc, char** argv)
                 }
                 baseDecoder->clearEnhancement();
                 ++inputEnhancedCount;
+                frameStartMap.insert({enhancementData.timestamp, enhancementData.baseDecodeStart});
             }
         }
 
@@ -200,11 +239,21 @@ int main(int argc, char** argv)
             if (baseExternal) {
                 // Allocate an external buffer and copy base image into it
                 LCEVC_PictureBufferDesc pictureBufferDesc = {nullptr, baseImage.size, {0}, LCEVC_Access_Read};
-                pictureBufferDesc.data = new uint8_t[baseImage.size]; // NOLINT:cppcoreguidelines-owning-memory
-                memcpy(pictureBufferDesc.data, baseImage.ptr, baseImage.size);
 
-                VN_LCEVC_CHECK(LCEVC_AllocPictureExternal(decoder, &baseDecoder->description(),
-                                                          &pictureBufferDesc, nullptr, &basePicture));
+                if (simulatePadding) {
+                    LCEVC_PicturePlaneDesc picturePlaneDesc[PictureLayout::kMaxPlanes] = {};
+                    VN_LCEVC_CHECK(createPaddedDesc(baseDecoder->description(), baseImage.ptr,
+                                                    &pictureBufferDesc, picturePlaneDesc));
+
+                    VN_LCEVC_CHECK(LCEVC_AllocPictureExternal(decoder, &baseDecoder->description(),
+                                                              &pictureBufferDesc, picturePlaneDesc,
+                                                              &basePicture));
+                } else {
+                    pictureBufferDesc.data = new uint8_t[baseImage.size]; // NOLINT:cppcoreguidelines-owning-memory
+                    VN_LCEVC_CHECK(LCEVC_AllocPictureExternal(decoder, &baseDecoder->description(),
+                                                              &pictureBufferDesc, nullptr, &basePicture));
+                    memcpy(pictureBufferDesc.data, baseImage.ptr, baseImage.size);
+                }
             } else {
                 VN_LCEVC_CHECK(LCEVC_AllocPicture(decoder, &baseDecoder->description(), &basePicture));
                 VN_LCEVC_CHECK(copyPictureFromMemory(decoder, basePicture, baseImage.ptr, baseImage.size));
@@ -213,8 +262,14 @@ int main(int argc, char** argv)
             baseDecoder->clearImage();
 
             // Generate output image and hash from the picture
-            if (outputBaseRaw) {
-                outputBaseRaw->write(decoder, basePicture);
+            if (!outputBaseRawFile.empty()) {
+                if (!outputBaseRaw) {
+                    outputBaseRaw =
+                        createRawWriter(baseDecoder->layout().makeRawFilename(outputBaseRawFile));
+                }
+                VN_UTILITY_CHECK_MSG(
+                    outputBaseRaw->write(decoder, basePicture),
+                    "Cannot write raw base output image, likely a picture format issue");
             }
 
             if (baseHash) {
@@ -222,12 +277,12 @@ int main(int argc, char** argv)
             }
         }
 
-        if (!isNull(basePicture)) {
-            // Try to send base picture into LCEVC decoder
-            if (VN_LCEVC_AGAIN(LCEVC_SendDecoderBase(decoder, basePictureTimestamp, false,
-                                                     basePicture, 1000000, nullptr))) {
-                basePicture = LCEVC_PictureHandle{};
-            }
+        // Try to send base picture into LCEVC decoder (since this is a testing program, don't ever
+        // timeout).
+        if (!isNull(basePicture) &&
+            VN_LCEVC_AGAIN(LCEVC_SendDecoderBase(decoder, basePictureTimestamp, false, basePicture,
+                                                 std::numeric_limits<uint32_t>::max(), nullptr))) {
+            basePicture = LCEVC_PictureHandle{};
         }
 
         {
@@ -238,9 +293,11 @@ int main(int argc, char** argv)
                     // Release external buffer
                     LCEVC_PictureBufferDesc pictureBufferDesc;
                     VN_LCEVC_CHECK(LCEVC_GetPictureBuffer(decoder, doneBasePicture, &pictureBufferDesc));
-                    delete pictureBufferDesc.data; // NOLINT:cppcoreguidelines-owning-memory
+                    VN_LCEVC_CHECK(LCEVC_FreePicture(decoder, doneBasePicture));
+                    delete[] pictureBufferDesc.data; // NOLINT:cppcoreguidelines-owning-memory
+                } else {
+                    VN_LCEVC_CHECK(LCEVC_FreePicture(decoder, doneBasePicture));
                 }
-                VN_LCEVC_CHECK(LCEVC_FreePicture(decoder, doneBasePicture));
             }
         }
 
@@ -262,11 +319,19 @@ int main(int argc, char** argv)
                 LCEVC_PictureDesc desc{};
                 VN_LCEVC_CHECK(LCEVC_GetPictureDesc(decoder, decodedPicture, &desc));
 
+                const TimePoint end = getTimePoint();
+                frameEndTimes.push_back(end);
+                latencyTotal += (end - frameStartMap[decodeInformation.timestamp]);
                 fmt::print("Frame {}: {:#08x} {}x{}\n", outputFrameCount,
                            decodeInformation.timestamp, desc.width, desc.height);
 
-                if (outputRaw) {
-                    outputRaw->write(decoder, decodedPicture);
+                if (!outputRawFile.empty()) {
+                    if (!outputRaw) {
+                        outputRaw = createRawWriter(PictureLayout(desc).makeRawFilename(outputRawFile));
+                    }
+                    VN_UTILITY_CHECK_MSG(
+                        outputRaw->write(decoder, decodedPicture),
+                        "Cannot write raw output image, likely a picture format issue");
                 }
 
                 if (highHash) {
@@ -296,5 +361,15 @@ int main(int argc, char** argv)
         fmt::print(*outputHash, "{{\n    \"base\":\"{}\",\n    \"high\":\"{}\"\n}}\n",
                    baseHash->hexDigest(), highHash->hexDigest());
     }
+    MilliSecondF64 frameTimeTotal{0};
+    if (frameEndTimes.size() > 2) {
+        for (int32_t i = 0; i < static_cast<int32_t>(frameEndTimes.size()) - 1; i++) {
+            frameTimeTotal += frameEndTimes[i + 1] - frameEndTimes[i];
+        }
+    }
+    const auto frameTime = frameTimeTotal.count() / outputFrameCount;
+    const auto latency = latencyTotal.count() / outputFrameCount;
+    fmt::print("Average frame latency: {:.4}ms, frame time (1 / throughput): {:.4}ms\n", latency, frameTime);
+
     return EXIT_SUCCESS;
 }

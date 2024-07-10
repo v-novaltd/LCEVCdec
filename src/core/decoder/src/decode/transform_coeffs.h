@@ -1,8 +1,19 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_TRANSFORM_COEFFS_H_
 #define VN_DEC_CORE_TRANSFORM_COEFFS_H_
 
 #include "common/platform.h"
+#include "common/threading.h"
 
 /*! \file
  *
@@ -45,7 +56,9 @@
 typedef struct Chunk Chunk_t;
 typedef struct CmdBuffer CmdBuffer_t;
 typedef struct Context Context_t;
+typedef struct Logger* Logger_t;
 typedef struct Memory* Memory_t;
+typedef struct ThreadManager ThreadManager_t;
 typedef struct TUState TUState_t;
 
 /*------------------------------------------------------------------------------*/
@@ -67,13 +80,23 @@ typedef enum TemporalCoeff
     TCIntraBlock = 2,
 } TemporalCoeff_t;
 
+typedef struct BlockClearJumps
+{
+    Memory_t memory;
+    uint32_t* jumps;
+    uint32_t count;
+    uint32_t capacity;
+    bool error;
+} * BlockClearJumps_t;
+
 /* clang-format off */
 
 /*! \brief Helper struct containing arguments necessary for
  *         decoding the transform coeffs */
 typedef struct TransformCoeffsDecodeArgs
 {
-    Context_t*         ctx;
+    Logger_t           log;
+    ThreadManager_t    threadManager;
     Chunk_t*           chunks;                       /**< Array of chunks for each transform layer to decode from. */
     Chunk_t*           temporalChunk;                /**< Single chunk for the temporal signal to decode from. */
     TransformCoeffs_t* coeffs;                       /**< Array of transform coeffs for each transform layer to decode into. */
@@ -81,7 +104,8 @@ typedef struct TransformCoeffsDecodeArgs
     int32_t            chunkCount;                   /**< Number of `chunks` to decode. */
     TUState_t*         tuState;                      /**< Transform unit state used for calculated co-ordinates. */
     bool               temporalUseReducedSignalling; /**< Indicates that the temporal data is compressed with reduced signaling. */
-    CmdBuffer_t*       tileClearCmdBuffer;           /**< Command buffer to insert tile clears into, must be valid if `temporalUseReducedSignalling` is true, otherwise it is unused. */
+    BlockClearJumps_t* blockClears;                  /**< Temporary dynamic array to store block clear locations when building cmdbuffers */
+    bool               useOldCodeLengths;            /**< Indicates that the stream uses old code lengths. */
 } TransformCoeffsDecodeArgs_t;
 
 /*! \brief Contains 2 lists of coefficients and runs respectively.
@@ -100,6 +124,10 @@ typedef struct TransformCoeffsData
 /* clang-format on */
 
 /*------------------------------------------------------------------------------*/
+
+bool blockClearJumpsInitialize(Memory_t memory, BlockClearJumps_t* blockClear);
+
+void blockClearJumpsRelease(BlockClearJumps_t blockClear);
 
 /*! Creates a new `TransformCoeffs_t` instance ready for decoding into.
  *

@@ -10,6 +10,8 @@ Via apt or a package manager in your distro:
 sudo apt install git git-lfs
 ```
 
+Ensure the `pre-commit` hook script is copied from `cmake/tools` to your `.git/hooks` to preform automatic linting before committing.
+
 ## Python
 
 Via apt or a package manager in your distro. You will also need pip, and it is recommended to install venv support.
@@ -46,10 +48,12 @@ Conan is installed and configured from the `lcevc_dec` repo, like so:
 
 ```shell
 pip install -r requirements.txt
+pip install -r cmake/tools/lint_requirements.txt
+pip install -r src/func_tests/test_requirements.txt
 export PATH=$PATH:~/.local/bin # or add this to the bottom of your ~/.bashrc
 conan config install "https://gitlab.com/v-nova-public/conan-profiles.git" --type=git
 
-sudo apt install libx11-xcb-dev libxcb* xorg-dev
+sudo apt install libx11-xcb-dev libxcb*
 python3 [CONAN_HOME]/linux/create_all_linux_conan_profiles.py
 ```
 
@@ -100,7 +104,7 @@ Now, install the NDK (this also requires java, if you don't have it already):
 ```shell
 sudo apt install openjdk-19-jre-headless
 sdkmanager "platforms;android-33"
-sdkmanager "ndk;21.4.7075529"
+sdkmanager "ndk;25.2.9519653"
 ```
 
-We use 21.4.7075529 here, as that's an NDK version which is known to work.
+We use 25.2.9519653 here, as that's an NDK version which is known to work.

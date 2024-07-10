@@ -1,4 +1,13 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decode/transform_coeffs.h"
 
@@ -31,12 +40,13 @@ typedef struct TransformCoeffs
 
 typedef struct DecodeChunkArgs
 {
-    Context_t* ctx;
+    Logger_t log;
     const Chunk_t* chunk;
     TransformCoeffs_t coeffs;
     const TUState_t* tuState;
-    CmdBuffer_t* tileClearCmdBuffer;
+    BlockClearJumps_t* blockClears;
     bool temporalUseReducedSignalling;
+    bool useOldCodeLengths;
 } DecodeChunkArgs_t;
 
 typedef bool (*DecodeChunkFunction_t)(DecodeChunkArgs_t* args);
@@ -67,6 +77,27 @@ static inline void transformCoeffsPush(TransformCoeffs_t coeffs, int16_t coeff, 
     coeffs->count++;
 }
 
+static inline void blockClearJumpPush(BlockClearJumps_t blockClears, uint32_t jump)
+{
+    if (blockClears->count >= blockClears->capacity) {
+        const uint32_t newCapacity = blockClears->capacity * CCGrowCapacityFactor;
+
+        uint32_t* newJumps =
+            VN_REALLOC_T_ARR(blockClears->memory, blockClears->jumps, uint32_t, newCapacity);
+
+        if (!newJumps) {
+            blockClears->error = true;
+            return;
+        }
+
+        blockClears->jumps = newJumps;
+        blockClears->capacity = newCapacity;
+    }
+
+    blockClears->jumps[blockClears->count] = jump;
+    blockClears->count++;
+}
+
 /*! Resets an instance ready to be decoded into without adjusting capacity. */
 static inline void transformCoeffsReset(TransformCoeffs_t coeffs)
 {
@@ -78,14 +109,12 @@ static inline void transformCoeffsReset(TransformCoeffs_t coeffs)
 /*! Decode a single layer chunk to coefficients and runs. */
 static bool decodeResidualCoeffs(DecodeChunkArgs_t* args)
 {
-    Context_t* ctx = args->ctx;
+    // Context_t* ctx = args->ctx;
     const int32_t tuCount = (int32_t)args->tuState->tuTotal;
     const Chunk_t* chunk = args->chunk;
 
-    VN_PROFILE_FUNCTION();
-
     EntropyDecoder_t decoder = {0};
-    entropyInitialise(ctx, &decoder, chunk, EDTDefault);
+    entropyInitialise(args->log, &decoder, chunk, EDTDefault, args->useOldCodeLengths);
 
     int16_t coeff = 0;
     int32_t tuIndex = 0;
@@ -105,28 +134,22 @@ static bool decodeResidualCoeffs(DecodeChunkArgs_t* args)
         transformCoeffsPush(args->coeffs, coeff, (uint32_t)run);
     }
 
-    entropyRelease(&decoder);
-
-    VN_PROFILE_STOP();
-
     return (tuIndex == tuCount) ? true : false;
 }
 
 /*! Decode a single temporal chunk to coefficients and runs. */
 static bool decodeTemporalCoeffs(DecodeChunkArgs_t* args)
 {
-    Context_t* ctx = args->ctx;
     const TUState_t* tuState = args->tuState;
     uint32_t tuIndex = 0;
-    uint8_t temporalSignal = 0;
+    TemporalSignal_t temporalSignal = TSInter;
     uint32_t blockTUCount = 0;
     uint32_t blockWidth = 0;
     uint32_t blockHeight = 0;
 
-    VN_PROFILE_FUNCTION();
-
     EntropyDecoder_t entropyDecoder = {0};
-    if (entropyInitialise(ctx, &entropyDecoder, args->chunk, EDTTemporal) != 0) {
+    if (entropyInitialise(args->log, &entropyDecoder, args->chunk, EDTTemporal,
+                          args->useOldCodeLengths) != 0) {
         return false;
     }
 
@@ -136,12 +159,10 @@ static bool decodeTemporalCoeffs(DecodeChunkArgs_t* args)
         /* If there's no data, we prime the temporal coeffs with a single
          * entry that indicates all the residual data is Inter */
         if (run == EntropyNoData) {
-            run = tuState->tuTotal;
+            run = (int32_t)tuState->tuTotal;
         }
 
-        TemporalCoeff_t temporal = (TemporalCoeff_t)temporalSignal;
-
-        if (args->temporalUseReducedSignalling && (temporal == TCIntra)) {
+        if (args->temporalUseReducedSignalling && (temporalSignal == (TemporalSignal_t)TCIntra)) {
             /* Reduced signaling has special logic for Intra signals, as
              * the run-length may be composed of an initial set of individual
              * transforms followed by a run of block clears, so we have to
@@ -170,7 +191,7 @@ static bool decodeTemporalCoeffs(DecodeChunkArgs_t* args)
             const uint32_t intraRun = tuIndex - startIndex;
 
             if (intraRun) {
-                transformCoeffsPush(args->coeffs, temporal, intraRun - 1);
+                transformCoeffsPush(args->coeffs, (int16_t)temporalSignal, intraRun - 1);
             }
 
             startIndex = tuIndex;
@@ -190,16 +211,18 @@ static bool decodeTemporalCoeffs(DecodeChunkArgs_t* args)
                 tuCoordsBlockDetails(tuState, x, y, &blockWidth, &blockHeight, &blockTUCount);
                 run--;
 
-                tuIndex += blockTUCount;
+                uint32_t currentIndex = tuIndex;
+                if (tuState->block.tuPerBlockRowRightEdge != 0 || y >= tuState->blockAligned.maxWholeBlockY) {
+                    currentIndex = tuCoordsBlockAlignedIndex(tuState, x, y);
+                }
+                blockClearJumpPush(*args->blockClears, currentIndex);
 
-                /* Ensure we store a command for clearing block at x & y back to zero,
-                 * all symbols under this are implicitly intra. */
-                cmdBufferAppendCoord(args->tileClearCmdBuffer, (int16_t)x, (int16_t)y);
+                tuIndex += blockTUCount;
             }
 
             /* The signal is intra, but it is a block clear, the distinction is useful
              * as an intra block clear can be skipped over, where as an intra signal run can't. */
-            temporal = TCIntraBlock;
+            temporalSignal = (TemporalSignal_t)TCIntraBlock;
             run = (int32_t)(tuIndex - startIndex);
         } else {
             tuIndex += run;
@@ -220,13 +243,9 @@ static bool decodeTemporalCoeffs(DecodeChunkArgs_t* args)
              *
              * Subtracting 1 ensures the temporal run-lengths behave similar to the residual
              * coeffs run-lengths when generating command buffers. */
-            transformCoeffsPush(args->coeffs, (int16_t)temporal, run - 1);
+            transformCoeffsPush(args->coeffs, (int16_t)temporalSignal, run - 1);
         }
     }
-
-    entropyRelease(&entropyDecoder);
-
-    VN_PROFILE_STOP();
 
     return (tuIndex == tuState->tuTotal) && !args->coeffs->error;
 }
@@ -248,6 +267,37 @@ int32_t decodeFunctor(void* data)
 }
 
 /*------------------------------------------------------------------------------*/
+
+bool blockClearJumpsInitialize(Memory_t memory, BlockClearJumps_t* blockClear)
+{
+    BlockClearJumps_t result = VN_CALLOC_T(memory, struct BlockClearJumps);
+
+    if (!result) {
+        return false;
+    }
+
+    result->memory = memory;
+    result->jumps = VN_MALLOC_T_ARR(memory, uint32_t, CCDefaultInitialCapacity);
+
+    if (!result->jumps) {
+        blockClearJumpsRelease(result);
+        return false;
+    }
+
+    result->capacity = CCDefaultInitialCapacity;
+
+    *blockClear = result;
+    return true;
+}
+
+void blockClearJumpsRelease(BlockClearJumps_t blockClear)
+{
+    if (blockClear) {
+        Memory_t memory = blockClear->memory;
+        VN_FREE(memory, blockClear->jumps);
+        VN_FREE(memory, blockClear);
+    }
+}
 
 bool transformCoeffsInitialize(Memory_t memory, TransformCoeffs_t* coeffs)
 {
@@ -318,10 +368,11 @@ bool transformCoeffsDecode(TransformCoeffsDecodeArgs_t* args)
             job->function = &decodeResidualCoeffs;
 
             DecodeChunkArgs_t* jobArgs = &job->args;
-            jobArgs->ctx = args->ctx;
+            jobArgs->log = args->log;
             jobArgs->chunk = chunk;
             jobArgs->coeffs = args->coeffs[i];
             jobArgs->tuState = args->tuState;
+            jobArgs->useOldCodeLengths = args->useOldCodeLengths;
             jobIndex++;
         }
     }
@@ -331,17 +382,18 @@ bool transformCoeffsDecode(TransformCoeffsDecodeArgs_t* args)
         job->function = &decodeTemporalCoeffs;
 
         DecodeChunkArgs_t* jobArgs = &job->args;
-        jobArgs->ctx = args->ctx;
+        jobArgs->log = args->log;
         jobArgs->chunk = args->temporalChunk;
         jobArgs->coeffs = args->temporalCoeffs;
         jobArgs->tuState = args->tuState;
-        jobArgs->tileClearCmdBuffer = args->tileClearCmdBuffer;
+        jobArgs->blockClears = args->blockClears;
         jobArgs->temporalUseReducedSignalling = args->temporalUseReducedSignalling;
+        jobArgs->useOldCodeLengths = args->useOldCodeLengths;
         jobIndex++;
     }
 
     /* Dispatch jobs */
-    return threadingExecuteJobs(&args->ctx->threadManager, decodeFunctor, jobData, jobIndex,
+    return threadingExecuteJobs(&args->threadManager, decodeFunctor, jobData, jobIndex,
                                 sizeof(DecodeJobData_t));
 }
 

@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_DEQUANT_H_
 #define VN_DEC_CORE_DEQUANT_H_
 
@@ -20,12 +30,19 @@ void quantMatrixDuplicateLOQs(QuantMatrix_t* matrix);
 
 /*! \brief Retrieve a pointer to the quant-matrix for LOQ-0 based upon the scaling
  *         mode used. */
-uint8_t* quantMatrixGetValues(QuantMatrix_t* matrix, LOQIndex_t index);
+static inline uint8_t* quantMatrixGetValues(QuantMatrix_t* matrix, LOQIndex_t index)
+{
+    if (!matrix || ((uint32_t)index >= LOQEnhancedCount)) {
+        return NULL;
+    }
+    return matrix->values[index];
+}
 
 /*------------------------------------------------------------------------------*/
 
-/*! \brief Contains dequantization settings for a single plane and LOQ. */
-#pragma pack(push, 8)
+/*! \brief Contains dequantization settings for a single plane and LOQ. Must be aligned to 16bit
+ *         boundaries, or else SSE generates a segfault */
+#pragma pack(push, 16)
 typedef struct Dequant
 {
     int16_t stepWidth[TSCount][RCLayerCountDDS]; /**< Step-width per-temporal type per-layer. */
@@ -49,6 +66,8 @@ typedef struct DequantParams
 
 /*------------------------------------------------------------------------------*/
 
+typedef struct DeserialisedData DeserialisedData_t;
+
 typedef struct DequantArgs
 {
     uint32_t planeCount;
@@ -62,6 +81,15 @@ typedef struct DequantArgs
     uint8_t chromaStepWidthMultiplier;
     QuantMatrix_t* quantMatrix;
 } DequantArgs_t;
+
+/*! \brief Copies a deserialised data struct to a dequant args struct.
+ *
+ * \param data     Input: an initialised DeserialisedData struct.
+ * \param args     Ouput: an uninitialised DequantArgs struct.
+ *
+ * \return 0 on success, otherwise -1
+ */
+int32_t initialiseDequantArgs(const DeserialisedData_t* data, DequantArgs_t* args);
 
 /*! \brief Calculates dequantization parameters to be used during decoding.
  *

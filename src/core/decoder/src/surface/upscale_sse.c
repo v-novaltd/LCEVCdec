@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "surface/upscale_sse.h"
 
 #if VN_CORE_FEATURE(SSE)
@@ -444,9 +454,9 @@ static inline void applyDither(__m128i values[2], const int8_t** ditherBuffer)
 }
 
 /*! \brief U8 Planar horizontal upscaling of 2 rows. */
-static void horizontalU8PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static void horizontalU8PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                   const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                  uint32_t xEnd, const Kernel_t* kernel, bool dither)
+                                  uint32_t xEnd, const Kernel_t* kernel)
 {
     const int16_t* kernelCoeffs = kernel->coeffs[0];
     const uint32_t kernelLength = kernel->length;
@@ -486,7 +496,7 @@ static void horizontalU8PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t*
 
     /* Run left edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsLeftValid(&coords)) {
-        horizontalU8Planar(ctx, in, out, base, width, coords.leftStart, coords.leftEnd, kernel, dither);
+        horizontalU8Planar(dither, in, out, base, width, coords.leftStart, coords.leftEnd, kernel);
     }
 
     /* Prime I/O */
@@ -497,8 +507,8 @@ static void horizontalU8PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t*
     int32_t storeOffset = (int32_t)(coords.start << 1);
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, alignU32(4 * (xEnd - xStart), 16));
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
     }
 
     /* Run middle SIMD loop */
@@ -541,14 +551,14 @@ static void horizontalU8PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t*
 
     /* Run right edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsRightValid(&coords)) {
-        horizontalU8Planar(ctx, in, out, base, width, coords.rightStart, coords.rightEnd, kernel, dither);
+        horizontalU8Planar(dither, in, out, base, width, coords.rightStart, coords.rightEnd, kernel);
     }
 }
 
 /*! \brief S16 Planar horizontal upscaling of 2 rows. */
-static void horizontalS16PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static void horizontalS16PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                    const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                   uint32_t xEnd, const Kernel_t* kernel, bool dither)
+                                   uint32_t xEnd, const Kernel_t* kernel)
 {
     const int16_t* kernelCoeffs = kernel->coeffs[0];
     const uint32_t kernelLength = kernel->length;
@@ -590,7 +600,7 @@ static void horizontalS16PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t
 
     /* Run left edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsLeftValid(&coords)) {
-        horizontalS16Planar(ctx, in, out, base, width, coords.leftStart, coords.leftEnd, kernel, dither);
+        horizontalS16Planar(dither, in, out, base, width, coords.leftStart, coords.leftEnd, kernel);
     }
 
     /* Prime I/O */
@@ -601,8 +611,8 @@ static void horizontalS16PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t
     int32_t storeOffset = (int32_t)(coords.start << 1);
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, alignU32(4 * (xEnd - xStart), 16));
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
     }
 
     /* Run middle SIMD loop */
@@ -645,15 +655,15 @@ static void horizontalS16PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t
 
     /* Run right edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsRightValid(&coords)) {
-        horizontalS16Planar(ctx, in, out, base, width, coords.rightStart, coords.rightEnd, kernel, dither);
+        horizontalS16Planar(dither, in, out, base, width, coords.rightStart, coords.rightEnd, kernel);
     }
 }
 
 /*! \brief U16 Planar horizontal upscaling of 2 rows. */
-static inline void horizontalU16PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static inline void horizontalU16PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                           const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                          uint32_t xEnd, const Kernel_t* kernel, bool dither,
-                                          uint16_t maxValue, bool is14Bit)
+                                          uint32_t xEnd, const Kernel_t* kernel, uint16_t maxValue,
+                                          bool is14Bit)
 {
     const int16_t* kernelCoeffs = kernel->coeffs[0];
     const uint32_t kernelLength = kernel->length;
@@ -697,8 +707,7 @@ static inline void horizontalU16PlanarSSE(Context_t* ctx, const uint8_t* in[2], 
 
     /* Run left edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsLeftValid(&coords)) {
-        horizontalUNPlanar(ctx, in, out, base, width, coords.leftStart, coords.leftEnd, kernel,
-                           dither, maxValue);
+        horizontalUNPlanar(dither, in, out, base, width, coords.leftStart, coords.leftEnd, kernel, maxValue);
     }
 
     /* Prime I/O */
@@ -709,8 +718,8 @@ static inline void horizontalU16PlanarSSE(Context_t* ctx, const uint8_t* in[2], 
     int32_t storeOffset = (int32_t)(coords.start << 1);
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, alignU32(4 * (xEnd - xStart), 16));
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
     }
 
     /* Run middle SIMD loop */
@@ -762,39 +771,39 @@ static inline void horizontalU16PlanarSSE(Context_t* ctx, const uint8_t* in[2], 
 
     /* Run right edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsRightValid(&coords)) {
-        horizontalUNPlanar(ctx, in, out, base, width, coords.rightStart, coords.rightEnd, kernel,
-                           dither, maxValue);
+        horizontalUNPlanar(dither, in, out, base, width, coords.rightStart, coords.rightEnd, kernel,
+                           maxValue);
     }
 }
 
 /*! \brief U10 Planar horizontal upscaling of 2 rows. */
-static void horizontalU10PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static void horizontalU10PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                    const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                   uint32_t xEnd, const Kernel_t* kernel, bool dither)
+                                   uint32_t xEnd, const Kernel_t* kernel)
 {
-    horizontalU16PlanarSSE(ctx, in, out, base, width, xStart, xEnd, kernel, dither, 1023, false);
+    horizontalU16PlanarSSE(dither, in, out, base, width, xStart, xEnd, kernel, 1023, false);
 }
 
 /*! \brief U12 Planar horizontal upscaling of 2 rows. */
-static void horizontalU12PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static void horizontalU12PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                    const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                   uint32_t xEnd, const Kernel_t* kernel, bool dither)
+                                   uint32_t xEnd, const Kernel_t* kernel)
 {
-    horizontalU16PlanarSSE(ctx, in, out, base, width, xStart, xEnd, kernel, dither, 4095, false);
+    horizontalU16PlanarSSE(dither, in, out, base, width, xStart, xEnd, kernel, 4095, false);
 }
 
 /*! \brief U14 Planar horizontal upscaling of 2 rows. */
-static void horizontalU14PlanarSSE(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static void horizontalU14PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                    const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                   uint32_t xEnd, const Kernel_t* kernel, bool dither)
+                                   uint32_t xEnd, const Kernel_t* kernel)
 {
-    horizontalU16PlanarSSE(ctx, in, out, base, width, xStart, xEnd, kernel, dither, 16383, true);
+    horizontalU16PlanarSSE(dither, in, out, base, width, xStart, xEnd, kernel, 16383, true);
 }
 
 /*! \brief NV12 horizontal upscaling of 2 rows. */
-static void horizontalU8NV12SSE(Context_t* ctx, const uint8_t* in[2], uint8_t* out[2],
+static void horizontalU8NV12SSE(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                 const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                uint32_t xEnd, const Kernel_t* kernel, bool dither)
+                                uint32_t xEnd, const Kernel_t* kernel)
 {
     const int16_t* kernelCoeffs = kernel->coeffs[0];
     const uint32_t kernelLength = kernel->length;
@@ -839,7 +848,7 @@ static void horizontalU8NV12SSE(Context_t* ctx, const uint8_t* in[2], uint8_t* o
 
     /* Run left edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsLeftValid(&coords)) {
-        horizontalU8NV12(ctx, in, out, base, width, coords.leftStart, coords.leftEnd, kernel, dither);
+        horizontalU8NV12(dither, in, out, base, width, coords.leftStart, coords.leftEnd, kernel);
     }
 
     /* Prime I/O */
@@ -852,8 +861,8 @@ static void horizontalU8NV12SSE(Context_t* ctx, const uint8_t* in[2], uint8_t* o
     storeOffset = (int32_t)(coords.start << 2);
 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
-    if (dither) {
-        ditherBuffer = ditherGetBuffer(ctx->dither, alignU32(8 * (xEnd - xStart), 32));
+    if (dither != NULL) {
+        ditherBuffer = ditherGetBuffer(dither, alignU32(8 * (xEnd - xStart), 32));
     }
 
     /* Run middle SIMD loop */
@@ -903,7 +912,7 @@ static void horizontalU8NV12SSE(Context_t* ctx, const uint8_t* in[2], uint8_t* o
 
     /* Run right edge non-SIMD loop */
     if (upscaleHorizontalCoordsIsRightValid(&coords)) {
-        horizontalU8NV12(ctx, in, out, base, width, coords.rightStart, coords.rightEnd, kernel, dither);
+        horizontalU8NV12(dither, in, out, base, width, coords.rightStart, coords.rightEnd, kernel);
     }
 }
 
@@ -1208,11 +1217,9 @@ static inline void verticalConvolveU16(const __m128i pels[UCInterleavedStore][UC
 }
 
 /*! \brief Vertical upscaling of 16 columns. */
-void verticalU8SSE(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                   uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalU8SSE(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                   uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    VN_UNUSED(ctx);
-
     __m128i kernelFwd[UCInterleavedStore];
     __m128i kernelRev[UCInterleavedStore];
     const int16_t* kernelCoeffs = kernel->coeffs[0];
@@ -1315,11 +1322,9 @@ void verticalU8SSE(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t
     }
 }
 
-void verticalS16SSE(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                    uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
+void verticalS16SSE(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                    uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    VN_UNUSED(ctx);
-
     __m128i kernelFwd[UCInterleavedStore];
     __m128i kernelRev[UCInterleavedStore];
     const int16_t* kernelCoeffs = kernel->coeffs[0];
@@ -1374,12 +1379,10 @@ void verticalS16SSE(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_
     }
 }
 
-static void verticalU16SSE(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                           uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height,
-                           const Kernel_t* kernel, uint16_t maxValue)
+static void verticalU16SSE(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                           uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel,
+                           uint16_t maxValue)
 {
-    VN_UNUSED(ctx);
-
     __m128i kernelFwd[UCInterleavedStore];
     __m128i kernelRev[UCInterleavedStore];
     const int16_t* kernelCoeffs = kernel->coeffs[0];
@@ -1438,25 +1441,22 @@ static void verticalU16SSE(Context_t* ctx, const uint8_t* in, uint32_t inStride,
     }
 }
 
-static void verticalU10SSE(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                           uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height,
-                           const Kernel_t* kernel)
+static void verticalU10SSE(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                           uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalU16SSE(ctx, in, inStride, out, outStride, y, rows, height, kernel, 1023);
+    verticalU16SSE(in, inStride, out, outStride, y, rows, height, kernel, 1023);
 }
 
-static void verticalU12SSE(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                           uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height,
-                           const Kernel_t* kernel)
+static void verticalU12SSE(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                           uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalU16SSE(ctx, in, inStride, out, outStride, y, rows, height, kernel, 4095);
+    verticalU16SSE(in, inStride, out, outStride, y, rows, height, kernel, 4095);
 }
 
-static void verticalU14SSE(Context_t* ctx, const uint8_t* in, uint32_t inStride, uint8_t* out,
-                           uint32_t outStride, uint32_t y, uint32_t rows, uint32_t height,
-                           const Kernel_t* kernel)
+static void verticalU14SSE(const uint8_t* in, uint32_t inStride, uint8_t* out, uint32_t outStride,
+                           uint32_t y, uint32_t rows, uint32_t height, const Kernel_t* kernel)
 {
-    verticalU16SSE(ctx, in, inStride, out, outStride, y, rows, height, kernel, 16383);
+    verticalU16SSE(in, inStride, out, outStride, y, rows, height, kernel, 16383);
 }
 
 /*------------------------------------------------------------------------------*/

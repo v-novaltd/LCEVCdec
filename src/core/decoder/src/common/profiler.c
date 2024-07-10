@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "common/profiler.h"
 
 #include "common/log.h"
@@ -46,7 +56,8 @@ typedef struct ProfileData
 
 typedef struct ProfilerState
 {
-    Context_t* ctx;
+    Memory_t memory;
+    Logger_t log;
 
     volatile int32_t threadID;
     volatile int32_t unknownThreadID;
@@ -104,10 +115,10 @@ typedef struct ProfileStats
 
 #if VN_CORE_FEATURE(PROFILER)
 
-static inline char* duplicateStr(Context_t* ctx, const char* src)
+static inline char* duplicateStr(Memory_t memory, const char* src)
 {
     const size_t length = strlen(src) + 1;
-    char* dst = VN_MALLOC_T_ARR(ctx->memory, char, length + 1);
+    char* dst = VN_MALLOC_T_ARR(memory, char, length + 1);
 
     memcpy(dst, src, length);
 
@@ -144,7 +155,7 @@ static inline int32_t getUnknownThreadID(ProfilerState_t* profiler)
 static inline int32_t getCurrentThreadID(ProfilerState_t* profiler)
 {
     if (gCurrentThreadID == 0) {
-        VN_WARNING(profiler->ctx->log, "Warning current thread not registered - registering now\n");
+        VN_WARNING(profiler->log, "Warning current thread not registered - registering now\n");
 
         int32_t unknownID = getUnknownThreadID(profiler);
         char buff[128];
@@ -180,8 +191,8 @@ static inline SampleData_t* nextSampleData(ProfilerState_t* profiler)
     uint32_t sampleIndex = nextSampleDataIndex(profiler);
 
     if (sampleIndex >= kSampleDataSize) {
-        VN_WARNING(profiler->ctx->log, "Saturated sample buffer. Index = %u, Count = %u\n",
-                   sampleIndex, kSampleDataSize);
+        VN_WARNING(profiler->log, "Saturated sample buffer. Index = %u, Count = %u\n", sampleIndex,
+                   kSampleDataSize);
         profiler->flush = true;
         return &profiler->sampleDummy;
     }
@@ -189,12 +200,11 @@ static inline SampleData_t* nextSampleData(ProfilerState_t* profiler)
     return &profiler->sampleData[sampleIndex];
 }
 
-static inline void pushProfileID(Context_t* ctx, ProfileID_t id)
+static inline void pushProfileID(Logger_t log, ProfileID_t id)
 {
     if (gCurrentThreadStackIndex >= 64) {
-        VN_ERROR(ctx->log,
-                 "Profile stack error, either the stack is not deep enough, or you have a "
-                 "profile start without a stop\n");
+        VN_ERROR(log, "Profile stack error, either the stack is not deep enough, or you have a "
+                      "profile start without a stop\n");
         gCurrentThreadStackIndex = 0;
     }
 
@@ -202,12 +212,11 @@ static inline void pushProfileID(Context_t* ctx, ProfileID_t id)
     gCurrentThreadStackIndex += 1;
 }
 
-static inline ProfileID_t popProfileID(Context_t* ctx)
+static inline ProfileID_t popProfileID(Logger_t log)
 {
     if (gCurrentThreadStackIndex == 0) {
-        VN_ERROR(ctx->log,
-                 "Profile stack error, you are attempting to pop from the stack when it is "
-                 "empty, missing profile start\n");
+        VN_ERROR(log, "Profile stack error, you are attempting to pop from the stack when it is "
+                      "empty, missing profile start\n");
         return 0;
     }
 
@@ -219,12 +228,12 @@ static inline ProfileID_t popProfileID(Context_t* ctx)
 
 /*------------------------------------------------------------------------------*/
 
-int32_t profilerInitialise(Context_t* ctx)
+int32_t profilerInitialise(ProfilerState_t** profilerOut, Memory_t memory, Logger_t log)
 {
 #if VN_CORE_FEATURE(PROFILER)
-    VN_DEBUG(ctx->log, "Opening profiler\n");
+    VN_DEBUG(log, "Opening profiler\n");
 
-    ProfilerState_t* profiler = VN_CALLOC_T(ctx->memory, ProfilerState_t);
+    ProfilerState_t* profiler = VN_CALLOC_T(memory, ProfilerState_t);
 
     if (!profiler) {
         return -1;
@@ -234,8 +243,8 @@ int32_t profilerInitialise(Context_t* ctx)
     profiler->profileID = 0;
     profiler->profileNextIndex = 0;
     profiler->sampleNextIndex = 0;
-    profiler->sampleData = VN_CALLOC_T_ARR(ctx->memory, SampleData_t, kSampleDataSize);
-    profiler->profileData = VN_CALLOC_T_ARR(ctx->memory, ProfileData_t, kProfileDataSize);
+    profiler->sampleData = VN_CALLOC_T_ARR(memory, SampleData_t, kSampleDataSize);
+    profiler->profileData = VN_CALLOC_T_ARR(memory, ProfileData_t, kProfileDataSize);
     profiler->flush = false;
     profiler->lastFlush = false;
     profiler->flushed = false;
@@ -245,7 +254,7 @@ int32_t profilerInitialise(Context_t* ctx)
         goto error_exit;
     }
 
-    if (mutexInitialise(ctx->memory, &profiler->profileDataMutex) != 0) {
+    if (mutexInitialise(memory, &profiler->profileDataMutex) != 0) {
         goto error_exit;
     }
 
@@ -263,17 +272,18 @@ int32_t profilerInitialise(Context_t* ctx)
 #endif
 
     if (profiler->logFile) {
-        VN_DEBUG(ctx->log, "Successfully opened profiler log file\n");
+        VN_DEBUG(log, "Successfully opened profiler log file\n");
     } else {
-        VN_ERROR(ctx->log, "Failed to open profiler log file\n");
+        VN_ERROR(log, "Failed to open profiler log file\n");
     }
 
 #if VN_OS(WINDOWS)
     QueryPerformanceFrequency(&profiler->timeFrequency);
 #endif
 
-    ctx->profiler = profiler;
-    profiler->ctx = ctx;
+    profiler->log = log;
+    profiler->memory = memory;
+    *profilerOut = profiler;
 
     profilerRegisterThread(profiler, "main_thread");
 
@@ -281,24 +291,27 @@ int32_t profilerInitialise(Context_t* ctx)
 
 error_exit:
     if (profiler) {
-        VN_FREE(ctx->memory, profiler->sampleData);
-        VN_FREE(ctx->memory, profiler->profileData);
-        VN_FREE(ctx->memory, profiler);
+        VN_FREE(memory, profiler->sampleData);
+        VN_FREE(memory, profiler->profileData);
+        VN_FREE(memory, profiler);
     }
 
     return -1;
 
 #else
-    VN_UNUSED(ctx);
+    VN_UNUSED(profilerOut);
+    VN_UNUSED(memory);
+    VN_UNUSED(log);
     return 0;
 #endif
 }
 
-void profilerRelease(Context_t* ctx)
+void profilerRelease(ProfilerState_t** profilerOut, Memory_t memory)
 {
 #if VN_CORE_FEATURE(PROFILER)
-    ProfilerState_t* profiler = ctx->profiler;
+    assert(profilerOut);
 
+    ProfilerState_t* profiler = *profilerOut;
     if (!profiler) {
         return;
     }
@@ -314,17 +327,18 @@ void profilerRelease(Context_t* ctx)
     for (uint32_t i = 0; i < kProfileDataSize; ++i) {
         ProfileData_t* pd = &profiler->profileData[i];
         void* label = (void*)pd->label;
-        VN_FREE(ctx->memory, label);
+        VN_FREE(memory, label);
     }
 
     mutexRelease(profiler->profileDataMutex);
 
-    VN_FREE(ctx->memory, profiler->sampleData);
-    VN_FREE(ctx->memory, profiler->profileData);
-    VN_FREE(ctx->memory, profiler);
-    ctx->profiler = NULL;
+    VN_FREE(memory, profiler->sampleData);
+    VN_FREE(memory, profiler->profileData);
+    VN_FREE(memory, profiler);
+    *profilerOut = NULL;
 #else
-    VN_UNUSED(ctx);
+    VN_UNUSED(profilerOut);
+    VN_UNUSED(memory);
 #endif
 }
 
@@ -336,7 +350,7 @@ void profilerRegisterThread(ProfilerState_t* profiler, const char* label)
     }
 
     if (gCurrentThreadID != 0) {
-        VN_WARNING(profiler->ctx->log, "Warning duplicate thread registration: %s\n", label);
+        VN_WARNING(profiler->log, "Warning duplicate thread registration: %s\n", label);
     }
 
     gCurrentThreadID = nextThreadID(profiler);
@@ -369,7 +383,7 @@ ProfileID_t profilerRegisterProfile(ProfilerState_t* profiler, const char* label
 
     ProfileData_t* profileData = &profiler->profileData[profileIndex];
     profileData->id = nextProfileID(profiler);
-    profileData->label = duplicateStr(profiler->ctx, label);
+    profileData->label = duplicateStr(profiler->memory, label);
     profileData->file = file;
     profileData->line = line;
     profileData->threadID = getCurrentThreadID(profiler);
@@ -423,7 +437,7 @@ ProfileID_t profilerRetrieveProfile(ProfilerState_t* profiler, const char* file,
 
     ProfileData_t* profile = &profiler->profileData[profileIndex];
     profile->id = nextProfileID(profiler);
-    profile->label = duplicateStr(profiler->ctx, gLabelFormatBuffer);
+    profile->label = duplicateStr(profiler->memory, gLabelFormatBuffer);
     profile->file = file;
     profile->line = line;
     profile->threadID = 0; /* Retrieved profiles cannot be unique across threads. */
@@ -501,7 +515,7 @@ void profilerProfileStart(ProfilerState_t* profiler, ProfileID_t id)
     sampleData->type = SDTBegin;
     sampleData->pid = id;
     sampleData->time = getHighFrequencyTime(profiler);
-    pushProfileID(profiler->ctx, id);
+    pushProfileID(profiler->log, id);
 #else
     VN_UNUSED(profiler);
     VN_UNUSED(id);
@@ -513,7 +527,7 @@ void profilerProfileStop(ProfilerState_t* profiler)
 #if VN_CORE_FEATURE(PROFILER)
     SampleData_t* sampleData = nextSampleData(profiler);
     sampleData->type = SDTEnd;
-    sampleData->pid = popProfileID(profiler->ctx);
+    sampleData->pid = popProfileID(profiler->log);
     sampleData->time = getHighFrequencyTime(profiler);
 #else
     VN_UNUSED(profiler);
@@ -533,10 +547,10 @@ void profilerFlush(ProfilerState_t* profiler)
     }
 
     if (kDumpSamplesLabel) {
-        dumpSampleTimes = VN_CALLOC_T_ARR(profiler->ctx->memory, uint64_t, kDumpSampleCapacity);
+        dumpSampleTimes = VN_CALLOC_T_ARR(profiler->memory, uint64_t, kDumpSampleCapacity);
     }
 
-    VN_DEBUG(profiler->ctx->log, "Starting profiler flush\n");
+    VN_DEBUG(profiler->log, "Starting profiler flush\n");
 
     if (profiler->logFile) {
         for (uint32_t i = 0; i < kProfileDataSize; ++i) {
@@ -596,7 +610,7 @@ void profilerFlush(ProfilerState_t* profiler)
     }
 
     /* Process profiles to log out */
-    ProfileStats_t* stats = VN_CALLOC_T_ARR(profiler->ctx->memory, ProfileStats_t, profileDataSize);
+    ProfileStats_t* stats = VN_CALLOC_T_ARR(profiler->memory, ProfileStats_t, profileDataSize);
 
     /* Note that each thread has a unique entry per profile point. So no need to
      * worry about 2 profile points working on different threads at the same time.
@@ -680,7 +694,7 @@ void profilerFlush(ProfilerState_t* profiler)
 
     /* Log amalgamated stats
      * @todo: Track inclusive and exclusive sample time and log a hierarchical representation. */
-    VN_DEBUG(profiler->ctx->log, "Profiler Stats\n");
+    VN_DEBUG(profiler->log, "Profiler Stats\n");
 
     for (uint32_t i = 0; i < profileDataSize; ++i) {
         const ProfileStats_t* profileStat = &stats[i];
@@ -691,37 +705,37 @@ void profilerFlush(ProfilerState_t* profiler)
             const double maxTimeMS = profileStat->maxTime / 1000000.0;
             const double avgTimeMS = profileStat->accumTime / (profileStat->count * 1000000.0);
 
-            VN_DEBUG(profiler->ctx->log, "  %-40s - min: %fms, max: %fms, avg: %fms, count: %" PRIu64 "\n",
+            VN_DEBUG(profiler->log, "  %-40s - min: %fms, max: %fms, avg: %fms, count: %" PRIu64 "\n",
                      profile->label, minTimeMS, maxTimeMS, avgTimeMS, profileStat->count);
         }
     }
 
     /* Log dump samples */
     if (dumpSampleTimes) {
-        VN_DEBUG(profiler->ctx->log, "Profiler Dump Sample Data: %s\n", kDumpSamplesLabel);
+        VN_DEBUG(profiler->log, "Profiler Dump Sample Data: %s\n", kDumpSamplesLabel);
 
         if (dumpSampleCount) {
             /* @todo: This may interfer on platforms that interleave logging with other
              *        applications */
-            VN_DEBUG(profiler->ctx->log, "%f", dumpSampleTimes[0] / 1000000.0);
+            VN_DEBUG(profiler->log, "%f", dumpSampleTimes[0] / 1000000.0);
             for (uint32_t i = 1; i < dumpSampleCount; ++i) {
-                VN_DEBUG(profiler->ctx->log, ", %f", dumpSampleTimes[i] / 1000000.0);
+                VN_DEBUG(profiler->log, ", %f", dumpSampleTimes[i] / 1000000.0);
             }
-            VN_DEBUG(profiler->ctx->log, "\n");
+            VN_DEBUG(profiler->log, "\n");
         } else {
-            VN_DEBUG(profiler->ctx->log, "  No sample data\n");
+            VN_DEBUG(profiler->log, "  No sample data\n");
         }
     }
 
     /* Clean up after ourselves. */
-    VN_FREE(profiler->ctx->memory, stats);
-    VN_FREE(profiler->ctx->memory, dumpSampleTimes);
+    VN_FREE(profiler->memory, stats);
+    VN_FREE(profiler->memory, dumpSampleTimes);
 
     profiler->profileNextIndex = 0;
     profiler->sampleNextIndex = 0;
     profiler->flushed = true;
 
-    VN_DEBUG(profiler->ctx->log, "Finished flushing profiler - Profiles: %u, Samples: %u\n",
+    VN_DEBUG(profiler->log, "Finished flushing profiler - Profiles: %u, Samples: %u\n",
              profileDataSize, sampleDataSize);
 #else
     VN_UNUSED(profiler);

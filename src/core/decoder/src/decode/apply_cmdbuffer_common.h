@@ -1,43 +1,74 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_APPLY_CMDBUFFER_COMMON_H_
 #define VN_DEC_CORE_APPLY_CMDBUFFER_COMMON_H_
 
 #include "common/platform.h"
+#include "common/types.h"
+#include "surface/surface.h"
+
+#include <assert.h>
 
 /*------------------------------------------------------------------------------*/
 
-#define VN_APPLY_CMDBUFFER_PIXEL_LOOP_BEGIN(Pixel_t, transformSize)                          \
-    const int16_t* coords = args->coords;                                                    \
-    const int16_t* residuals = args->residuals;                                              \
-    VN_UNUSED(residuals);                                                                    \
-    Pixel_t* surfaceData = (Pixel_t*)surfaceGetLine(args->surface, 0);                       \
-    const size_t stride = surfaceGetStrideInPixels(args->surface);                           \
-    for (int32_t i = 0; i < args->count; ++i) {                                              \
-        const int16_t x = *coords++;                                                         \
-        const int16_t y = *coords++;                                                         \
-        Pixel_t* pixels = surfaceData + (y * stride) + x;                                    \
-        const int32_t pixelCount = minS32(transformSize, (int32_t)args->surface->width - x); \
-        const int32_t rowCount = minS32(transformSize, (int32_t)args->surface->height - y);
-
-#define VN_APPLY_CMDBUFFER_PIXEL_LOOP_END() }
-
-/*------------------------------------------------------------------------------*/
-
+typedef struct CmdBuffer CmdBuffer_t;
+typedef struct CmdBufferEntryPoint CmdBufferEntryPoint_t;
 typedef struct Highlight Highlight_t;
-typedef struct Surface Surface_t;
+typedef struct TileState TileState_t;
 
 /*------------------------------------------------------------------------------*/
 
 typedef struct ApplyCmdBufferArgs
 {
     const Surface_t* surface;
-    const int16_t* coords;
+    int16_t* surfaceData;
+    uint16_t surfaceStride;
+    uint32_t x;
+    uint32_t y;
     const int16_t* residuals;
-    int32_t count;
     const Highlight_t* highlight;
 } ApplyCmdBufferArgs_t;
 
+/*------------------------------------------------------------------------------*/
+
 typedef void (*ApplyCmdBufferFunction_t)(const ApplyCmdBufferArgs_t* args);
+
+typedef bool (*CmdBufferApplicator_t)(const TileState_t* tile, size_t entryPointIdx,
+                                      const Surface_t* surface, const Highlight_t* highlight);
+
+bool cmdBufferApplicatorBlockScalar(const TileState_t* tile, size_t entryPointIdx,
+                                    const Surface_t* surface, const Highlight_t* highlight);
+
+bool cmdBufferApplicatorBlockNEON(const TileState_t* tile, size_t entryPointIdx,
+                                  const Surface_t* surface, const Highlight_t* highlight);
+
+bool cmdBufferApplicatorBlockSSE(const TileState_t* tile, size_t entryPointIdx,
+                                 const Surface_t* surface, const Highlight_t* highlight);
+
+bool cmdBufferApplicatorSurfaceScalar(const TileState_t* tile, size_t entryPointIdx,
+                                      const Surface_t* surface, const Highlight_t* highlight);
+
+bool cmdBufferApplicatorSurfaceNEON(const TileState_t* tile, size_t entryPointIdx,
+                                    const Surface_t* surface, const Highlight_t* highlight);
+
+bool cmdBufferApplicatorSurfaceSSE(const TileState_t* tile, size_t entryPointIdx,
+                                   const Surface_t* surface, const Highlight_t* highlight);
+
+#define VN_UNUSED_CMDBUFFER_APPLICATOR() \
+    VN_UNUSED(tile);                     \
+    VN_UNUSED(entryPointIdx);            \
+    VN_UNUSED(surface);                  \
+    VN_UNUSED(highlight);                \
+    return false;
 
 /*------------------------------------------------------------------------------*/
 

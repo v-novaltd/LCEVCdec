@@ -1,12 +1,21 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 // Implementation of base::Decoder that uses libavcodec and libavfilter
 //
 #include "LCEVC/utility/base_decoder.h"
 //
 #include "LCEVC/utility/extract.h"
 #include "LCEVC/utility/picture_layout.h"
-#include "string_utils.h"
+#include "LCEVC/utility/string_utils.h"
 
 extern "C"
 {
@@ -32,18 +41,17 @@ extern "C"
 #include <cassert>
 #include <iostream>
 #include <memory>
-#include <string>
 #include <string_view>
 #include <vector>
 
 namespace lcevc_dec::utility {
 
 namespace {
-    // Generate an LVCEVC picture description for output of context, or filter if present
+    // Generate an LCEVC picture description for output of context, or filter if present
     LCEVC_PictureDesc lcevcPictureDesc(const AVCodecContext& ctx, const AVFilterLink* filterLink);
-    // Convert libabv codec type to LCEVC
+    // Convert libav codec type to LCEVC
     LCEVC_CodecType lcevcCodecType(enum AVCodecID avCodecID);
-    // Return a libav fitler string to convert to given color format
+    // Return a libav filter string to convert to given color format
     const char* libavFormatFilter(LCEVC_ColorFormat fmt);
     // Return a string for a libav error
     std::string libavError(int r);
@@ -51,7 +59,7 @@ namespace {
     uint32_t pocIncrement(AVCodecID codecId);
     // Handle libav log calls
     void logCallback(void* avcl, int level, const char* fmt, va_list args);
-    // Copy useful metadata between lkibav packets
+    // Copy useful metadata between libav packets
     void copyPacketMetadata(AVPacket* dst, const AVPacket* src);
 } // namespace
 
@@ -61,32 +69,32 @@ class BaseDecoderLibAV final : public BaseDecoder
 {
 public:
     BaseDecoderLibAV() = default;
-    ~BaseDecoderLibAV() final;
+    ~BaseDecoderLibAV() override;
 
     BaseDecoderLibAV(const BaseDecoderLibAV&) = delete;
     BaseDecoderLibAV(BaseDecoderLibAV&&) = delete;
     BaseDecoderLibAV& operator=(const BaseDecoderLibAV&) = delete;
     BaseDecoderLibAV& operator=(BaseDecoderLibAV&&) = delete;
 
-    const LCEVC_PictureDesc& description() const final { return m_pictureDesc; }
-    const PictureLayout& layout() const final { return m_pictureLayout; }
+    const LCEVC_PictureDesc& description() const override { return m_pictureDesc; }
+    const PictureLayout& layout() const override { return m_pictureLayout; }
 
-    int maxReorder() const final;
+    int maxReorder() const override;
 
-    bool hasImage() const final;
-    bool getImage(Data& data) const final;
-    void clearImage() final;
+    bool hasImage() const override;
+    bool getImage(Data& data) const override;
+    void clearImage() override;
 
-    bool hasEnhancement() const final;
-    bool getEnhancement(Data& data) const final;
-    void clearEnhancement() final;
+    bool hasEnhancement() const override;
+    bool getEnhancement(Data& data) const override;
+    void clearEnhancement() override;
 
-    bool update() final;
+    bool update() override;
 
 private:
     friend std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view source,
                                                                std::string_view sourceFormat,
-                                                               LCEVC_ColorFormat baseFormat);
+                                                               LCEVC_ColorFormat baseFormat, bool verbose);
     int openInput(std::string_view source, std::string_view sourceFormat);
     int openStream(AVMediaType type);
     int addFilter(std::string_view filters);
@@ -142,7 +150,9 @@ private:
         FlushingBase,
         FlushingFilter,
         Eof
-    } m_state = State::Start;
+    };
+
+    State m_state = State::Start;
 
     // State for generating monotonic Picture Order Count
     int64_t m_pocHighest = 0;
@@ -165,18 +175,18 @@ private:
     std::vector<uint8_t> m_enhancement;
 };
 
-int BaseDecoderLibAV::openInput(std::string_view source, std::string_view sourceFormat)
+int BaseDecoderLibAV::openInput(std::string_view input, std::string_view inputFormatStr)
 {
     const AVInputFormat* inputFormat = nullptr;
-    if (!sourceFormat.empty()) {
-        inputFormat = av_find_input_format(std::string(sourceFormat).c_str());
+    if (!inputFormatStr.empty()) {
+        inputFormat = av_find_input_format(std::string(inputFormatStr).c_str());
         if (!inputFormat) {
-            fmt::print("Unkonwn input format: {}\n", sourceFormat);
+            fmt::print("Unknown input format: {}\n", inputFormatStr);
             return -1;
         }
     }
 
-    if (int r = avformat_open_input(&m_fmtCtx, std::string(source).c_str(),
+    if (int r = avformat_open_input(&m_fmtCtx, std::string(input).c_str(),
                                     const_cast<AVInputFormat*>(inputFormat), nullptr);
         r < 0) {
         size_t errorBufferSize{64};
@@ -195,7 +205,7 @@ int BaseDecoderLibAV::openInput(std::string_view source, std::string_view source
 
     m_inputFormats = split(m_fmtCtx->iformat->name, ",");
 
-    // What sort of NAL unit delimitng should be used?
+    // What sort of NAL unit delimiting should be used?
     if (isInputFormat("mp4") || isInputFormat("dash")) {
         m_nalFormat = LCEVC_NALFormat_LengthPrefix;
     } else {
@@ -409,6 +419,8 @@ bool BaseDecoderLibAV::update()
                 }
             }
         }
+
+        m_enhancementData.baseDecodeStart = std::chrono::high_resolution_clock::now();
         // Maybe convert demuxed to video via parsing
         if ((m_demuxPacket->size != 0 || m_state == State::FlushingParser) && m_videoPacket->size == 0) {
             if (m_demuxPacket->size == 0) {
@@ -441,7 +453,7 @@ bool BaseDecoderLibAV::update()
                         parserOutSize);
                     memcpy(m_videoPacket->data, parserOutData, parserOutSize);
                     // Generate PTS from parsed output_picture_number if there is no PTS from container
-                    if (m_parserCtx->pts == static_cast<int64_t>(AV_NOPTS_VALUE)) {
+                    if (m_parserCtx->pts == AV_NOPTS_VALUE) {
                         m_videoPacket->pts = generateIncreasingPoc(
                             m_parserCtx->output_picture_number, m_videoPacket->flags & AV_PKT_FLAG_KEY);
                     } else {
@@ -464,11 +476,12 @@ bool BaseDecoderLibAV::update()
             m_enhancement.resize(m_videoPacket->size);
             uint32_t enhancementSize = 0;
             int64_t enhancementPts = m_videoPacket->pts;
+            int32_t extractResult = 0;
 
             if (m_removeEnhanced) {
                 // Extract enhanced data from AU, and remove enhancement NAL units
                 uint32_t nalOutSize = 0;
-                LCEVC_extractAndRemoveEnhancementFromNAL(
+                extractResult = LCEVC_extractAndRemoveEnhancementFromNAL(
                     m_videoPacket->data, m_videoPacket->size, m_nalFormat,
                     lcevcCodecType(m_videoDecCtx->codec_id), &nalOutSize, m_enhancement.data(),
                     static_cast<uint32_t>(m_enhancement.size()), &enhancementSize);
@@ -477,19 +490,23 @@ bool BaseDecoderLibAV::update()
                 m_basePacket->size = static_cast<int>(nalOutSize);
             } else {
                 // Extract enhanced data from AU, leaving enhancement NAL units in place
-                LCEVC_extractEnhancementFromNAL(
+                extractResult = LCEVC_extractEnhancementFromNAL(
                     m_videoPacket->data, m_videoPacket->size, m_nalFormat,
                     lcevcCodecType(m_videoDecCtx->codec_id), m_enhancement.data(),
                     static_cast<uint32_t>(m_enhancement.size()), &enhancementSize);
                 av_packet_ref(m_basePacket, m_videoPacket);
             }
+            if (extractResult < 0) {
+                fmt::print(stderr, "extract function failed, data {}, size {}\n",
+                           m_videoPacket->data, m_videoPacket->size);
+            }
 
             av_packet_unref(m_videoPacket);
 
-            // Truncate enhancement to actual size
-            m_enhancement.resize(enhancementSize);
+            if (extractResult == 1) {
+                // Truncate enhancement to actual size
+                m_enhancement.resize(enhancementSize);
 
-            if (enhancementSize) {
                 // Got some LCEVC data - return to client
                 m_enhancementData.ptr = m_enhancement.data();
                 m_enhancementData.size = static_cast<uint32_t>(m_enhancement.size());
@@ -589,8 +606,8 @@ int64_t BaseDecoderLibAV::generateIncreasingPoc(int64_t decodedPoc, bool isIdr)
 // The source can be anything supported by libav
 // If baseFormat is not Unknown, then the decoded images will be converted to the given format
 //
-std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view source, std::string_view sourceFormat,
-                                                    LCEVC_ColorFormat baseFormat)
+std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view input, std::string_view inputFormat,
+                                                    LCEVC_ColorFormat baseFormat, bool verbose)
 {
     auto decoder = std::make_unique<BaseDecoderLibAV>();
 
@@ -600,13 +617,17 @@ std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view source, std
         av_register_all();
 #endif
         av_log_set_callback(logCallback);
-        av_log_set_level(AV_LOG_ERROR);
-
         registered = true;
     }
 
+    if (verbose) {
+        av_log_set_level(AV_LOG_VERBOSE);
+    } else {
+        av_log_set_level(AV_LOG_ERROR);
+    }
+
     // Open container
-    if (decoder->openInput(source, sourceFormat) < 0) {
+    if (decoder->openInput(input, inputFormat) < 0) {
         return nullptr;
     }
 
@@ -639,6 +660,10 @@ std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view source, std
     const int imageBufferSize =
         av_image_get_buffer_size(decoder->m_pixelFormat, static_cast<int>(decoder->m_pictureDesc.width),
                                  static_cast<int>(decoder->m_pictureDesc.height), 1);
+    if (imageBufferSize < 0) {
+        fmt::print(stderr, "av_image_get_buffer_size error\n");
+        return nullptr;
+    }
     decoder->m_image.resize(imageBufferSize);
 
     return decoder;
@@ -658,6 +683,20 @@ namespace {
             case AV_PIX_FMT_YUV420P14LE: return LCEVC_I420_14_LE;
             case AV_PIX_FMT_YUV420P16LE: return LCEVC_I420_16_LE;
 #endif
+            case AV_PIX_FMT_YUV422P: return LCEVC_I422_8;
+            case AV_PIX_FMT_YUV422P10LE: return LCEVC_I422_10_LE;
+#if LIBAVCODEC_VERSION_MAJOR >= 59
+            case AV_PIX_FMT_YUV422P12LE: return LCEVC_I422_12_LE;
+            case AV_PIX_FMT_YUV422P14LE: return LCEVC_I422_14_LE;
+            case AV_PIX_FMT_YUV422P16LE: return LCEVC_I422_16_LE;
+#endif
+            case AV_PIX_FMT_YUV444P: return LCEVC_I444_8;
+            case AV_PIX_FMT_YUV444P10LE: return LCEVC_I444_10_LE;
+#if LIBAVCODEC_VERSION_MAJOR >= 59
+            case AV_PIX_FMT_YUV444P12LE: return LCEVC_I444_12_LE;
+            case AV_PIX_FMT_YUV444P14LE: return LCEVC_I444_14_LE;
+            case AV_PIX_FMT_YUV444P16LE: return LCEVC_I444_16_LE;
+#endif
             case AV_PIX_FMT_NV12: return LCEVC_NV12_8;
             case AV_PIX_FMT_NV21: return LCEVC_NV21_8;
             case AV_PIX_FMT_RGB24: return LCEVC_RGB_8;
@@ -673,7 +712,10 @@ namespace {
             case AV_PIX_FMT_GRAY14LE: return LCEVC_GRAY_14_LE;
 #endif
             case AV_PIX_FMT_GRAY16LE: return LCEVC_GRAY_16_LE;
-            default: return LCEVC_ColorFormat_Unknown;
+            default: {
+                fmt::print("base_decoder_libav: Couldn't deduce format from AVPixelFormat ({}).\n", fmt);
+                return LCEVC_ColorFormat_Unknown;
+            }
         }
     }
 
@@ -723,8 +765,8 @@ namespace {
             desc.sampleAspectRatioDen = filterLink->sample_aspect_ratio.den;
         } else {
             // Get picture format from codec context
-            desc.width = ctx.coded_width;
-            desc.height = ctx.coded_height;
+            desc.width = ctx.width;
+            desc.height = ctx.height;
             desc.colorFormat = lcevcColorFormat(ctx.pix_fmt);
             desc.sampleAspectRatioNum = ctx.sample_aspect_ratio.num;
             desc.sampleAspectRatioDen = ctx.sample_aspect_ratio.den;
@@ -734,7 +776,7 @@ namespace {
         desc.colorRange = lcevcColorRange(ctx.color_range);
         desc.colorPrimaries = lcevcColorPrimaries(ctx.colorspace);
         desc.transferCharacteristics = lcevcColorTransferCharacteristics(ctx.color_trc);
-        // desc.hdrStaticInfo = lcevcHDRStaticInfot(ctx->?);
+        // desc.hdrStaticInfo = lcevcHDRStaticInfo(ctx->?);
 
         return desc;
     }
@@ -803,8 +845,8 @@ namespace {
 
     void logCallback(void* /*avcl*/, int level, const char* fmt, va_list args)
     {
-        char tmp[1024];
         if (level <= AV_LOG_ERROR) {
+            char tmp[1024];
             vsnprintf(tmp, sizeof(tmp) - 1, fmt, args);
             fmt::print("libav: {}\n", tmp);
         }

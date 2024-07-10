@@ -1,14 +1,26 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_TYPES_H_
 #define VN_DEC_CORE_TYPES_H_
 
 #include "common/platform.h"
 
+#include <assert.h>
 #include <LCEVC/PerseusDecoder.h>
+#include <math.h>
 
 /*------------------------------------------------------------------------------*/
 
-typedef struct Context Context_t;
+typedef struct Memory* Memory_t;
 
 /*------------------------------------------------------------------------------*/
 
@@ -118,7 +130,9 @@ int32_t planesTypePlaneCount(PlanesType_t type);
 typedef enum TransformType
 {
     TransformDD,
-    TransformDDS
+    TransformDDS,
+
+    TransformCount
 } TransformType_t;
 
 const char* transformTypeToString(TransformType_t type);
@@ -166,9 +180,11 @@ typedef enum QuantMatrixMode
 
 const char* quantMatrixModeToString(QuantMatrixMode_t mode);
 
+/* Block sizes. A block (if temporal is on) is 32x32 pixels, and 32 = 1 << 5. */
 enum BlockConstants
 {
     BSTemporal = 32,
+    BSTemporalShift = 5,
 };
 
 enum ResidualConstants
@@ -180,10 +196,15 @@ enum ResidualConstants
     RCMaxPlanes = 3
 };
 
+enum MetaCmdBufferConstants
+{
+    MaxCmdBufferEntryPoints = 16
+};
+
 typedef enum TemporalSignal
 {
-    TSInter = 0,
-    TSIntra = 1,
+    TSInter = 0, /* i.e. add */
+    TSIntra = 1, /* i.e. set */
     TSCount
 } TemporalSignal_t;
 
@@ -303,7 +324,7 @@ typedef enum Interleaving
 uint32_t interleavingGetChannelCount(Interleaving_t interleaving);
 
 int32_t interleavingGetChannelSkipOffset(Interleaving_t interleaving, uint32_t channelIdx,
-                                         int32_t* skip, int32_t* offset);
+                                         uint32_t* skip, uint32_t* offset);
 
 Interleaving_t interleavingFromAPI(perseus_interleaving interleaving);
 const char* interleavingToString(Interleaving_t interleaving);
@@ -334,19 +355,44 @@ bool fixedPointIsValid(FixedPoint_t type);
 
 BitDepth_t bitdepthFromFixedPoint(FixedPoint_t type);
 
-int16_t fpS15ToS7(int16_t val);
-int16_t fpU16ToS16(uint16_t val, int16_t shift);
-uint16_t fpS16ToU16(int32_t val, int16_t shift, int16_t rounding, int16_t signOffset, uint16_t maxValue);
+/* This function is used help convert upsample kernel coeffs for 8bit pipeline. 64 is 2^6. */
+static inline int16_t fpS15ToS7(int16_t val) { return (int16_t)((val + 64) >> 7); }
 
-int16_t fpU8ToS8(uint8_t val);
-int16_t fpU10ToS10(uint16_t val);
-int16_t fpU12ToS12(uint16_t val);
-int16_t fpU14ToS14(uint16_t val);
+static inline int16_t fpU16ToS16(uint16_t val, int16_t shift)
+{
+    int16_t res = (int16_t)(val << shift);
+    res -= 0x4000;
+    return res;
+}
 
-uint8_t fpS8ToU8(int32_t val);
-uint16_t fpS10ToU10(int32_t val);
-uint16_t fpS12ToU12(int32_t val);
-uint16_t fpS14ToU14(int32_t val);
+static inline uint16_t fpS16ToU16(int32_t val, int16_t shift, int16_t rounding, int16_t signOffset,
+                                  uint16_t maxValue)
+{
+    int16_t res = (int16_t)(((val + rounding) >> shift) + signOffset);
+
+    if (res > (int16_t)maxValue) {
+        return maxValue;
+    }
+
+    if (res < 0x00) {
+        return 0x00;
+    }
+
+    return (uint16_t)res;
+}
+
+static inline int16_t fpU8ToS8(uint8_t val) { return fpU16ToS16(val, 7); }
+static inline int16_t fpU10ToS10(uint16_t val) { return fpU16ToS16(val, 5); }
+static inline int16_t fpU12ToS12(uint16_t val) { return fpU16ToS16(val, 3); }
+static inline int16_t fpU14ToS14(uint16_t val) { return fpU16ToS16(val, 1); }
+
+static inline uint8_t fpS8ToU8(int32_t val)
+{
+    return (uint8_t)fpS16ToU16(val, 7, 0x40, 0x80, 0xFF);
+}
+static inline uint16_t fpS10ToU10(int32_t val) { return fpS16ToU16(val, 5, 0x10, 0x200, 0x3FF); }
+static inline uint16_t fpS12ToU12(int32_t val) { return fpS16ToU16(val, 3, 0x4, 0x800, 0xFFF); }
+static inline uint16_t fpS14ToU14(int32_t val) { return fpS16ToU16(val, 1, 0x1, 0x2000, 0x3FFF); }
 
 /*! \brief Maps a floating-point value in the range of 0.0 to 1.0 onto an
  *         unsigned 16-bit integer. */
@@ -360,23 +406,92 @@ FixedPointDemotionFunction_t fixedPointGetDemotionFunction(FixedPoint_t unsigned
 
 /*------------------------------------------------------------------------------*/
 
-uint16_t alignU16(uint16_t value, uint16_t alignment);
-uint32_t alignU32(uint32_t value, uint32_t alignment);
-int32_t clampS32(int32_t value, int32_t minValue, int32_t maxValue);
-uint32_t clampU32(uint32_t value, uint32_t minValue, uint32_t maxValue);
-float clampF32(float value, float minValue, float maxValue);
-float floorF32(float value);
-int32_t minS32(int32_t x, int32_t y);
-uint32_t minU32(uint32_t x, uint32_t y);
-uint64_t minU64(uint64_t x, uint64_t y);
-int32_t maxS32(int32_t x, int32_t y);
-uint64_t maxU64(uint64_t x, uint64_t y);
-size_t minSize(size_t x, size_t y);
-size_t maxSize(size_t x, size_t y);
-uint8_t saturateU8(int32_t value);
-int16_t saturateS16(int32_t value);
-uint16_t saturateUN(int32_t value, uint16_t maxValue);
-int32_t divideCeilS32(int32_t numerator, int32_t denominator);
+static inline uint16_t alignU16(uint16_t value, uint16_t alignment)
+{
+    if (alignment == 0) {
+        return value;
+    }
+
+    return (value + (alignment - 1)) & ~(alignment - 1);
+}
+
+static inline uint32_t alignU32(uint32_t value, uint32_t alignment)
+{
+    if (alignment == 0) {
+        return value;
+    }
+
+    return (value + (alignment - 1)) & ~(alignment - 1);
+}
+
+static inline int32_t clampS32(int32_t value, int32_t minValue, int32_t maxValue)
+{
+    return (value < minValue) ? minValue : (value > maxValue) ? maxValue : value;
+}
+
+static inline uint32_t clampU32(uint32_t value, uint32_t minValue, uint32_t maxValue)
+{
+    return (value < minValue) ? minValue : (value > maxValue) ? maxValue : value;
+}
+
+static inline float clampF32(float value, float minValue, float maxValue)
+{
+    return (value < minValue) ? minValue : (value > maxValue) ? maxValue : value;
+}
+
+static inline float floorF32(float value) { return floorf(value); }
+
+static inline int32_t minS16(int16_t x, int16_t y) { return x < y ? x : y; }
+
+static inline int32_t minS32(int32_t x, int32_t y) { return x < y ? x : y; }
+
+static inline uint8_t minU8(uint8_t x, uint8_t y) { return x < y ? x : y; }
+
+static inline uint16_t minU16(uint16_t x, uint16_t y) { return x < y ? x : y; }
+
+static inline uint32_t minU32(uint32_t x, uint32_t y) { return x < y ? x : y; }
+
+static inline uint64_t minU64(uint64_t x, uint64_t y) { return x < y ? x : y; }
+
+static inline int32_t maxS32(int32_t x, int32_t y) { return x > y ? x : y; }
+
+static inline int32_t maxU32(uint32_t x, uint32_t y) { return x > y ? x : y; }
+
+static inline uint64_t maxU64(uint64_t x, uint64_t y) { return x > y ? x : y; }
+
+static inline size_t minSize(size_t x, size_t y) { return x < y ? x : y; }
+
+static inline size_t maxSize(size_t x, size_t y) { return x > y ? x : y; }
+
+static inline uint8_t saturateU8(int32_t value)
+{
+    const int32_t result = (value < 0) ? 0 : (value > 255) ? 255 : value;
+    return (uint8_t)result;
+}
+
+static inline int16_t saturateS16(int32_t value)
+{
+    const int32_t result = (value < -32768) ? -32768 : (value > 32767) ? 32767 : value;
+    return (int16_t)result;
+}
+
+static inline uint16_t saturateUN(int32_t value, uint16_t maxValue)
+{
+    return (value < 0) ? 0 : (value > maxValue) ? maxValue : (uint16_t)value;
+}
+
+static inline int32_t divideCeilS32(int32_t numerator, int32_t denominator)
+{
+    /* This function is for ceiling a positive division. */
+    assert(numerator > 0);
+    assert(denominator > 0);
+
+    if (denominator == 0) {
+        return 0;
+    }
+
+    return (numerator + denominator - 1) / denominator;
+}
 
 /* Determines the bit index of the first non-zero bit from MSB to LSB.
  *
@@ -410,9 +525,25 @@ uint32_t alignTruncU32(uint32_t value, uint32_t alignment);
 
 /*------------------------------------------------------------------------------*/
 
+/* \brief Extract bits from the middle of a number.
+ *
+ * \param startBit The first bit that you want, inclusive
+ * \param endBit   The last bit that you want, exclusive
+ *
+ * \return         The bits in the specified interval, right-aligned. For example,
+ *                 extract(0xf0f1f2f3, 8, 20) returns 0x00000f1f
+ */
+static inline uint32_t extractBits(uint32_t data, uint8_t startBit, uint8_t endBit)
+{
+    const uint32_t mask = (1 << (endBit - startBit)) - 1;
+    return (data >> (32 - endBit)) & mask;
+}
+
+/*------------------------------------------------------------------------------*/
+
 /* \brief Helper function to perform a deep copy of a str.
  *
- * This copies str to dst if str is valid, and it's length is >= 1. If either
+ * This copies str to dst if str is valid, and its length is >= 1. If either
  * condition fails, then dst is set to NULL, and no error is reported.
  *
  * If dst is assigned, the user takes responsibility for calling free() on the
@@ -422,7 +553,7 @@ uint32_t alignTruncU32(uint32_t value, uint32_t alignment);
  * \param dst The destination to allocate and copy string into.
  *
  * \return 0 on success, otherwise -1 */
-int32_t strcpyDeep(Context_t* ctx, const char* str, const char** dst);
+int32_t strcpyDeep(Memory_t memory, const char* str, const char** dst);
 
 /*------------------------------------------------------------------------------*/
 

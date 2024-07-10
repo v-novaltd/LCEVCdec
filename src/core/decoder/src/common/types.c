@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "common/types.h"
 
 #include "common/memory.h"
@@ -198,6 +208,7 @@ const char* transformTypeToString(TransformType_t type)
     switch (type) {
         case TransformDD: return "DD";
         case TransformDDS: return "DDS";
+        case TransformCount: break;
     }
 
     return "Unknown";
@@ -425,8 +436,8 @@ typedef struct InterleavingInfo
 {
     uint32_t channelCount;
     uint32_t componentCount;
-    int32_t offset[4]; /* Initial offset mapping  */
-    int32_t skip[4];
+    uint32_t offset[4]; /* Initial offset mapping  */
+    uint32_t skip[4];
 } InterleavingInfo_t;
 
 enum InterleavingConstants
@@ -476,7 +487,7 @@ uint32_t interleavingGetChannelCount(Interleaving_t interleaving)
 }
 
 int32_t interleavingGetChannelSkipOffset(Interleaving_t interleaving, uint32_t channelIdx,
-                                         int32_t* skip, int32_t* offset)
+                                         uint32_t* skip, uint32_t* offset)
 {
     /* channelIdx maps to one of the following forms:
      *
@@ -654,51 +665,6 @@ BitDepth_t bitdepthFromFixedPoint(FixedPoint_t type)
     return Depth8;
 }
 
-/* This function is used help convert upsample kernel coeffs for 8bit pipeline */
-int16_t fpS15ToS7(int16_t val)
-{
-    /* 64 is 2^6 */
-    return (int16_t)((val + 64) >> 7);
-}
-
-int16_t fpU16ToS16(uint16_t val, int16_t shift)
-{
-    int16_t res = (int16_t)(val << shift);
-    res -= 0x4000;
-    return res;
-}
-
-uint16_t fpS16ToU16(int32_t val, int16_t shift, int16_t rounding, int16_t signOffset, uint16_t maxValue)
-{
-    int16_t res = (int16_t)(((val + rounding) >> shift) + signOffset);
-
-    if (res > (int16_t)maxValue) {
-        return maxValue;
-    }
-
-    if (res < 0x00) {
-        return 0x00;
-    }
-
-    return (uint16_t)res;
-}
-
-int16_t fpU8ToS8(uint8_t val) { return fpU16ToS16(val, 7); }
-
-int16_t fpU10ToS10(uint16_t val) { return fpU16ToS16(val, 5); }
-
-int16_t fpU12ToS12(uint16_t val) { return fpU16ToS16(val, 3); }
-
-int16_t fpU14ToS14(uint16_t val) { return fpU16ToS16(val, 1); }
-
-uint8_t fpS8ToU8(int32_t val) { return (uint8_t)fpS16ToU16(val, 7, 0x40, 0x80, 0xFF); }
-
-uint16_t fpS10ToU10(int32_t val) { return fpS16ToU16(val, 5, 0x10, 0x200, 0x3FF); }
-
-uint16_t fpS12ToU12(int32_t val) { return fpS16ToU16(val, 3, 0x4, 0x800, 0xFFF); }
-
-uint16_t fpS14ToU14(int32_t val) { return fpS16ToU16(val, 1, 0x1, 0x2000, 0x3FFF); }
-
 uint16_t f32ToU16(float val)
 {
     assert(val >= 0.0f && val <= 1.0f);
@@ -731,85 +697,6 @@ FixedPointDemotionFunction_t fixedPointGetDemotionFunction(FixedPoint_t unsigned
 
 /*------------------------------------------------------------------------------*/
 
-uint16_t alignU16(uint16_t value, uint16_t alignment)
-{
-    if (alignment == 0) {
-        return value;
-    }
-
-    return (value + (alignment - 1)) & ~(alignment - 1);
-}
-
-uint32_t alignU32(uint32_t value, uint32_t alignment)
-{
-    if (alignment == 0) {
-        return value;
-    }
-
-    return (value + (alignment - 1)) & ~(alignment - 1);
-}
-
-int32_t clampS32(int32_t value, int32_t minValue, int32_t maxValue)
-{
-    return (value < minValue) ? minValue : (value > maxValue) ? maxValue : value;
-}
-
-uint32_t clampU32(uint32_t value, uint32_t minValue, uint32_t maxValue)
-{
-    return (value < minValue) ? minValue : (value > maxValue) ? maxValue : value;
-}
-
-float clampF32(float value, float minValue, float maxValue)
-{
-    return (value < minValue) ? minValue : (value > maxValue) ? maxValue : value;
-}
-
-float floorF32(float value) { return floorf(value); }
-
-int32_t minS32(int32_t x, int32_t y) { return x < y ? x : y; }
-
-uint32_t minU32(uint32_t x, uint32_t y) { return x < y ? x : y; }
-
-uint64_t minU64(uint64_t x, uint64_t y) { return x < y ? x : y; }
-
-int32_t maxS32(int32_t x, int32_t y) { return x > y ? x : y; }
-
-uint64_t maxU64(uint64_t x, uint64_t y) { return x > y ? x : y; }
-
-size_t minSize(size_t x, size_t y) { return x < y ? x : y; }
-
-size_t maxSize(size_t x, size_t y) { return x > y ? x : y; }
-
-uint8_t saturateU8(int32_t value)
-{
-    const int32_t result = (value < 0) ? 0 : (value > 255) ? 255 : value;
-    return (uint8_t)result;
-}
-
-int16_t saturateS16(int32_t value)
-{
-    const int32_t result = (value < -32768) ? -32768 : (value > 32767) ? 32767 : value;
-    return (int16_t)result;
-}
-
-uint16_t saturateUN(int32_t value, uint16_t maxValue)
-{
-    return (value < 0) ? 0 : (value > maxValue) ? maxValue : (uint16_t)value;
-}
-
-int32_t divideCeilS32(int32_t numerator, int32_t denominator)
-{
-    /* This function is for ceiling a positive division. */
-    assert(numerator > 0);
-    assert(denominator > 0);
-
-    if (denominator == 0) {
-        return 0;
-    }
-
-    return (numerator + denominator - 1) / denominator;
-}
-
 size_t bitScanReverse(size_t value)
 {
 #if VN_OS(WINDOWS)
@@ -835,7 +722,7 @@ uint32_t alignTruncU32(uint32_t value, uint32_t alignment)
     return value & ~(alignment - 1);
 }
 
-int32_t strcpyDeep(Context_t* ctx, const char* str, const char** dst)
+int32_t strcpyDeep(Memory_t memory, const char* str, const char** dst)
 {
     const size_t strLen = str ? strlen(str) : 0;
     *dst = NULL;
@@ -844,7 +731,7 @@ int32_t strcpyDeep(Context_t* ctx, const char* str, const char** dst)
         return 0;
     }
 
-    char* newStr = VN_MALLOC_T_ARR(ctx->memory, char, strLen + 1);
+    char* newStr = VN_MALLOC_T_ARR(memory, char, strLen + 1);
 
     if (!newStr) {
         return -1;

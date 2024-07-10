@@ -1,11 +1,21 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 // Scoped type to manage a lock on an LCEVC_Picture
 //
 #ifndef VN_LCEVC_UTILITY_PICTURE_LOCK_H
 #define VN_LCEVC_UTILITY_PICTURE_LOCK_H
 
 #include "LCEVC/lcevc_dec.h"
+#include "LCEVC/utility/picture_layout.h"
 
 #include <cassert>
 #include <memory>
@@ -35,7 +45,7 @@ public:
     // Number of planes in image
     uint32_t numPlanes() const { return static_cast<uint32_t>(m_planeDescs.size()); }
 
-    // Get refernece to particular plane description
+    // Get reference to particular plane description
     const LCEVC_PicturePlaneDesc& planeDesc(uint32_t plane) const
     {
         assert(plane < m_planeDescs.size());
@@ -48,15 +58,20 @@ public:
     {
         assert(plane < m_planeDescs.size());
         assert(row < height(plane));
+        auto layout = PictureLayout(m_desc);
+        uint32_t topOffset = m_desc.cropTop >> layout.getPlaneWidthShift(layout.format(), plane);
+        uint32_t leftOffset = (m_desc.cropLeft * layout.sampleSize() * layout.planeInterleave(plane)) >>
+                              layout.getPlaneWidthShift(layout.format(), plane);
 
-        return static_cast<T*>(
-            static_cast<void*>(m_planeDescs[plane].firstSample +
-                               static_cast<size_t>(row * m_planeDescs[plane].rowByteStride)));
+        return static_cast<T*>(static_cast<void*>(
+            m_planeDescs[plane].firstSample +
+            static_cast<size_t>((row + topOffset) * m_planeDescs[plane].rowByteStride + leftOffset)));
     }
 
     // Get row size in bytes of given plane
     uint32_t rowSize(uint32_t plane) const;
     uint32_t height(uint32_t plane) const;
+    uint32_t numPlaneGroups() const;
 
     // Handle to locked picture
     LCEVC_PictureHandle picture() const { return m_picture; }
@@ -64,6 +79,7 @@ public:
 private:
     LCEVC_DecoderHandle m_decoder{};
     LCEVC_PictureHandle m_picture{};
+    LCEVC_PictureDesc m_desc{};
     LCEVC_PictureLockHandle m_lock{};
 
     std::vector<LCEVC_PicturePlaneDesc> m_planeDescs;

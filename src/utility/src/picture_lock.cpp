@@ -1,5 +1,14 @@
-// Copyright (c) V-Nova International Limited 2023. All rights reserved.
-//
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "LCEVC/utility/picture_lock.h"
 
 #include "LCEVC/utility/check.h"
@@ -12,9 +21,9 @@ PictureLock::PictureLock(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle pictur
     , m_picture(picture)
 {
     VN_LCEVC_CHECK(LCEVC_LockPicture(decoder, picture, access, &m_lock));
+    VN_LCEVC_CHECK(LCEVC_GetPictureDesc(decoder, picture, &m_desc));
 
     uint32_t numPlanes = 0;
-
     VN_LCEVC_CHECK(LCEVC_GetPicturePlaneCount(decoder, picture, &numPlanes));
     m_planeDescs.resize(numPlanes);
 
@@ -41,9 +50,8 @@ uint32_t PictureLock::rowSize(uint32_t planeIdx) const
     if (LCEVC_GetPictureDesc(m_decoder, m_picture, &desc) != LCEVC_Success) {
         return 0;
     }
-
-    const uint8_t bytesPerSample = (PictureLayout::getBitsPerSample(desc.colorFormat) + 7) / 8;
-    return bytesPerSample * (desc.width >> PictureLayout::getPlaneWidthShift(desc.colorFormat, planeIdx));
+    PictureLayout layout(desc);
+    return layout.rowStride(planeIdx);
 }
 
 uint32_t PictureLock::height(uint32_t planeIdx) const
@@ -54,6 +62,16 @@ uint32_t PictureLock::height(uint32_t planeIdx) const
     }
 
     return (desc.height >> PictureLayout::getPlaneHeightShift(desc.colorFormat, planeIdx));
+}
+
+uint32_t PictureLock::numPlaneGroups() const
+{
+    LCEVC_PictureDesc desc = {};
+    if (LCEVC_GetPictureDesc(m_decoder, m_picture, &desc) != LCEVC_Success) {
+        return 0;
+    }
+    PictureLayout layout(desc);
+    return layout.planeGroups();
 }
 
 } // namespace lcevc_dec::utility

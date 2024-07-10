@@ -1,4 +1,13 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "common/stats.h"
 
@@ -9,6 +18,7 @@
 
 /*------------------------------------------------------------------------------*/
 
+#if VN_CORE_FEATURE(STATS)
 /* clang-format off */
 static const char* const kStatTypeNames[STStatsCount] = {
     "Index",
@@ -31,6 +41,16 @@ static const char* const kStatTypeNames[STStatsCount] = {
     "Tile Clear Count",
     "Inter Transform Count",
     "Intra Transform Count",
+
+    "Serial Decode LOQ-0 Start",
+    "Serial Decode LOQ-0 Stop",
+    "Serial Decode LOQ-1 Start",
+    "Serial Decode LOQ-1 Stop",
+    "Apply LOQ-0 Start",
+    "Apply LOQ-0 Stop",
+    "Apply LOQ-1 Start",
+    "Apply LOQ-1 Stop",
+    "Command Buffer Size",
 
     "LOQ-0 Temporal Byte Size",
 
@@ -70,6 +90,7 @@ static const char* const kStatTypeNames[STStatsCount] = {
 };
 /* clang-format on */
 
+#endif
 typedef struct StatsOutputFile
 {
     FILE* file;
@@ -83,8 +104,9 @@ typedef struct Stats
     bool enabled;
     uint64_t currentIndex;
     FrameStats_t freeList;
+    FrameStats_t currentFrame;
     StatsOutputFile_t outputFile;
-}* Stats_t;
+} * Stats_t;
 
 typedef struct FrameStats
 {
@@ -92,7 +114,8 @@ typedef struct FrameStats
     uint64_t index;
     uint64_t values[STStatsCount];
     FrameStats_t nextFrameStats;
-}* FrameStats_t;
+} * FrameStats_t;
+#if VN_CORE_FEATURE(STATS)
 
 /*------------------------------------------------------------------------------*/
 
@@ -117,7 +140,9 @@ static void statsDump(StatsOutputFile_t* file, const FrameStats_t frameStats)
     }
     fprintf(file->file, "\n");
 }
+#endif
 
+#if VN_CORE_FEATURE(STATS)
 bool statsInitialize(Memory_t memory, Stats_t* stats, const StatsConfig_t* config)
 {
     Stats_t result = VN_CALLOC_T(memory, struct Stats);
@@ -163,9 +188,11 @@ void statsRelease(Stats_t stats)
         VN_FREE(stats->memory, stats);
     }
 }
+#endif
 
 FrameStats_t statsNewFrame(Stats_t stats)
 {
+#if VN_CORE_FEATURE(STATS)
     assert(stats != NULL);
 
     if (!stats->enabled) {
@@ -186,12 +213,34 @@ FrameStats_t statsNewFrame(Stats_t stats)
 
     statsRecordValue(result, STFrameIndex, stats->currentIndex);
     stats->currentIndex++;
+    stats->currentFrame = result;
 
     return result;
+#else
+    VN_UNUSED(stats);
+    return NULL;
+#endif
+}
+
+FrameStats_t statsGetFrame(Stats_t stats)
+{
+#if VN_CORE_FEATURE(STATS)
+    assert(stats != NULL);
+
+    if (!stats->enabled) {
+        return NULL;
+    }
+
+    return stats->currentFrame;
+#else
+    VN_UNUSED(stats);
+    return NULL;
+#endif
 }
 
 void statsEndFrame(FrameStats_t frameStats)
 {
+#if VN_CORE_FEATURE(STATS)
     if (!frameStats) {
         return;
     }
@@ -204,7 +253,9 @@ void statsEndFrame(FrameStats_t frameStats)
     /* Store frame stats for re-use. */
     frameStats->nextFrameStats = stats->freeList;
     stats->freeList = frameStats;
+#endif
 }
+#if VN_CORE_FEATURE(STATS)
 
 void statsRecordValue(FrameStats_t stats, StatType_t type, uint64_t value)
 {
@@ -227,5 +278,6 @@ void statsRecordTime(FrameStats_t stats, StatType_t type)
     assert(type >= 0 && type < STStatsCount);
     stats->values[type] = timeNowNano(stats->owner->time);
 }
+#endif
 
 /*------------------------------------------------------------------------------*/

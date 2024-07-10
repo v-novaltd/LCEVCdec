@@ -23,7 +23,7 @@ set_property(GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS FALSE)
 # Advertise Emscripten as a 32-bit platform (as opposed to
 # CMAKE_SYSTEM_PROCESSOR=x86_64 for 64-bit platform), since some projects (e.g.
 # OpenCV) use this to detect bitness.
-# Allow users to ovewrite this on the command line with -DEMSCRIPTEN_SYSTEM_PROCESSOR=arm.
+# Allow users to overwrite this on the command line with -DEMSCRIPTEN_SYSTEM_PROCESSOR=arm.
 if ("${EMSCRIPTEN_SYSTEM_PROCESSOR}" STREQUAL "")
   set(EMSCRIPTEN_SYSTEM_PROCESSOR x86)
 endif()

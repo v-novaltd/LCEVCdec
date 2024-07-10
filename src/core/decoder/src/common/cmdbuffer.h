@@ -1,7 +1,18 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_CMD_BUFFER_H_
 #define VN_DEC_CORE_CMD_BUFFER_H_
 
+#include "common/memory.h"
 #include "common/platform.h"
 
 /*! \file
@@ -94,31 +105,105 @@
 
 /*------------------------------------------------------------------------------*/
 
-typedef enum CmdBufferType
+typedef enum CmdBufferCmd
 {
-    CBTResiduals,
-    CBTCoordinates
-} CmdBufferType_t;
+    CBCAdd = 0,       /**< Add a residual to the temporal buffer. Binary 00 000000 */
+    CBCSet = 64,      /**< Set (write) a residual to the temporal buffer. Binary 01 000000 */
+    CBCSetZero = 128, /**< Set (write) all zeros of TU size to the temporal buffer. Binary 10 000000 */
+    CBCClear = 192, /**< Set a 32x32px block to zeros - only at the first TU of a block. Binary 11 000000 */
+} CmdBufferCmd_t;
 
-typedef struct CmdBufferData
+/*! \brief Arbitrary constants used for the command buffer storage behavior. */
+enum CmdBufferConstants
 {
-    const int16_t* coordinates;
-    const int16_t* residuals;
-    int32_t count;
-} CmdBufferData_t;
+    CBKStoreGrowFactor = 2, /**< The factory multiply current capacity by when growing the buffer. */
+    CBKDefaultInitialCapacity = 32768, /**< The default initial capacity of a cmdbuffer. */
+    CBKTUSizeDD = 2,                   /**< width/height of a DD TU in pixels */
+    CBKTUSizeDDS = 4,                  /**< width/height of a DDS TU in pixels */
+    CBKDDSLayers = 16,                 /**< layerCount for a DDS buffer */
+    CBKDDLayers = 4,                   /**< layerCount for a DD buffer */
+    CBKDDSLayerSize = 32,              /**< layer size (bytes) for a DDS buffer */
+    CBKDDLayerSize = 8,                /**< layer size (bytes) for a DD buffer */
+    CBKBigJump = 62,            /**< Max 6-bit value where skip can be combined with the command */
+    CBKExtraBigJumpSignal = 63, /**< 6 binary 1s to signal to read the next 3 bytes for the jump value */
+    CBKExtraBigJump = UINT16_MAX /**< Max 16-bit value before overflowing to a 24-bit jump value */
+};
 
-typedef struct CmdBuffer CmdBuffer_t;
+/*! \brief A struct indicating how to apply a slice of a command buffer.
+ *
+ *  We often want to apply command buffers across several threads. To do this, we split the
+ *  commands roughly evenly across several threads, and mark each with an entry point.
+ */
+typedef struct CmdBufferEntryPoint
+{
+    uint32_t count; /**< The number of commands in this entry point. */
+    uint32_t initialJump; /**< How far to jump to get to the point, in the image, where you apply these commands. */
+    int32_t commandOffset; /**< The offset in the commands-end of the command buffer. */
+    int32_t dataOffset;    /**< The offset in the data-end of the command buffer. */
+} CmdBufferEntryPoint_t;
+
+/*! \brief Dynamically growing memory-manager for a command buffer instance.
+ *
+ *  The storage can be resized after initialization. This can be performed after
+ *  changing both the capacity and entry size.
+ *
+ *  \note This does not contract itself overtime.
+ */
+typedef struct CmdBufferStorage
+{
+    Memory_t memory;         /**< Decoder instance this belongs to. */
+    uint8_t* start;          /**< Pointer to the start of the storage. */
+    uint8_t* currentCommand; /**< Pointer to the current command write position in the storage. */
+    uint8_t* currentData;    /**< Pointer to the current data write position in the storage. */
+    uint8_t* end;            /**< Pointer to the end of the storage. */
+    uint32_t allocatedCapacity; /**< Number of elements allocated. */
+} CmdBufferStorage_t;
+
+/*! \brief A series of commands (add, set, clear, etc), and whatever information is needed to apply
+ *         those commands to a surface.
+ */
+typedef struct CmdBuffer
+{
+    Memory_t memory; /**< Memory-manager from this command buffer's decoder instance. */
+    CmdBufferStorage_t data; /**< Memory storage for residuals from the start, commands and jumps from the end. */
+    CmdBufferEntryPoint_t* entryPoints; /**< List of entry points to this cmdBuffer. */
+    uint32_t count;                     /**< Number of commands in buffer. */
+    uint16_t numEntryPoints;            /**< Number of entry points. */
+    uint8_t layerCount; /**< Number of residuals in each data element of `data`, 16 for DDS, 4 for DD. */
+} CmdBuffer_t;
+
 typedef struct Memory* Memory_t;
 
 /*------------------------------------------------------------------------------*/
 
-/*! \brief Initializes a command buffer read for appending.
+/*! \brief Get the size of the "data" end of the command buffer (the portion which extends backwards
+ *         from buffer->end). */
+static inline size_t cmdBufferGetDataSize(const CmdBuffer_t* buffer)
+{
+    return buffer->data.end - buffer->data.currentData;
+}
+
+/*! \brief Get the size of twhic ffmpeghe "commands" end of the command buffer (the portion which
+ * extends forwards from buffer->start). */
+static inline size_t cmdBufferGetCommandsSize(const CmdBuffer_t* buffer)
+{
+    return buffer->data.currentCommand - buffer->data.start;
+}
+
+/*! \brief Get the total size of the command buffer (data plus commands) */
+static inline size_t cmdBufferGetSize(const CmdBuffer_t* buffer)
+{
+    return cmdBufferGetCommandsSize(buffer) + cmdBufferGetDataSize(buffer);
+}
+
+/*! \brief Initializes a command buffer, ready for appending.
  *
- * \param cmdBuffer   The command buffer location to initialise.
+ * \param cmdBuffer       The command buffer location to initialise.
+ * \param numEntryPoints  The number of entry points.
  *
  * \return true on success, otherwise false.
  */
-bool cmdBufferInitialise(Memory_t memory, CmdBuffer_t** cmdBuffer, CmdBufferType_t type);
+bool cmdBufferInitialise(Memory_t memory, CmdBuffer_t** cmdBuffer, uint16_t numEntryPoints);
 
 /*! \brief Releases all the memory associated with the command buffer.
  *
@@ -139,29 +224,10 @@ void cmdBufferFree(CmdBuffer_t* cmdBuffer);
  *
  * \return True on success, otherwise false.
  */
-bool cmdBufferReset(CmdBuffer_t* cmdBuffer, int32_t layerCount);
-
-/*! \brief Retrieves the layer count the command buffer has been reset to.
- *
- * \param cmdBuffer   The command buffer to retrieve the count from.
- *
- * \return The number of layers if cmdBufferReset has been called, otherwise 0.
- */
-int32_t cmdBufferGetLayerCount(const CmdBuffer_t* cmdBuffer);
-
-/*! \brief Retrieves the underlying data from the cmdbuffer.
- *
- * \note The returned values are invalidated if any other cmdBuffer API
- *       is called after this function returns.
- *
- * \param cmdBuffer The command buffer to retrieve data from.
- */
-CmdBufferData_t cmdBufferGetData(const CmdBuffer_t* cmdBuffer);
+bool cmdBufferReset(CmdBuffer_t* cmdBuffer, uint8_t layerCount);
 
 /*! \brief Returns true if the command buffer contains no entries. */
-bool cmdBufferIsEmpty(const CmdBuffer_t* cmdBuffer);
-
-int32_t cmdBufferGetCount(const CmdBuffer_t* cmdBuffer);
+static inline bool cmdBufferIsEmpty(const CmdBuffer_t* cmdBuffer) { return cmdBuffer->count == 0; }
 
 /*! \brief Appends a new entry in the command buffer for a given location with values.
  *
@@ -181,25 +247,14 @@ int32_t cmdBufferGetCount(const CmdBuffer_t* cmdBuffer);
  *
  * \return true on success, otherwise false.
  */
-bool cmdBufferAppend(CmdBuffer_t* cmdBuffer, int16_t x, int16_t y, const int16_t* values);
+bool cmdBufferAppend(CmdBuffer_t* cmdBuffer, CmdBufferCmd_t command, const int16_t* values, uint32_t jump);
 
-/*! \brief Appends a new entry in the command buffer for a given location.
+/*! \brief Determine offsets for this command buffer's entry points.
  *
- * Unlike `cmdBufferAppend()` this function does not require cmdbuffer_reset() to
- * be called before being used, as the default state of the command buffer is sufficient
- * for appending just coordinate commands. However when resetting through `cmdbufferReset()`
- * it is required that it is called with a layer_count of 0.
-
- * \note The buffer must have been initialised with `CBT_Residuals` otherwise this
- *       call will fail.
- *
- * \param cmdBuffer   The command buffer to add the entry to.
- * \param x           The horizontal coord for the command.
- * \param y           The vertical coord for the command.
- *
- * \return true on success, otherwise false.
+ * The number of entry points is set on initialization, but their locations can't be known until
+ * the command buffer has actually been populated.
  */
-bool cmdBufferAppendCoord(CmdBuffer_t* cmdBuffer, int16_t x, int16_t y);
+void cmdBufferSplit(const CmdBuffer_t* srcBuffer);
 
 /*------------------------------------------------------------------------------*/
 

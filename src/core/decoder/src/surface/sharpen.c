@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "common/log.h"
 #include "common/memory.h"
 #include "context.h"
@@ -8,24 +18,29 @@
 
 typedef struct Sharpen
 {
-    Context_t* ctx;
+    ThreadManager_t* threadManager;
+    Memory_t memory;
+    Logger_t log;
     bool lockSettings;
     float strength;
     SharpenType_t type;
     Surface_t surfaceIntermediate;
-}* Sharpen_t;
+} * Sharpen_t;
 
 /*------------------------------------------------------------------------------*/
 
-bool sharpenInitialize(Context_t* ctx, Sharpen_t* sharpen, float globalStrength)
+bool sharpenInitialize(ThreadManager_t* threadManager, Memory_t memory, Logger_t log,
+                       Sharpen_t* sharpenOut, float globalStrength)
 {
-    Sharpen_t result = VN_MALLOC_T(ctx->memory, struct Sharpen);
+    Sharpen_t result = VN_MALLOC_T(memory, struct Sharpen);
 
     if (!result) {
         return false;
     }
 
-    result->ctx = ctx;
+    result->threadManager = threadManager;
+    result->memory = memory;
+    result->log = log;
 
     if (globalStrength == -1.0f) {
         result->lockSettings = false;
@@ -38,9 +53,9 @@ bool sharpenInitialize(Context_t* ctx, Sharpen_t* sharpen, float globalStrength)
         result->strength = globalStrength;
     }
 
-    surfaceIdle(ctx, &result->surfaceIntermediate);
+    surfaceIdle(&result->surfaceIntermediate);
 
-    *sharpen = result;
+    *sharpenOut = result;
 
     return true;
 }
@@ -48,9 +63,9 @@ bool sharpenInitialize(Context_t* ctx, Sharpen_t* sharpen, float globalStrength)
 void sharpenRelease(Sharpen_t sharpen)
 {
     if (sharpen) {
-        surfaceRelease(sharpen->ctx, &sharpen->surfaceIntermediate);
+        surfaceRelease(sharpen->memory, &sharpen->surfaceIntermediate);
 
-        Memory_t memory = sharpen->ctx->memory;
+        Memory_t memory = sharpen->memory;
         VN_FREE(memory, sharpen);
     }
 }
@@ -122,20 +137,19 @@ SharpenFunction_t surfaceSharpenGetFunction(FixedPoint_t dstFP, CPUAccelerationF
 
 static bool prepareIntermediateSurface(Sharpen_t sharpen, const Surface_t* surface)
 {
-    Context_t* ctx = sharpen->ctx;
-
     const FixedPoint_t fp = surface->type;
     const uint32_t height = surface->height;
     const uint32_t stride = surface->width;
 
     /* Release previously allocated sharpening surface if not big enough or initialised. */
-    if (!surfaceIsIdle(ctx, &sharpen->surfaceIntermediate) &&
-        !surfaceCompatible(ctx, &sharpen->surfaceIntermediate, fp, stride, height, ILNone)) {
-        surfaceRelease(ctx, &sharpen->surfaceIntermediate);
+    if (!surfaceIsIdle(&sharpen->surfaceIntermediate) &&
+        !surfaceCompatible(&sharpen->surfaceIntermediate, fp, stride, height, ILNone)) {
+        surfaceRelease(sharpen->memory, &sharpen->surfaceIntermediate);
     }
 
-    if (surfaceIsIdle(ctx, &sharpen->surfaceIntermediate) &&
-        (surfaceInitialise(ctx, &sharpen->surfaceIntermediate, fp, stride, height, stride, ILNone) != 0)) {
+    if (surfaceIsIdle(&sharpen->surfaceIntermediate) &&
+        (surfaceInitialise(sharpen->memory, &sharpen->surfaceIntermediate, fp, stride, height,
+                           stride, ILNone) != 0)) {
         return false;
     }
 
@@ -207,12 +221,12 @@ bool surfaceSharpen(Sharpen_t sharpen, const Surface_t* surface, Dither_t dither
     }
 
     if (surface->interleaving == ILRGB || surface->interleaving == ILRGBA) {
-        VN_ERROR(sharpen->ctx->log, "sharpen does not support RGB");
+        VN_ERROR(sharpen->log, "sharpen does not support RGB");
         return false;
     }
 
     if (!prepareIntermediateSurface(sharpen, surface)) {
-        VN_ERROR(sharpen->ctx->log, "Failed to prepare sharpen intermediate surface\n");
+        VN_ERROR(sharpen->log, "Failed to prepare sharpen intermediate surface\n");
         return false;
     }
 
@@ -226,11 +240,11 @@ bool surfaceSharpen(Sharpen_t sharpen, const Surface_t* surface, Dither_t dither
                                                         (size_t)(surface->width - 2) * pixelSize};
 
     if (!slicedJobContext.function) {
-        VN_ERROR(sharpen->ctx->log, "Failed to find sharpen function\n");
+        VN_ERROR(sharpen->log, "Failed to find sharpen function\n");
         return false;
     }
 
-    return threadingExecuteSlicedJobsWithPostRun(&sharpen->ctx->threadManager, &sharpenSlicedJob,
+    return threadingExecuteSlicedJobsWithPostRun(sharpen->threadManager, &sharpenSlicedJob,
                                                  &sharpenPostRunJob, &slicedJobContext, surface->height);
 }
 

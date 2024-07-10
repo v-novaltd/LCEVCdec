@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "common/threading.h"
 
 #include "common/memory.h"
@@ -142,11 +152,11 @@ typedef struct ThreadJob
 
 typedef struct Thread
 {
-    Context_t* ctx;
+    ProfilerState_t* profiler;
 
     bool busy;
     bool wait;
-    bool die;
+    bool dead;
     int32_t retval;
     int32_t idx;
     ThreadPlatform_t platform;
@@ -181,18 +191,18 @@ VN_THREADLOOP_SIGNATURE()
     Thread_t* thread = (Thread_t*)data;
     ThreadPlatform_t* platform = &thread->platform;
 
-    profilerRegisterThread(thread->ctx->profiler, "worker_thread");
+    profilerRegisterThread(thread->profiler, "worker_thread");
 
-    while (!thread->die) {
+    while (!thread->dead) {
         platformMutexLock(platform);
 
-        while (!thread->busy && !thread->die) {
+        while (!thread->busy && !thread->dead) {
             platformMutexCVWaitTimed(platform, 500);
         }
 
         platformMutexUnlock(platform);
 
-        if (!thread->die) {
+        if (!thread->dead) {
             thread->retval = executeThreadJob(&thread->job);
 
             platformMutexLock(platform);
@@ -253,27 +263,29 @@ static inline void threadStop(Thread_t* thrd)
 
 /*------------------------------------------------------------------------------*/
 
-int32_t threadingInitialise(Context_t* ctx, ThreadManager_t* mgr, uint32_t numThreads)
+int32_t threadingInitialise(Memory_t memory, Logger_t log, ProfilerState_t* profiler,
+                            ThreadManager_t* mgr, uint32_t numThreads)
 {
     if (mgr == NULL) {
         return -1;
     }
 
     if (numThreads > 0) {
-        mgr->threads = VN_CALLOC_T_ARR(ctx->memory, Thread_t, numThreads);
+        mgr->threads = VN_CALLOC_T_ARR(memory, Thread_t, numThreads);
 
         if (mgr->threads == NULL) {
-            VN_ERROR(ctx->log, "Failed to allocate memory for thread data\n");
+            VN_ERROR(log, "Failed to allocate memory for thread data\n");
             return -1;
         }
     }
 
-    mgr->ctx = ctx;
+    mgr->memory = memory;
+    mgr->log = log;
     mgr->numThreads = numThreads;
 
     for (int32_t i = 0; i < (int32_t)numThreads; i++) {
         Thread_t* thrd = &mgr->threads[i];
-        thrd->ctx = ctx;
+        thrd->profiler = profiler;
         thrd->idx = i;
         threadLaunch(thrd);
     }
@@ -284,11 +296,11 @@ int32_t threadingInitialise(Context_t* ctx, ThreadManager_t* mgr, uint32_t numTh
 void threadingRelease(ThreadManager_t* mgr)
 {
     for (uint32_t i = 0; i < mgr->numThreads; i++) {
-        Thread_t* thrd = &mgr->threads[i];
-        ThreadPlatform_t* plat = &thrd->platform;
+        Thread_t* thread = &mgr->threads[i];
+        ThreadPlatform_t* plat = &thread->platform;
 
         platformMutexLock(plat);
-        thrd->die = 1;
+        thread->dead = true;
         platformMutexCVNotify(plat);
         platformMutexUnlock(plat);
     }
@@ -299,7 +311,7 @@ void threadingRelease(ThreadManager_t* mgr)
     }
 
     if (mgr->numThreads > 0) {
-        VN_FREE(mgr->ctx->memory, mgr->threads);
+        VN_FREE(mgr->memory, mgr->threads);
         mgr->numThreads = 0;
     }
 }
@@ -338,7 +350,7 @@ static bool threadingSubmitJob(ThreadManager_t* mgr, uint32_t threadIndex, JobFu
     Thread_t* thread = threadSubmitLock(mgr, threadIndex);
 
     if (!thread) {
-        VN_ERROR(mgr->ctx->log, "Failed to retrieve and lock thread for index: %u\n", threadIndex);
+        VN_ERROR(mgr->log, "Failed to retrieve and lock thread for index: %u\n", threadIndex);
         return false;
     }
 
@@ -358,7 +370,7 @@ static bool threadingSubmitSlicedJob(ThreadManager_t* mgr, uint32_t threadIndex,
     Thread_t* thread = threadSubmitLock(mgr, threadIndex);
 
     if (!thread) {
-        VN_ERROR(mgr->ctx->log, "Failed to retireve and lock thread for index: %u\n", threadIndex);
+        VN_ERROR(mgr->log, "Failed to retrieve and lock thread for index: %u\n", threadIndex);
         return false;
     }
 
@@ -422,11 +434,15 @@ int32_t threadingGetNumCores(void)
 #endif
 }
 
-uint32_t threadingGetNumThreads(ThreadManager_t* mgr) { return mgr ? mgr->numThreads : 0; }
+uint32_t threadingGetNumThreads(ThreadManager_t* mgr) { return mgr ? mgr->numThreads : 1; }
 
 #else
 
-int32_t threadingInitialise(Context_t* ctx, ThreadManager_t* mgr, uint32_t numThreads) { return 0; }
+int32_t threadingInitialise(Memory_t memory, Logger_t log, Context_t* ctx, ThreadManager_t* mgr,
+                            uint32_t numThreads)
+{
+    return 0;
+}
 
 void threadingRelease(ThreadManager_t* mgr) {}
 
@@ -448,7 +464,7 @@ bool threadingExecuteJobs(ThreadManager_t* mgr, int32_t (*function)(void*), void
 
 int32_t threadingGetNumCores() { return 1; }
 
-uint32_t threadingGetNumThreads(ThreadManager_t* mgr) { return 0; }
+uint32_t threadingGetNumThreads(ThreadManager_t* mgr) { return 1; }
 
 #endif
 
@@ -501,7 +517,11 @@ bool threadingExecuteSlicedJobsWithPostRun(ThreadManager_t* mgr, SlicedJobFuncti
                                            SlicedJobFunction_t postRunFunction,
                                            const void* executeContext, size_t totalSize)
 {
-    const size_t totalJobCount = threadingGetNumThreads(mgr) + 1;
+    if (!mgr) {
+        return false;
+    }
+    const size_t totalJobCount = threadingGetNumThreads(mgr);
+    assert(totalJobCount > 0);
     const size_t perSliceCount = totalSize / totalJobCount;
 
     JobIndex_t index = {.current = 0, .last = totalJobCount - 1};

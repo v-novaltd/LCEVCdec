@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_BYTESTREAM_H_
 #define VN_DEC_CORE_BYTESTREAM_H_
 
@@ -63,7 +73,14 @@ const uint8_t* bytestreamCurrent(const ByteStream_t* stream);
 
 /*! \brief Retrieve the remaining number of bytes to be read.
  *  \return Number of bytes remaining in the stream, or 0 upon error */
-size_t bytestreamRemaining(const ByteStream_t* stream);
+static inline size_t bytestreamRemaining(const ByteStream_t* stream)
+{
+    if (stream->offset > stream->size) {
+        return 0;
+    }
+
+    return stream->size - stream->offset;
+}
 
 /*! \brief Retrieve the byte size of the overall stream.
     \return Number of bytes the stream was initialised with. */
@@ -82,10 +99,6 @@ int32_t readU32(const uint8_t* ptr, uint32_t* out);
 /*! \brief Endian aware uint16_t read from a pointer.
  *  \return number of bytes read. */
 int32_t readU16(const uint8_t* ptr, uint16_t* out);
-
-/*! \brief Endian aware uint8_t read from a pointer.
- *  \return number of bytes read. */
-int32_t readU8(const uint8_t* ptr, uint8_t* out);
 
 /*------------------------------------------------------------------------------*/
 

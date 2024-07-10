@@ -42,7 +42,7 @@ cd _build
 conan install .. -g  cmake_find_package_multi -pr=macos-11.0-x86_64-apple-clang-14.0-Release -o executables=False # And
 conan install .. -g  cmake_find_package_multi -pr=macos-11.0-x86_64-apple-clang-14.0-Debug -o executables=False
 
-cmake -G 'Unix Makefiles' -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/ios.toolchain.cmake -DPLATFORM=MAC -DVN_SDK_EXECUTABLES=OFF -DVN_SDK_UNIT_TESTS=OFF -DVN_SDK_FFMPEG_LIBS_PACKAGE=OFF -DVN_SDK_TESTS=OFF -DVN_INTEGRATION_OPENGL=OFF ..
+cmake -G 'Unix Makefiles' -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/ios.toolchain.cmake -DPLATFORM=MAC -DVN_SDK_EXECUTABLES=OFF -DVN_SDK_UNIT_TESTS=OFF -DVN_SDK_FFMPEG_LIBS_PACKAGE="" -DVN_SDK_TESTS=OFF -DVN_INTEGRATION_OPENGL=OFF ..
 
 cmake --build .
 cmake --install .

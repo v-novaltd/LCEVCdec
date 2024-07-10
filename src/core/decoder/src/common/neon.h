@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_NEON_H_
 #define VN_DEC_CORE_NEON_H_
 
@@ -17,34 +27,34 @@
 /*------------------------------------------------------------------------------*/
 
 /*! \brief Safely read up to 16 s8 lanes from the src location */
-static inline int8x16_t loadVectorS8NEON(const void* src, uint32_t lanes)
+static inline int8x16_t loadVectorS8NEON(const void* src, uint32_t maxNumLanes)
 {
-    if (lanes >= 16) {
+    if (maxNumLanes >= 16) {
         return vld1q_s8((const int8_t*)src);
     }
 
-    if (lanes == 8) {
+    if (maxNumLanes == 8) {
         return vcombine_s8(vld1_s8((const int8_t*)src), vdup_n_s8(0));
     }
 
     VN_ALIGN(int8_t temp[16], 16) = {0};
-    memcpy(temp, src, lanes);
+    memcpy(temp, src, maxNumLanes);
     return vld1q_s8(temp);
 }
 
 /*! \brief Safely read up to 16 u8 lanes from the src location */
-static inline uint8x16_t loadVectorU8NEON(const void* src, uint32_t lanes)
+static inline uint8x16_t loadVectorU8NEON(const void* src, uint32_t maxNumLanes)
 {
-    if (lanes >= 16) {
+    if (maxNumLanes >= 16) {
         return vld1q_u8((const uint8_t*)src);
     }
 
-    if (lanes == 8) {
+    if (maxNumLanes == 8) {
         return vcombine_u8(vld1_u8((const uint8_t*)src), vdup_n_u8(0));
     }
 
     VN_ALIGN(uint8_t temp[16], 16) = {0};
-    memcpy(temp, src, lanes);
+    memcpy(temp, src, maxNumLanes);
     return vld1q_u8(temp);
 }
 
@@ -52,46 +62,109 @@ static inline uint8x16_t loadVectorU8NEON(const void* src, uint32_t lanes)
  *
  *  \note This is safe to read up to 15-bits per lane as unsigned
  *        data - the cast will be implicit. */
-static inline int16x8_t loadVectorS16NEON(const void* src, uint32_t lanes)
+static inline int16x8_t loadVectorS16NEON(const void* src, uint32_t maxNumLanes)
 {
-    if (lanes >= 8) {
+    if (maxNumLanes >= 8) {
         return vld1q_s16((const int16_t*)src);
     }
 
-    if (lanes == 4) {
+    if (maxNumLanes == 4) {
         return vcombine_s16(vld1_s16((const int16_t*)src), vdup_n_s16(0));
     }
 
     VN_ALIGN(int16_t temp[8], 16) = {0};
-    memcpy(temp, src, lanes * sizeof(int16_t));
+    memcpy(temp, src, maxNumLanes * sizeof(int16_t));
     return vld1q_s16(temp);
 }
 
+// All of the below will write the entire src vector, UNLESS maxNumLanes is greater than the number
+// of lanes in src.
+
 /*! \brief Safely write up to 16 lanes of 8-bit data to the dst location. */
-static inline void writeVectorU8NEON(void* dst, uint8x16_t src, const uint32_t lanes)
+static inline void writeVectorU8x16NEON(void* dst, uint8x16_t src, const uint32_t maxNumLanes)
 {
-    if (lanes == 16) {
+    if (maxNumLanes >= 16) {
         vst1q_u8((uint8_t*)dst, src);
         return;
     }
 
-    for (uint32_t i = 0; i < lanes && lanes < 16; i++) {
+    for (uint32_t i = 0; i < maxNumLanes; i++) {
         ((uint8_t*)dst)[i] = vgetq_lane_u8(src, 0);
         src = vextq_u8(src, src, 1);
     }
 }
 
-/*! \brief Safely write up to 8 lanes of 16-bit data to the dst location. */
-static inline void writeVectorS16NEON(void* dst, int16x8_t src, const uint32_t lanes)
+/*! \brief Safely write up to 8 lanes of 8-bit data to the dst location. */
+static inline void writeVectorU8x8NEON(void* dst, uint8x8_t src, const uint32_t maxNumLanes)
 {
-    if (lanes >= 8) {
+    if (maxNumLanes >= 8) {
+        vst1_u8((uint8_t*)dst, src);
+        return;
+    }
+
+    for (uint32_t i = 0; i < maxNumLanes; i++) {
+        ((uint8_t*)dst)[i] = vget_lane_u8(src, 0);
+        src = vext_u8(src, src, 1);
+    }
+}
+
+/*! \brief Safely write and interleave up to 8 lanes of 8-bit data to the dst location. */
+static inline void writeVectorU8x8x2NEON(void* dst, uint8x8x2_t src, const uint32_t maxNumLanes)
+{
+    if (maxNumLanes >= 8) {
+        vst2_u8((uint8_t*)dst, src);
+        return;
+    }
+
+    for (uint32_t i = 0; i < maxNumLanes; i++) {
+        ((uint8_t*)dst)[2 * i] = vget_lane_u8(src.val[0], 0);
+        src.val[0] = vext_u8(src.val[0], src.val[0], 1);
+        ((uint8_t*)dst)[2 * i + 1] = vget_lane_u8(src.val[1], 0);
+        src.val[1] = vext_u8(src.val[1], src.val[1], 1);
+    }
+}
+
+/*! \brief Safely write up to 8 lanes of 16-bit data to the dst location. */
+static inline void writeVectorS16NEON(void* dst, int16x8_t src, const uint32_t maxNumLanes)
+{
+    if (maxNumLanes >= 8) {
         vst1q_s16((int16_t*)dst, src);
         return;
     }
 
-    for (uint32_t i = 0; i < minU32(lanes, 8); i++) {
+    for (uint32_t i = 0; i < maxNumLanes; i++) {
         ((int16_t*)dst)[i] = vgetq_lane_s16(src, 0);
         src = vextq_s16(src, src, 1);
+    }
+}
+
+/*! \brief Safely write up to 4 lanes of 16-bit data to the dst location. */
+static inline void writeVectorU16x4NEON(void* dst, uint16x4_t src, const uint32_t maxNumLanes)
+{
+    if (maxNumLanes >= 4) {
+        vst1_u16((uint16_t*)dst, src);
+        return;
+    }
+
+    for (uint32_t i = 0; i < maxNumLanes; i++) {
+        ((uint16_t*)dst)[i] = vget_lane_u16(src, 0);
+        src = vext_u16(src, src, 1);
+    }
+}
+
+/*! \brief Safely write and interleave up to 4 lanes of 16-bit NV12 data to the dst location. */
+static inline void writeVectorU16x4x2NEON(void* dst, uint16x4x2_t src, const uint32_t maxNumLanes)
+{
+    if (maxNumLanes >= 4) {
+        vst2_u16((uint16_t*)dst, src);
+        return;
+    }
+
+    for (uint32_t i = 0; i < maxNumLanes; i++) {
+        ((uint16_t*)dst)[2 * i] = vget_lane_u16(src.val[0], 0);
+        src.val[0] = vext_u16(src.val[0], src.val[0], 1);
+        ((uint16_t*)dst)[2 * i + 1] = vget_lane_u16(src.val[1], 0);
+        src.val[1] = vext_u16(src.val[1], src.val[1], 1);
     }
 }
 
@@ -159,7 +232,7 @@ static inline void writeS16AsUNSSE(uint8_t* dst, const int16x8x2_t vec, uint32_t
                                    uint32_t writeLaneSize, int16x8_t clamp)
 {
     if (writeLaneSize == 1) {
-        writeVectorU8NEON(dst, packS16ToU8NEON(vec), lanes);
+        writeVectorU8x16NEON(dst, packS16ToU8NEON(vec), lanes);
         return;
     }
 

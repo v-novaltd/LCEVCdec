@@ -1,16 +1,28 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #ifndef VN_DEC_CORE_THREADING_H_
 #define VN_DEC_CORE_THREADING_H_
 
 #include "common/platform.h"
 
-typedef struct Context Context_t;
-typedef struct Thread Thread_t;
+typedef struct Logger* Logger_t;
 typedef struct Memory* Memory_t;
+typedef struct ProfilerState ProfilerState_t;
+typedef struct Thread Thread_t;
 
 typedef struct ThreadManager
 {
-    Context_t* ctx;
+    Memory_t memory;
+    Logger_t log;
     Thread_t* threads;
     uint32_t numThreads;
 } ThreadManager_t;
@@ -42,7 +54,8 @@ static inline bool isLastSlice(JobIndex_t index) { return index.current == index
  *  \param mgr the number of threads to start
  *
  *  \returns 0 on success */
-int32_t threadingInitialise(Context_t* ctx, ThreadManager_t* mgr, uint32_t numThreads);
+int32_t threadingInitialise(Memory_t memory, Logger_t log, ProfilerState_t* profiler,
+                            ThreadManager_t* mgr, uint32_t numThreads);
 
 /*! \brief Release the threading engine. */
 void threadingRelease(ThreadManager_t* mgr);
@@ -92,7 +105,7 @@ bool threadingExecuteJobs(ThreadManager_t* mgr, JobFunction_t function, void* jo
 bool threadingExecuteSlicedJobs(ThreadManager_t* mgr, SlicedJobFunction_t function,
                                 const void* executeContext, size_t totalSize);
 
-/* \brief Generates and executes a list of sliced jobs, once all jobs have completed
+/*! \brief Generates and executes a list of sliced jobs, once all jobs have completed
  *        the `postRunFunction` will be invoked for each job on the calling thread.
  *        This call blocks.
  */

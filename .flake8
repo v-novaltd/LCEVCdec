@@ -1,5 +1,13 @@
 [flake8]
-extend-ignore = E501,F811,W503
+max_line_length = 100
+extend-ignore = E501,W503
 per-file-ignores =
-    src/func_tests/test_functions/__init__.py: F401
+    src/func_tests/test_functions/__init__.py: F401,F811
+    conanfile.py: E711
+
+[pycodestyle]
+max_line_length = 100
+ignore = W503
+per-file-ignores =
+    src/func_tests/test_functions/__init__.py: F401,F811
     conanfile.py: E711

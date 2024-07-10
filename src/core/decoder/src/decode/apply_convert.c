@@ -1,7 +1,19 @@
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decode/apply_convert.h"
 
 #include "common/cmdbuffer.h"
+#include "common/tile.h"
+#include "decode/transform_unit.h"
 #include "surface/surface.h"
 
 #include <assert.h>
@@ -78,11 +90,23 @@ static void convertDDS_S87_S8(const ConvertArgs_t* args, int32_t x, int32_t y)
 
 /*------------------------------------------------------------------------------*/
 
-bool applyConvert(Context_t* context, const CmdBuffer_t* buffer, const Surface_t* src,
-                  Surface_t* dst, CPUAccelerationFeatures_t accel)
+bool applyConvert(const TileState_t* tile, const Surface_t* src, Surface_t* dst, bool temporalEnabled)
 {
-    const TransformType_t transform = transformTypeFromLayerCount(cmdBufferGetLayerCount(buffer));
-    CmdBufferData_t bufferData = cmdBufferGetData(buffer);
+    const CmdBuffer_t* buffer = tile->cmdBuffer;
+    const int32_t layerCount = buffer->layerCount;
+    const uint8_t tuWidthShift = (layerCount == 16) ? 2 : 1;
+    const TransformType_t transformType = (layerCount == 16) ? TransformDDS : TransformDD;
+
+    uint32_t tuIndex = 0;
+    TUState_t tuState;
+    if (tuStateInitialise(&tuState, (uint16_t)tile->width, (uint16_t)tile->height, tile->x, tile->y,
+                          tuWidthShift) < 0) {
+        return false;
+    }
+    tuIndex += tuCoordsBlockAlignedIndex(&tuState, tile->x, tile->y);
+    int32_t cmdOffset = 0;
+    uint32_t x = 0;
+    uint32_t y = 0;
 
     const ConvertArgs_t args = {
         .src = src,
@@ -93,21 +117,55 @@ bool applyConvert(Context_t* context, const CmdBuffer_t* buffer, const Surface_t
         .dstOffset = 0,
     };
 
-    for (int32_t i = 0; i < bufferData.count; ++i) {
-        //
-        const int32_t x = bufferData.coordinates[0];
-        const int32_t y = bufferData.coordinates[1];
-        bufferData.coordinates += 2;
-
-        // umm what about edge pixels? gonna get some OOB actions here?
-
-        if (transform == TransformDD) {
-            convertDD_S87_S8(&args, x, y);
+    for (uint32_t count = 0; count < buffer->count; count++) {
+        const uint8_t* commandPtr = buffer->data.start + cmdOffset;
+        const CmdBufferCmd_t command = (const CmdBufferCmd_t)(*commandPtr & 0xC0);
+        const uint8_t jumpSignal = *commandPtr & 0x3F;
+        uint32_t jump = 0;
+        if (jumpSignal < CBKBigJump) {
+            jump = jumpSignal;
+            cmdOffset++;
+        } else if (jumpSignal == CBKBigJump) {
+            jump = commandPtr[1] + (commandPtr[2] << 8);
+            cmdOffset += 3;
         } else {
-            convertDDS_S87_S8(&args, x, y);
+            jump = commandPtr[1] + (commandPtr[2] << 8) + (commandPtr[3] << 16);
+            cmdOffset += 4;
+        }
+        tuIndex += jump;
+        if (temporalEnabled) {
+            if (tuCoordsBlockAlignedRaster(&tuState, tuIndex, &x, &y) < 0) {
+                return false;
+            }
+        } else {
+            if (tuCoordsSurfaceRaster(&tuState, tuIndex, &x, &y) < 0) {
+                return false;
+            }
+        }
+
+        if (temporalEnabled && command == CBCClear) {
+            /* For temporal surfaces, run clear blocks on the U8 'dst' surface */
+            const uint16_t clearHeight = minU16(BSTemporal, (uint16_t)(dst->height - y));
+            const uint16_t clearWidth = minU16(BSTemporal, (uint16_t)(dst->width - x));
+            const size_t clearBytes = clearWidth * sizeof(uint8_t);
+
+            uint8_t* pixels = dst->data + (y * dst->stride) + x;
+
+            for (int32_t row = 0; row < clearHeight; ++row) {
+                memset(pixels, 0, clearBytes);
+                pixels += dst->stride;
+            }
+        }
+
+        /* Copy residuals from the previously applied 'src' surface to the 'dst' with conversion to U8 */
+        if (command != CBCClear) {
+            if (transformType == TransformDD) {
+                convertDD_S87_S8(&args, (int32_t)x, (int32_t)y);
+            } else {
+                convertDDS_S87_S8(&args, (int32_t)x, (int32_t)y);
+            }
         }
     }
-
     return true;
 }
 

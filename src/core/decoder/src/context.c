@@ -1,4 +1,14 @@
-/* Copyright (c) V-Nova International Limited 2022. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
 #include "context.h"
 
 #include "common/memory.h"
@@ -113,71 +123,71 @@ void contextPlaneSurfacesInitialise(Context_t* ctx)
         PlaneSurfaces_t* plane = &ctx->planes[planeIndex];
 
         for (int32_t i = 0; i < 2; ++i) {
-            surfaceIdle(ctx, &plane->temporalBuffer[i]);
+            surfaceIdle(&plane->temporalBuffer[i]);
         }
 
-        surfaceIdle(ctx, &plane->temporalBufferU8);
-        surfaceIdle(ctx, &plane->basePixels);
-        surfaceIdle(ctx, &plane->basePixelsU8);
+        surfaceIdle(&plane->temporalBufferU8);
+        surfaceIdle(&plane->basePixels);
+        surfaceIdle(&plane->basePixelsU8);
 
         for (int32_t i = 0; i < LOQEnhancedCount; ++i) {
-            surfaceIdle(ctx, &plane->externalSurfaces[i]);
+            surfaceIdle(&plane->externalSurfaces[i]);
         }
 
         for (int32_t i = 0; i < LOQMaxCount; ++i) {
-            surfaceIdle(ctx, &plane->internalSurfaces[i]);
+            surfaceIdle(&plane->internalSurfaces[i]);
         }
 
-        surfaceIdle(ctx, &plane->loq2UpsampleTarget);
+        surfaceIdle(&plane->loq2UpsampleTarget);
     }
 
-    surfaceIdle(ctx, &ctx->upscaleIntermediateSurface);
+    surfaceIdle(&ctx->upscaleIntermediateSurface);
 }
 
-void contextPlaneSurfacesRelease(Context_t* ctx)
+void contextPlaneSurfacesRelease(Context_t* ctx, Memory_t memory)
 {
     for (int32_t planeIndex = 0; planeIndex < 3; ++planeIndex) {
         PlaneSurfaces_t* plane = &ctx->planes[planeIndex];
 
         for (int32_t i = 0; i < 2; i += 1) {
-            surfaceRelease(ctx, &plane->temporalBuffer[i]);
+            surfaceRelease(memory, &plane->temporalBuffer[i]);
         }
 
-        surfaceRelease(ctx, &plane->temporalBufferU8);
-        surfaceRelease(ctx, &plane->basePixels);
-        surfaceRelease(ctx, &plane->basePixelsU8);
+        surfaceRelease(memory, &plane->temporalBufferU8);
+        surfaceRelease(memory, &plane->basePixels);
+        surfaceRelease(memory, &plane->basePixelsU8);
 
         for (int32_t i = 0; i < LOQEnhancedCount; ++i) {
-            surfaceRelease(ctx, &plane->externalSurfaces[i]);
+            surfaceRelease(memory, &plane->externalSurfaces[i]);
         }
 
         for (int32_t i = 0; i < LOQMaxCount; ++i) {
-            surfaceRelease(ctx, &plane->internalSurfaces[i]);
+            surfaceRelease(memory, &plane->internalSurfaces[i]);
         }
 
-        surfaceRelease(ctx, &plane->loq2UpsampleTarget);
+        surfaceRelease(memory, &plane->loq2UpsampleTarget);
     }
 
-    surfaceRelease(ctx, &ctx->upscaleIntermediateSurface);
+    surfaceRelease(memory, &ctx->upscaleIntermediateSurface);
 }
 
-static inline int32_t contextPrepareSurface(Context_t* ctx, Surface_t* surf, FixedPoint_t fpType,
+static inline int32_t contextPrepareSurface(Memory_t memory, Surface_t* surf, FixedPoint_t fpType,
                                             uint32_t width, uint32_t height)
 {
-    if (!surfaceIsIdle(ctx, surf) && !surfaceCompatible(ctx, surf, fpType, width, height, ILNone)) {
-        surfaceRelease(ctx, surf);
-        assert(surfaceIsIdle(ctx, surf));
+    if (!surfaceIsIdle(surf) && !surfaceCompatible(surf, fpType, width, height, ILNone)) {
+        surfaceRelease(memory, surf);
+        assert(surfaceIsIdle(surf));
     }
 
-    if (surfaceIsIdle(ctx, surf) &&
-        (surfaceInitialise(ctx, surf, fpType, width, height, width, ILNone) != 0)) {
+    if (surfaceIsIdle(surf) &&
+        (surfaceInitialise(memory, surf, fpType, width, height, width, ILNone) != 0)) {
         return -1;
     }
 
     return 0;
 }
 
-static int32_t contextInternalSurfacesPrepare(Context_t* ctx)
+static int32_t contextInternalSurfacesPrepare(Context_t* ctx, Memory_t memory, Logger_t log)
 {
     const DeserialisedData_t* data = &ctx->deserialised;
 
@@ -194,8 +204,8 @@ static int32_t contextInternalSurfacesPrepare(Context_t* ctx)
             uint32_t height = 0;
             deserialiseCalculateSurfaceProperties(data, (LOQIndex_t)loq, planeIndex, &width, &height);
 
-            if (contextPrepareSurface(ctx, internalSurface, fpType, width, height) != 0) {
-                VN_ERROR(ctx->log, "unable to allocate internal buffer\n");
+            if (contextPrepareSurface(memory, internalSurface, fpType, width, height) != 0) {
+                VN_ERROR(log, "unable to allocate internal buffer\n");
                 return -1;
             }
         }
@@ -204,7 +214,7 @@ static int32_t contextInternalSurfacesPrepare(Context_t* ctx)
     return 0;
 }
 
-bool contextLOQUsingInternalSurfaces(Context_t* ctx, LOQIndex_t loq)
+bool contextLOQUsingInternalSurfaces(Context_t* ctx, Memory_t memory, Logger_t log, LOQIndex_t loq)
 {
     /* fixedpoint_is_signed, is an equivalent to is_high_precision - essentially at that point
      * we need to perform some copy as external API only provides low_precision memory. */
@@ -212,26 +222,31 @@ bool contextLOQUsingInternalSurfaces(Context_t* ctx, LOQIndex_t loq)
                      fixedPointIsSigned(ctx->inputFP[loq]) || fixedPointIsSigned(ctx->outputFP[loq]);
 
     if (res) {
-        contextInternalSurfacesPrepare(ctx);
+        contextInternalSurfacesPrepare(ctx, memory, log);
     }
 
     return res;
 }
 
-int32_t contextInternalSurfacesImageCopy(Context_t* ctx, Surface_t src[3], LOQIndex_t loq, bool fromSrc)
+int32_t contextInternalSurfacesImageCopy(Context_t* ctx, Logger_t log, Surface_t src[3],
+                                         LOQIndex_t loq, bool fromSrc)
 {
     for (int32_t planeIndex = 0; planeIndex < 3; ++planeIndex) {
         PlaneSurfaces_t* plane = &ctx->planes[planeIndex];
 
-        if (!surfaceIsIdle(ctx, &src[planeIndex])) {
-            if (fromSrc) {
-                if (!surfaceBlit(ctx, &src[planeIndex], &plane->internalSurfaces[loq], BMCopy)) {
-                    return -1;
-                }
-            } else {
-                if (!surfaceBlit(ctx, &plane->internalSurfaces[loq], &src[planeIndex], BMCopy)) {
-                    return -1;
-                }
+        if (surfaceIsIdle(&src[planeIndex])) {
+            continue;
+        }
+
+        if (fromSrc) {
+            if (!surfaceBlit(log, &(ctx->threadManager), ctx->cpuFeatures, &src[planeIndex],
+                             &plane->internalSurfaces[loq], BMCopy)) {
+                return -1;
+            }
+        } else {
+            if (!surfaceBlit(log, &(ctx->threadManager), ctx->cpuFeatures,
+                             &plane->internalSurfaces[loq], &src[planeIndex], BMCopy)) {
+                return -1;
             }
         }
     }
@@ -239,7 +254,7 @@ int32_t contextInternalSurfacesImageCopy(Context_t* ctx, Surface_t src[3], LOQIn
     return 0;
 }
 
-int32_t contextTemporalConvertSurfacesPrepare(Context_t* ctx)
+int32_t contextTemporalConvertSurfacesPrepare(Context_t* ctx, Memory_t memory, Logger_t log)
 {
     const DeserialisedData_t* data = &ctx->deserialised;
     const FixedPoint_t highPrecisionFPType = fixedPointHighPrecision(ctx->applyFP[LOQ0]);
@@ -253,50 +268,41 @@ int32_t contextTemporalConvertSurfacesPrepare(Context_t* ctx)
         deserialiseCalculateSurfaceProperties(data, LOQ0, planeIndex, &width[LOQ0], &height[LOQ0]);
         deserialiseCalculateSurfaceProperties(data, LOQ1, planeIndex, &width[LOQ1], &height[LOQ1]);
 
-        if (contextPrepareSurface(ctx, temporalSurface, highPrecisionFPType, width[LOQ0],
+        if (contextPrepareSurface(memory, temporalSurface, highPrecisionFPType, width[LOQ0],
                                   height[LOQ0]) != 0) {
-            VN_ERROR(ctx->log, "unable to allocate temporal surface\n");
+            VN_ERROR(log, "unable to allocate temporal surface\n");
             return -1;
         }
 
         if (ctx->convertS8) {
             Surface_t* temporalSurfaceU8 = &plane->temporalBufferU8;
 
-            if (contextPrepareSurface(ctx, temporalSurfaceU8, FPU8, width[LOQ0], height[LOQ0]) != 0) {
-                VN_ERROR(ctx->log, "unable to allocate temporal u8 surface\n");
+            if (contextPrepareSurface(memory, temporalSurfaceU8, FPU8, width[LOQ0], height[LOQ0]) != 0) {
+                VN_ERROR(log, "unable to allocate temporal u8 surface\n");
                 return -1;
             }
         }
 
         /* Reset base pixels back to 0. */
-        if (ctx->generateSurfaces) {
-            if (ctx->useExternalSurfaces) {
-                if (ctx->convertS8) {
-                    Surface_t* basePixels = &plane->basePixels;
+        const bool resetBasePixels =
+            ctx->generateSurfaces && (!ctx->useExternalSurfaces || ctx->convertS8);
+        const bool resetBasePixelsU8 = ctx->generateSurfaces && ctx->useExternalSurfaces && ctx->convertS8;
+        if (resetBasePixels) {
+            Surface_t* basePixels = &plane->basePixels;
 
-                    if (contextPrepareSurface(ctx, basePixels, highPrecisionFPType, width[LOQ1],
-                                              height[LOQ1]) != 0) {
-                        VN_ERROR(ctx->log, "unable to allocate base pixels surface\n");
-                        return -1;
-                    }
-                }
-            } else {
-                Surface_t* basePixels = &plane->basePixels;
+            if (contextPrepareSurface(memory, basePixels, highPrecisionFPType, width[LOQ1],
+                                      height[LOQ1]) != 0) {
+                VN_ERROR(log, "unable to allocate base pixels surface\n");
+                return -1;
+            }
+        }
 
-                if (contextPrepareSurface(ctx, basePixels, highPrecisionFPType, width[LOQ1],
-                                          height[LOQ1]) != 0) {
-                    VN_ERROR(ctx->log, "unable to allocate base pixels surface\n");
-                    return -1;
-                }
+        if (resetBasePixelsU8) {
+            Surface_t* basePixelsU8 = &plane->basePixelsU8;
 
-                if (ctx->convertS8) {
-                    Surface_t* basePixelsU8 = &plane->basePixelsU8;
-
-                    if (contextPrepareSurface(ctx, basePixelsU8, FPU8, width[LOQ1], height[LOQ1]) != 0) {
-                        VN_ERROR(ctx->log, "unable to allocate base pixels u8 surface\n");
-                        return -1;
-                    }
-                }
+            if (contextPrepareSurface(memory, basePixelsU8, FPU8, width[LOQ1], height[LOQ1]) != 0) {
+                VN_ERROR(log, "unable to allocate base pixels u8 surface\n");
+                return -1;
             }
         }
     }
@@ -304,7 +310,7 @@ int32_t contextTemporalConvertSurfacesPrepare(Context_t* ctx)
     return 0;
 }
 
-int32_t contextLOQ2TargetSurfacePrepare(Context_t* ctx)
+int32_t contextLOQ2TargetSurfacePrepare(Context_t* ctx, Memory_t memory, Logger_t log)
 {
     /* Setup internal upsample target. This target is only used when
        scaling_modes[PSS_LOQ_1] != 0D and the user calls the `perseus_decoder_decode`
@@ -319,17 +325,16 @@ int32_t contextLOQ2TargetSurfacePrepare(Context_t* ctx)
         deserialiseCalculateSurfaceProperties(&ctx->deserialised, LOQ1, plane, &width, &height);
 
         /* Re-alloc surface if the dimensions have changed. */
-        if (!surfaceIsIdle(ctx, planeSurface) &&
-            !surfaceCompatible(ctx, planeSurface, fpType, width, height, ILNone)) {
-            surfaceRelease(ctx, planeSurface);
-            assert(surfaceIsIdle(ctx, planeSurface));
+        if (!surfaceIsIdle(planeSurface) &&
+            !surfaceCompatible(planeSurface, fpType, width, height, ILNone)) {
+            surfaceRelease(memory, planeSurface);
+            assert(surfaceIsIdle(planeSurface));
         }
 
-        if (surfaceIsIdle(ctx, planeSurface)) {
-            if (surfaceInitialise(ctx, planeSurface, fpType, width, height, width, ILNone) != 0) {
-                VN_ERROR(ctx->log, "unable to allocate loq2_target_surface");
-                return -1;
-            }
+        if (surfaceIsIdle(planeSurface) &&
+            (surfaceInitialise(memory, planeSurface, fpType, width, height, width, ILNone) != 0)) {
+            VN_ERROR(log, "unable to allocate loq2_target_surface");
+            return -1;
         }
     }
 
@@ -353,7 +358,7 @@ void contextExternalSurfacesPrepare(Context_t* ctx)
 
             deserialiseCalculateSurfaceProperties(&ctx->deserialised, (LOQIndex_t)loq, plane,
                                                   &width, &height);
-            surfaceInitialiseExt2(ctx, surf, fpType, width, height, width, ILNone);
+            surfaceInitialiseExt2(surf, fpType, width, height, width, ILNone);
         }
     }
 }

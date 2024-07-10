@@ -1,7 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved.
- *
- * Unpacking/unescaping raw LCEVC data from NAL units.
- */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
+// Unpacking/unescaping raw LCEVC data from NAL units.
+
 #ifndef VN_LCEVC_UTILITY_EXTRACT_H
 #define VN_LCEVC_UTILITY_EXTRACT_H
 
@@ -45,10 +54,11 @@ typedef enum LCEVC_NALFormat // NOLINT
  * @param[out]      enhancementData      Where to put extracted enhancement data
  * @param[in]       enhancementCapacity  Capacity of enhancement data buffer
  * @param[out]      enhancementSize      Pointer to where to write the extracted size - will be 0 if none found
+ * @return                               1 = LCEVC found, 0 = no LCEVC found, -1 = an error ocurred
  */
-void LCEVC_extractEnhancementFromNAL(const uint8_t* nalData, uint32_t nalSize, LCEVC_NALFormat nalFormat,
-                                     LCEVC_CodecType codecType, uint8_t* enhancementData,
-                                     uint32_t enhancementCapacity, uint32_t* enhancementSize);
+int32_t LCEVC_extractEnhancementFromNAL(const uint8_t* nalData, uint32_t nalSize, LCEVC_NALFormat nalFormat,
+                                        LCEVC_CodecType codecType, uint8_t* enhancementData,
+                                        uint32_t enhancementCapacity, uint32_t* enhancementSize);
 
 /*!
  * \brief Extract LCEVC enhancement data from a buffer containing NAL Units, and remove extracted data from input buffer.
@@ -61,11 +71,12 @@ void LCEVC_extractEnhancementFromNAL(const uint8_t* nalData, uint32_t nalSize, L
  * @param[out]      enhancementData      Where to put extracted enhancement data
  * @param[in]       enhancementCapacity  Capacity of enhancement data buffer
  * @param[out]      enhancementSize      Pointer to where to write the extracted size - will be 0 if none found
+ * @return                               1 = LCEVC found, 0 = no LCEVC found, -1 = an error ocurred
  */
-void LCEVC_extractAndRemoveEnhancementFromNAL(uint8_t* nalData, uint32_t nalSize,
-                                              LCEVC_NALFormat nalFormat, LCEVC_CodecType codecType,
-                                              uint32_t* nalOutSize, uint8_t* enhancementData,
-                                              uint32_t enhancementCapacity, uint32_t* enhancementSize);
+int32_t LCEVC_extractAndRemoveEnhancementFromNAL(uint8_t* nalData, uint32_t nalSize,
+                                                 LCEVC_NALFormat nalFormat, LCEVC_CodecType codecType,
+                                                 uint32_t* nalOutSize, uint8_t* enhancementData,
+                                                 uint32_t enhancementCapacity, uint32_t* enhancementSize);
 
 #ifdef __cplusplus
 }

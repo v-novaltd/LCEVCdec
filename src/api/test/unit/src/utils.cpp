@@ -1,6 +1,17 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "utils.h"
+
+#include "LCEVC/utility/picture_layout.h"
 
 #include <picture.h>
 
@@ -8,7 +19,6 @@
 #include <vector>
 
 using namespace lcevc_dec::decoder;
-using namespace lcevc_dec::api_utility;
 
 EnhancementWithData getEnhancement(int64_t pts, const std::vector<uint8_t> kValidEnhancements[3])
 {
@@ -22,13 +32,9 @@ void setupPictureExternal(LCEVC_PictureBufferDesc& bufferDescOut, SmartBuffer& b
                           LCEVC_ColorFormat format, uint32_t width, uint32_t height,
                           LCEVC_AccelBufferHandle accelBufferHandle, LCEVC_Access access)
 {
-    PictureFormatDesc fullFormat;
-    const PictureFormat::Enum internalFormat = fromLCEVCDescColorFormat(format);
-    const PictureInterleaving::Enum interleaving = fromLCEVCDescInterleaving(format);
-    fullFormat.Initialise(internalFormat, width, height, interleaving);
-
+    PictureLayout pictureLayout(format, width, height);
     // make the buffers
-    bufferOut = std::make_shared<std::vector<uint8_t>>(fullFormat.GetMemorySize());
+    bufferOut = std::make_shared<std::vector<uint8_t>>(pictureLayout.size());
 
     bufferDescOut = {
         bufferOut->data(),
@@ -38,8 +44,8 @@ void setupPictureExternal(LCEVC_PictureBufferDesc& bufferDescOut, SmartBuffer& b
     };
 
     uint8_t* curDataPtr = bufferOut->data();
-    for (uint32_t planeIdx = 0; planeIdx < fullFormat.GetPlaneCount(); planeIdx++) {
-        planeDescArrOut[planeIdx] = {curDataPtr, fullFormat.GetPlaneStrideBytes(planeIdx)};
-        curDataPtr += fullFormat.GetPlaneMemorySize(planeIdx);
+    for (uint32_t planeIdx = 0; planeIdx < pictureLayout.planes(); planeIdx++) {
+        planeDescArrOut[planeIdx] = {curDataPtr, pictureLayout.rowStride(planeIdx)};
+        curDataPtr += pictureLayout.planeSize(planeIdx);
     }
 }

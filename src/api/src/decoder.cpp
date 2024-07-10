@@ -1,23 +1,41 @@
-/* Copyright (c) V-Nova International Limited 2023. All rights reserved. */
+/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
+ * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
+ * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decoder.h"
 
 #include "accel_context.h"
+#include "enums.h"
+#include "event_manager.h"
+#include "handle.h"
 #include "interface.h"
-#include "lcevc_container.h"
+#include "lcevc_config.h"
+#include "log.h"
 #include "picture.h"
 #include "picture_lock.h"
 #include "pool.h"
-#include "uLog.h"
-#include "uTimestamps.h"
+#include "timestamps.h"
 
 #include <LCEVC/lcevc_dec.h>
+#include <LCEVC/PerseusDecoder.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <memory>
 
 // ------------------------------------------------------------------------------------------------
 
 namespace lcevc_dec::decoder {
 
-using namespace lcevc_dec::api_utility;
+static const LogComponent kComp = LogComponent::Decoder;
 
 // Assume that we will need not-very-many accel contexts. We may need a surprisingly large amount
 // of pictures though (enough to max out the unprocessed, temporary/pending, and processed queues).
@@ -34,7 +52,7 @@ Decoder::Decoder(const LCEVC_AccelContextHandle& accelContext, LCEVC_DecoderHand
     , m_lcevcProcessor(m_coreDecoder, m_bufferManager)
     , m_eventManager(apiHandle)
 {
-    VNUnused(accelContext);
+    VN_UNUSED(accelContext);
 }
 
 Decoder::~Decoder()
@@ -145,7 +163,7 @@ LCEVC_ReturnCode Decoder::feedBase(int64_t timestamp, bool discontinuity,
     basePic->setTimehandle(timehandle);
     basePic->setUserData(userData);
 
-    m_baseContainer.emplace(baseHandle, m_clock.getTimeSinceStart(), timeoutUs);
+    m_baseContainer.emplace_back(baseHandle, m_clock.getElapsedTime(), timeoutUs);
 
     tryToQueueDecodes();
 
@@ -167,7 +185,7 @@ LCEVC_ReturnCode Decoder::feedEnhancementData(int64_t timestamp, bool discontinu
     }
 
     const uint64_t timehandle = getTimehandle(m_enhancementDiscontinuityCount, timestamp);
-    const uint64_t inputTime = m_clock.getTimeSinceStart();
+    const uint64_t inputTime = m_clock.getElapsedTime();
     auto insertRes = static_cast<LCEVC_ReturnCode>(
         m_lcevcProcessor.insertUnprocessedLcevcData(data, byteSize, timehandle, inputTime));
     if (insertRes != LCEVC_Success) {
@@ -182,8 +200,8 @@ LCEVC_ReturnCode Decoder::feedEnhancementData(int64_t timestamp, bool discontinu
 LCEVC_ReturnCode Decoder::feedOutputPicture(Handle<Picture> outputHandle)
 {
     if (m_pendingOutputContainer.size() >= m_lcevcProcessor.getUnprocessedCapacity()) {
-        VNLogInfo("Pending outputs container is full. Size is %zu but capacity is %u\n.",
-                  m_pendingOutputContainer.size(), m_lcevcProcessor.getUnprocessedCapacity());
+        VNLogDebug("Pending outputs container is full. Size is %zu but capacity is %u\n.",
+                   m_pendingOutputContainer.size(), m_lcevcProcessor.getUnprocessedCapacity());
         return LCEVC_Again;
     }
 
@@ -215,7 +233,7 @@ LCEVC_ReturnCode Decoder::produceOutputPicture(LCEVC_PictureHandle& outputHandle
     outputHandle.hdl = nextResult.pictureHandle.handle;
 
     triggerEvent(Event(static_cast<int32_t>(LCEVC_OutputPictureDone),
-                       Handle<Picture>(outputHandle.hdl), &(nextResult.decodeInfo)));
+                       Handle<Picture>(outputHandle.hdl), nextResult.decodeInfo));
 
     return nextResult.returnCode;
 }
@@ -243,7 +261,7 @@ void Decoder::flushInputs()
     const bool basesFull = isBaseQueueFull();
     while (!m_baseContainer.empty()) {
         Handle<Picture> finishedBase = m_baseContainer.front().nonNullHandle;
-        m_baseContainer.pop();
+        m_baseContainer.pop_front();
         triggerEvent(Event(LCEVC_BasePictureDone, finishedBase));
     }
     if (basesFull && !isBaseQueueFull()) {
@@ -269,6 +287,69 @@ void Decoder::flushOutputs()
         output->unbindMemory();
         result.returnCode = LCEVC_Flushed;
     }
+}
+
+LCEVC_ReturnCode Decoder::peek(int64_t timestamp, uint32_t& widthOut, uint32_t& heightOut)
+{
+    const uint64_t baseThToFind = getTimehandle(m_baseDiscontinuityCount, timestamp);
+
+    // Rarely, we get the easy case, where the client has already sent base, enhancement, and
+    // destination pictures, so we have a finished decode ready to go (in this case, we know that
+    // base and lcevc will have the same discontinuity count).
+    if (const Result* res = findDecodeResult(baseThToFind); res != nullptr) {
+        const Picture& pic = *(getPicture(res->pictureHandle));
+        widthOut = pic.getWidth();
+        heightOut = pic.getHeight();
+        return res->returnCode;
+    }
+
+    // If the client has NOT sent destination pictures (for example, if they're using peek to
+    // decide what size their pictures should be), then we have to work out for ourselves what the
+    // output might look like.
+
+    // Get data
+    const uint64_t enhancementThToFind = getTimehandle(m_enhancementDiscontinuityCount, timestamp);
+    const std::shared_ptr<perseus_decoder_stream> lcevcData =
+        m_lcevcProcessor.extractProcessedLcevcData(enhancementThToFind, false);
+    const BaseData* baseData = findBaseData(baseThToFind);
+
+    // Always need base OR lcevc
+    if (baseData == nullptr && lcevcData == nullptr) {
+        return LCEVC_NotFound;
+    }
+
+    // In never-passthrough, we need the enhancement.
+    if (m_config.getPassthroughMode() == PassthroughPolicy::Disable && lcevcData == nullptr) {
+        return LCEVC_NotFound;
+    }
+
+    // If we don't have a base, then either fail, or rely entirely on lcevc.
+    if (baseData == nullptr) {
+        if (m_config.getPassthroughMode() == PassthroughPolicy::Force) {
+            return LCEVC_NotFound;
+        }
+        widthOut = lcevcData->global_config.width;
+        heightOut = lcevcData->global_config.height;
+        return LCEVC_Success;
+    }
+
+    // Finally, if we DO have the base, we can simply use the same check used by the actual decode.
+    const Picture& basePic = *(getPicture(baseData->nonNullHandle));
+    const bool timeout = static_cast<int64_t>(baseData->insertionTime + baseData->timeoutUs) <
+                         m_clock.getElapsedTime();
+    const bool lcevcAvailable = (lcevcData != nullptr);
+    const auto [shouldPassthrough, shouldFail] = shouldPassthroughOrFail(timeout, lcevcAvailable);
+    if (shouldPassthrough) {
+        widthOut = basePic.getWidth();
+        heightOut = basePic.getHeight();
+    } else if (!shouldFail) {
+        widthOut = lcevcData->global_config.width;
+        heightOut = lcevcData->global_config.height;
+    }
+
+    const LCEVC_ReturnCode returnCode =
+        (timeout ? LCEVC_Timeout : (shouldFail ? LCEVC_Error : LCEVC_Success));
+    return returnCode;
 }
 
 LCEVC_ReturnCode Decoder::skip(int64_t timestamp)
@@ -299,7 +380,7 @@ LCEVC_ReturnCode Decoder::skip(int64_t timestamp)
         if (curBase.getTimehandle() > baseTHToSkip) {
             break;
         }
-        m_baseContainer.pop();
+        m_baseContainer.pop_front();
 
         triggerEvent(Event(LCEVC_BasePictureDone, base));
         m_finishedBaseContainer.push(base);
@@ -317,17 +398,11 @@ LCEVC_ReturnCode Decoder::skip(int64_t timestamp)
         triggerEvent(LCEVC_CanSendEnhancement);
     }
 
-    // Add a "skipped" result for this timestamp (if it doesn't already exist). Set aside a picture
-    // handle, but it'll just be empty.
-    if (findDecodeResult(baseTHToSkip) == nullptr) {
-        const Handle<Picture> dest = m_pendingOutputContainer.front();
-        m_pendingOutputContainer.pop();
-        m_resultsQueue.emplace_back(dest, LCEVC_Success, discontinuityCount, timestamp, true);
-    }
-
-    // Set any earlier results as skipped
+    // If we have any decode results for this or earlier timestamps, set them to skipped. Note: we
+    // only need to do this for decodes that have already produced a decode result. For other
+    // timestamps, it's like they simply never happened.
     for (auto& thAndInfo : m_resultsQueue) {
-        if (thAndInfo.decodeInfo.timestamp < timestamp) {
+        if (thAndInfo.decodeInfo.timestamp <= timestamp) {
             thAndInfo.decodeInfo.skipped = true;
         }
     }
@@ -343,7 +418,7 @@ LCEVC_ReturnCode Decoder::synchronize(bool dropPending)
     //
     // AccelContext* context = m_accelContextPool.lookup(m_accelContextHandle);
     // context->synchronize(dropPending);
-    VNUnused(dropPending);
+    VN_UNUSED(dropPending);
     return LCEVC_Success;
 }
 
@@ -396,7 +471,7 @@ bool Decoder::getNextDecodeData(BaseData& nextBase,
     nextOutput = m_pendingOutputContainer.front();
     nextProcessedLcevcData = m_lcevcProcessor.extractProcessedLcevcData(timehandle);
     nextBase = m_baseContainer.front();
-    m_baseContainer.pop();
+    m_baseContainer.pop_front();
     m_pendingOutputContainer.pop();
 
     // Trigger non-full events
@@ -495,31 +570,24 @@ bool Decoder::unlockPicture(Handle<PictureLock> pictureLock)
     return true;
 }
 
-bool Decoder::shouldPassthrough(bool timeout, bool forcePassthrough, bool lcevcAvailable,
-                                bool& shouldFailOut) const
+std::pair<bool, bool> Decoder::shouldPassthroughOrFail(bool timeout, bool lcevcAvailable) const
 {
-    shouldFailOut = false;
-    if (timeout || forcePassthrough) {
-        return true;
-    }
+    const bool needToPassthrough = timeout || !lcevcAvailable;
 
     switch (m_config.getPassthroughMode()) {
-        case DILPassthroughPolicy::Disable: {
-            if (!lcevcAvailable) {
-                shouldFailOut = true;
-            }
-            return false;
+        case PassthroughPolicy::Disable: {
+            return {false, needToPassthrough};
         }
 
-        case DILPassthroughPolicy::Allow: {
-            return !lcevcAvailable;
+        case PassthroughPolicy::Allow: {
+            return {needToPassthrough, false};
         }
 
-        case DILPassthroughPolicy::Force: {
-            return true;
+        case PassthroughPolicy::Force: {
+            return {true, false};
         }
     }
-    return false;
+    return {false, false};
 }
 
 Result& Decoder::populateDecodeResult(Handle<Picture> decodeDest, const BaseData& baseData,
@@ -530,20 +598,10 @@ Result& Decoder::populateDecodeResult(Handle<Picture> decodeDest, const BaseData
 
     const LCEVC_ReturnCode returnCode =
         (shouldFail ? LCEVC_Error : (wasTimeout ? LCEVC_Timeout : LCEVC_Success));
-    const int64_t timestamp = timehandleGetTimestamp(base.getTimehandle());
     const uint16_t discontinuityCount = timehandleGetCC(base.getTimehandle());
-    auto& result =
-        m_resultsQueue.emplace_back(decodeDest, returnCode, discontinuityCount, timestamp, false);
-
-    result.decodeInfo.hasBase = true;
-    result.decodeInfo.baseBitdepth = base.getBitdepth();
-    result.decodeInfo.baseWidth = base.getWidth();
-    result.decodeInfo.baseHeight = base.getHeight();
-    result.decodeInfo.userData = base.getUserData();
-
-    result.decodeInfo.hasEnhancement = lcevcAvailable;
-
-    result.decodeInfo.enhanced = !shouldPassthrough && !shouldFail;
+    auto& result = m_resultsQueue.emplace_back(
+        decodeDest, returnCode, discontinuityCount,
+        DecodeInformation(base, lcevcAvailable, shouldPassthrough, shouldFail));
 
     return result;
 }
@@ -556,6 +614,20 @@ Result* Decoder::findDecodeResult(uint64_t timehandle)
                    (res.discontinuityCount == timehandleGetCC(timehandle));
         });
     return (existingResult == m_resultsQueue.end() ? nullptr : &(*existingResult));
+}
+
+BaseData* Decoder::findBaseData(uint64_t timehandle)
+{
+    if (m_baseContainer.empty()) {
+        return nullptr;
+    }
+
+    const auto findBase = [this, timehandle](const BaseData& baseData) {
+        const Picture& pic = *(getPicture(baseData.nonNullHandle));
+        return (pic.getTimehandle() == timehandle);
+    };
+    auto iterToBase = std::find_if(m_baseContainer.begin(), m_baseContainer.end(), findBase);
+    return (iterToBase == m_baseContainer.end() ? nullptr : &(*iterToBase));
 }
 
 void Decoder::tryToQueueDecodes()
@@ -581,15 +653,14 @@ LCEVC_ReturnCode Decoder::doDecode(const BaseData& baseData, const perseus_decod
                                    Handle<Picture> decodeDest, Result*& resultOut)
 {
     // First, check whether we fail, passthrough, or enhance:
-    const bool timeout = ((baseData.insertionTime + baseData.timeoutUs) < m_clock.getTimeSinceStart());
-    const bool forcePassthrough = (m_config.getPassthroughMode() == DILPassthroughPolicy::Force);
+    const bool timeout =
+        static_cast<int64_t>(baseData.insertionTime + baseData.timeoutUs) < m_clock.getElapsedTime();
     const bool lcevcAvailable = (processedLcevcData != nullptr);
-    bool shouldFail = false;
-    const bool passthrough = shouldPassthrough(timeout, forcePassthrough, lcevcAvailable, shouldFail);
+    const auto [shouldPassthrough, shouldFail] = shouldPassthroughOrFail(timeout, lcevcAvailable);
 
     // Based on this, populate decode result (including whether it fails).
-    resultOut =
-        &populateDecodeResult(decodeDest, baseData, lcevcAvailable, shouldFail, passthrough, timeout);
+    resultOut = &populateDecodeResult(decodeDest, baseData, lcevcAvailable, shouldFail,
+                                      shouldPassthrough, timeout);
 
     // NOW fail, if necessary
     Picture& base = *(getPicture(baseData.nonNullHandle));
@@ -599,12 +670,12 @@ LCEVC_ReturnCode Decoder::doDecode(const BaseData& baseData, const perseus_decod
                    ": We were%s able to find lcevc data, failing decode. Passthrough mode is %d\n",
                    timehandleGetTimestamp(timehandle), timehandleGetCC(timehandle),
                    (lcevcAvailable ? "" : " NOT"), m_config.getPassthroughMode());
-        return LCEVC_Error;
+        return (timeout ? LCEVC_Timeout : LCEVC_Error);
     }
 
     // Not failing, i.e. either passthrough or enhance, so set up the destination pic.
     Picture& decodeDestPic = *getPicture(decodeDest);
-    if (!decodeSetupOutputPic(decodeDestPic, processedLcevcData, base)) {
+    if (!decodeSetupOutputPic(decodeDestPic, shouldPassthrough ? nullptr : processedLcevcData, base)) {
         VNLogError("CC %u, PTS %" PRId64 ": Failed to setup output pic. Perhaps invalid "
                    "formats, or unmodifiable destination?\n",
                    timehandleGetCC(timehandle), timehandleGetTimestamp(timehandle));
@@ -612,8 +683,8 @@ LCEVC_ReturnCode Decoder::doDecode(const BaseData& baseData, const perseus_decod
     }
 
     // Now, passthrough or enhance.
-    if (passthrough) {
-        if (!timeout && !forcePassthrough) {
+    if (shouldPassthrough) {
+        if (!timeout && !(m_config.getPassthroughMode() == PassthroughPolicy::Force)) {
             VNLogInfo("CC %u, PTS %" PRId64 ": Doing passthrough, due to lack of lcevc data.\n",
                       timehandleGetTimestamp(timehandle), timehandleGetCC(timehandle));
         }
@@ -634,19 +705,24 @@ LCEVC_ReturnCode Decoder::decodeEnhance(const BaseData& baseData,
     // Get a base (either a non-deleting pointer to the base, or a deleting pointer to a copy).
     Picture& base = *(getPicture(baseData.nonNullHandle));
     std::shared_ptr<Picture> baseToUse = decodeEnhanceGetBase(base, processedLcevcData);
+    std::shared_ptr<Picture> intermediatePicture =
+        decodeEnhanceGetIntermediate(baseToUse, processedLcevcData);
     const uint64_t timehandle = baseToUse->getTimehandle();
 
     // Set up the images used by the Core decoder.
     perseus_image coreBase = {};
+    perseus_image coreIntermediate = {};
     perseus_image coreEnhanced = {};
-    if (!decodeEnhanceSetupCoreImages(*baseToUse, decodeDest, coreBase, coreEnhanced)) {
-        VNLogError("CC %u, PTS %" PRId64 ": Failed to set up Core Images.\n",
+
+    if (!decodeEnhanceSetupCoreImages(*baseToUse, intermediatePicture, decodeDest, coreBase,
+                                      coreIntermediate, coreEnhanced)) {
+        VNLogError("CC %u, PTS %" PRId64 ": Failed to set up core images.\n",
                    timehandleGetTimestamp(timehandle), timehandleGetCC(timehandle));
         return LCEVC_Error;
     }
 
     // Do the actual decode.
-    return decodeEnhanceCore(timehandle, coreBase, coreEnhanced, processedLcevcData);
+    return decodeEnhanceCore(timehandle, coreBase, coreIntermediate, coreEnhanced, processedLcevcData);
 }
 
 bool Decoder::decodeSetupOutputPic(Picture& enhancedPic, const perseus_decoder_stream* processedLcevcData,
@@ -692,18 +768,46 @@ std::shared_ptr<Picture> Decoder::decodeEnhanceGetBase(Picture& originalBase,
     return newPic;
 }
 
-bool Decoder::decodeEnhanceSetupCoreImages(Picture& basePic, Picture& enhancedPic,
-                                           perseus_image& baseOut, perseus_image& enhancedOut)
+std::shared_ptr<Picture> Decoder::decodeEnhanceGetIntermediate(std::shared_ptr<Picture> basePicture,
+                                                               const perseus_decoder_stream& processedLcevcData)
+{
+    perseus_scaling_mode level1Scale = processedLcevcData.global_config.scaling_modes[PSS_LOQ_1];
+    if (level1Scale != PSS_SCALE_0D) {
+        LCEVC_PictureDesc intermediateDesc = {};
+        basePicture->getDesc(intermediateDesc);
+        intermediateDesc.height =
+            (level1Scale == PSS_SCALE_2D) ? intermediateDesc.height * 2 : intermediateDesc.height;
+        intermediateDesc.width *= 2;
+        std::shared_ptr<Picture> newPic = std::make_shared<PictureManaged>(m_bufferManager);
+        newPic->setDesc(intermediateDesc);
+        return newPic;
+    }
+    return nullptr;
+}
+
+bool Decoder::decodeEnhanceSetupCoreImages(Picture& basePic, std::shared_ptr<Picture> intermediatePicture,
+                                           Picture& enhancedPic, perseus_image& baseOut,
+                                           perseus_image& intermediateOut, perseus_image& enhancedOut)
 {
     if (!basePic.toCoreImage(baseOut)) {
-        VNLogError("CC %u, PTS %" PRId64 ": Failed to get Core image from Base\n",
+        VNLogError("CC %u, PTS %" PRId64 ": Failed to get core image from base picture\n",
                    timehandleGetCC(basePic.getTimehandle()),
                    timehandleGetTimestamp(basePic.getTimehandle()));
         return false;
     }
 
+    if (intermediatePicture) {
+        if (!intermediatePicture->toCoreImage(intermediateOut)) {
+            VNLogError("CC %u, PTS %" PRId64
+                       ": Failed to get core image from intermediate picture\n",
+                       timehandleGetCC(intermediatePicture->getTimehandle()),
+                       timehandleGetTimestamp(intermediatePicture->getTimehandle()));
+            return false;
+        }
+    }
+
     if (!enhancedPic.toCoreImage(enhancedOut)) {
-        VNLogError("CC %u, PTS %" PRId64 ": Failed to get Core image from Base\n",
+        VNLogError("CC %u, PTS %" PRId64 ": Failed to get core image from enhanced picture\n",
                    timehandleGetCC(basePic.getTimehandle()),
                    timehandleGetTimestamp(basePic.getTimehandle()));
         return false;
@@ -721,22 +825,30 @@ bool Decoder::decodeEnhanceSetupCoreImages(Picture& basePic, Picture& enhancedPi
 }
 
 LCEVC_ReturnCode Decoder::decodeEnhanceCore(uint64_t timehandle, const perseus_image& coreBase,
+                                            const perseus_image& coreIntermediate,
                                             const perseus_image& coreEnhanced,
                                             const perseus_decoder_stream& processedLcevcData)
 {
+    const perseus_image* coreBaseInternal = &coreBase;
+    if (processedLcevcData.global_config.scaling_modes[PSS_LOQ_1] != PSS_SCALE_0D) {
+        perseus_decoder_upscale(m_coreDecoder, &coreIntermediate, &coreBase, PSS_LOQ_2);
+        coreBaseInternal = &coreIntermediate;
+    }
+
     // Decode base
-    if (perseus_decoder_decode_base(m_coreDecoder, &coreBase) != 0) {
+    if (perseus_decoder_decode_base(m_coreDecoder, coreBaseInternal) != 0) {
         VNLogError("CC %u, PTS %" PRId64 ": Failed to decode Perseus base LOQ.\n",
                    timehandleGetTimestamp(timehandle), timehandleGetCC(timehandle));
         return LCEVC_Error;
     }
 
-    if (perseus_decoder_upscale(m_coreDecoder, &coreEnhanced, &coreBase, PSS_LOQ_1) != 0) {
+    if (perseus_decoder_upscale(m_coreDecoder, &coreEnhanced, coreBaseInternal, PSS_LOQ_1) != 0) {
         VNLogError("CC %u, PTS %" PRId64 ": Failed to upscale Perseus.\n",
                    timehandleGetTimestamp(timehandle), timehandleGetCC(timehandle));
         return LCEVC_Error;
     }
 
+    // In-loop sharpening not supported by encoder, currently unreachable
     if ((processedLcevcData.s_info.mode == PSS_S_MODE_IN_LOOP) &&
         (perseus_decoder_apply_s(m_coreDecoder, &coreEnhanced) != 0)) {
         VNLogError("CC %u, PTS %" PRId64 ": Failed to apply sfilter in loop.\n",
@@ -753,7 +865,7 @@ LCEVC_ReturnCode Decoder::decodeEnhanceCore(uint64_t timehandle, const perseus_i
 
     // output.resizeCrop();
 
-    if ((processedLcevcData.s_info.mode == PSS_S_MODE_OUT_OF_LOOP) &&
+    if ((processedLcevcData.s_info.mode == PSS_S_MODE_OUT_OF_LOOP || m_config.getSFilterStrength() > 0.0f) &&
         (perseus_decoder_apply_s(m_coreDecoder, &coreEnhanced) != 0)) {
         VNLogError("CC %u, PTS %" PRId64 "Failed to apply sfilter out of loop.\n",
                    timehandleGetTimestamp(timehandle), timehandleGetCC(timehandle));

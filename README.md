@@ -20,7 +20,7 @@ Low Complexity Enhancement Video Codec Decoder (LCEVC_DEC) is the primary MPEG-5
 
 ## Requirements
 
-See [Getting Started](docs/getting_started.md) to set up the appropiate build tools for the host OS.
+See [Getting Started](docs/getting_started.md) to set up the appropriate build tools for the host OS.
 
 ## Building
 
@@ -29,6 +29,7 @@ See:
  * [Building - Linux](docs/building_linux.md) to build Linux hosted targets.
  * [Building - macOS](docs/building_macos.md) to build macOS hosted targets.
  * [Building - Windows](docs/building_windows.md) to build Windows hosted targets.
+ * [(Optional) Building with PGO](docs/building_with_pgo.md) to build with Profile-Guided Optimization.
 
 ## Installation
 
@@ -40,6 +41,10 @@ To install, build and upload a Conan package for **LCEVC_DEC** see [Conan Packag
 
 ## Notice
 
-Copyright © V-Nova Limited 2023
+Copyright © V-Nova Limited 2014-2024
 
-This software is protected by copyrights and other intellectual property rights and no license is granted to any such rights. If you would like to obtain a license to compile, distribute, or make any other use of this software, please contact V-Nova Limited info@v-nova.com.
+Additional Information and Restrictions
+* The LCEVCdec software is licensed under the BSD-3-CLAUSE-CLEAR License
+* The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+* If the software is incorporated into another project, THE TERMS OF THE BSD 3-Clause Clear License and the additional licensing information contained in this folder MUST BE MAINTAINED, AND THE SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT.
+* ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE EXCLUSION OF PATENT LICENSES PROVISION OF THIS BSD-3-CLAUSE-CLEAR LICENSE. For enquiries about patent licenses, please contact legal@v-nova.com.

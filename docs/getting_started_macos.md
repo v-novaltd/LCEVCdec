@@ -8,23 +8,25 @@ Via homebrew or a package manager in your distro:
 brew install git git-lfs
 ```
 
-## Python
-
-This should come with Xcode, see below.
-
 ## Xcode
 
-Xcode is required for Apple. It should also include things that are needed in other steps. In particular, it should include python, pip, and python-venv. Beware: your system may use either `python3` and `pip3`, or `python` and `pip`.
+Xcode is required for Apple. It should also include things that are needed in other steps. In particular, it should include python, pip, and python-venv. Beware: your system may use either `python3` and `pip3`, or `python` and `pip`. Python versions 3.7 - 3.11 are known to be supported.
+
+## Python
+
+Once installed with xcode, install requirements with:
+
+```shell
+pip install -r requirements.txt
+pip install -r cmake/tools/lint_requirements.txt
+pip install -r src/func_tests/test_requirements.txt
+```
 
 ## Installing and Configuring Conan
 
 Conan is software that uses python to manage C/C++ packages. You will need to have Conan installed to get V-Nova's package recipes and prebuilt packages, which will then be fed into CMake to come up with build configurations. Most steps involving Conan will require access to the VPN, or an in-office ethernet connection.
 
 Conan is installed and configured from the `lcevc_dec` repo, using pip. You may wish to use a virtualenv (python-venv or python3-venv) for this.
-
-```shell
-pip install -r requirements.txt
-```
 
 That step will also get other required python modules, as a happy little bonus.
 

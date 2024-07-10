@@ -17,30 +17,3 @@ Options:
   VN_CORE_FORCE_OVERLAY: @VN_CORE_FORCE_OVERLAY@
   VN_INTEGRATION_OPENGL: @VN_INTEGRATION_OPENGL@
   VN_INTEGRATION_WEBM: @VN_INTEGRATION_WEBM@
-
-Words
-
-## Building sample code
-
-More words
-
-### Windows using CMake Visual Studio 2019
-
-    mkdir sample_build
-    cd sample_build
-    cmake -G "Visual Studio 2019" ..\sample
-    cmake --build .
-
-### Windows using CMake and Ninja
-
-    mkdir sample_build
-    cd sample_build
-    cmake -G Ninja ..\sample
-    cmake --build .
-
-### Linux using Ninja
-
-    mkdir sample_build
-    cd sample_build
-    cmake -G Ninja ../sample
-    cmake --build .
