@@ -51,6 +51,9 @@ target_link_libraries(
 
 # Installation.
 #
+
+include(GNUInstallDirs)
+
 get_target_property(IS_APPLE_FRAMEWORK lcevc_dec_api FRAMEWORK)
 if(IS_APPLE_FRAMEWORK)
     install(TARGETS lcevc_dec_api DESTINATION lib)
@@ -58,4 +61,4 @@ else()
     install(TARGETS lcevc_dec_api)
 endif()
 
-install(FILES ${INTERFACES} DESTINATION "include/LCEVC")
+install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC")

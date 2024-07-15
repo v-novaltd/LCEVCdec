@@ -24,5 +24,5 @@ target_include_directories(
     PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
     PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
 
-install(FILES ${INTERFACES} DESTINATION "include/LCEVC")
-install(TARGETS lcevc_dec_core_sequencing DESTINATION lib)
+install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC")
+install(TARGETS lcevc_dec_core_sequencing)

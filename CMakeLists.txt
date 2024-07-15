@@ -130,15 +130,18 @@ configure_file("cmake/templates/README.md.in" "install_config/README.md")
 
 # Top level install
 #
-install(FILES "COPYING" DESTINATION "./")
-install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "./")
-install(FILES "cmake/install/conanfile.txt" DESTINATION "./")
-install(FILES "cmake/install/lcevc_dec.pc" DESTINATION "./pkgconfig/")
-install(DIRECTORY "licenses" DESTINATION "./")
-install(FILES "LICENSE.md" DESTINATION "./licenses/LCEVCdec")
+# Define the variabels to install files based on the GNU conventions
+include(GNUInstallDirs)
+
+install(FILES "COPYING" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES "cmake/install/conanfile.txt" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES "cmake/install/lcevc_dec.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
+install(DIRECTORY "licenses" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES "LICENSE.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses/LCEVCdec")
 
 #
-install(FILES "include/LCEVC/lcevc.h" DESTINATION "./include/LCEVC")
+install(FILES "include/LCEVC/lcevc.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC")
 
 #
 if(VN_SDK_EXECUTABLES)
