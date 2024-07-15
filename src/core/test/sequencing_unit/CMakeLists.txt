@@ -17,7 +17,7 @@ lcevc_set_properties(lcevc_core_sequencing_test_unit)
 target_sources(lcevc_core_sequencing_test_unit PRIVATE ${SOURCES})
 
 find_package(GTest REQUIRED CONFIG)
-target_link_libraries(lcevc_core_sequencing_test_unit PRIVATE lcevc_dec::sequencing GTest::GTest)
+target_link_libraries(lcevc_core_sequencing_test_unit PRIVATE lcevc_dec::sequencing GTest::gtest)
 
 add_executable(lcevc_dec::core_sequencing_test_unit ALIAS lcevc_core_sequencing_test_unit)
 
