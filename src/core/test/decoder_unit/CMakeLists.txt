@@ -34,7 +34,7 @@ target_link_libraries(
             lcevc_dec::unit_test_utilities
             lcevc_dec::platform
             lcevc_dec::compiler
-            GTest::gtest
+            GTest::gtest_main
             range-v3::range-v3
             $<TARGET_NAME_IF_EXISTS:ghcFilesystem::ghc_filesystem>)
 

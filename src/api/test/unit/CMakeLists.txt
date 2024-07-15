@@ -23,6 +23,6 @@ target_include_directories(lcevc_dec_test_unit
 
 target_link_libraries(
     lcevc_dec_test_unit PRIVATE lcevc_dec::api_static lcevc_dec::compiler lcevc_dec::platform
-                                lcevc_dec::utility GTest::gtest)
+                                lcevc_dec::utility GTest::gtest_main)
 
 install(TARGETS lcevc_dec_test_unit DESTINATION "bin")
