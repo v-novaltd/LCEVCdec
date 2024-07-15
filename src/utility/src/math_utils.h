@@ -32,7 +32,7 @@ static inline uint8_t clz(uint32_t n)
 #if defined WIN32
     return (uint8_t)(_lzcnt_u32(n));
 #elif defined __linux__ && (__GNUC__ >= 14)
-    return (uint8_t)(__builtin_clzg(n, (8 * sizeof(n)));
+    return (uint8_t)(__builtin_clzg(n, (int) (8 * sizeof(n))));
 #else
     if (n == 0) {
         return (8 * sizeof(n));

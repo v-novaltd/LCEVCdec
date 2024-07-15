@@ -21,7 +21,7 @@
 
 /*- General utility functions -------------------------------------------------------------------*/
 
-static inline uint8_t clz(int32_t streamData, uint8_t numBits)
+static inline uint8_t clz(uint32_t streamData, uint8_t numBits)
 {
 #if defined WIN32
     return (uint8_t)(_lzcnt_u32(streamData) + numBits - 32);
@@ -29,7 +29,7 @@ static inline uint8_t clz(int32_t streamData, uint8_t numBits)
     /* Annoyingly, it's undefined behaviour if you provide 0 to __builtin_clz. To match the Windows
      * behaviour (where 0 is just another leading zero), we need clzg, with sizeof(streamData) as
      * the default arg. */
-    return (uint8_t)(__builtin_clzg(streamData, (sizeof(streamData) * 8)) + numBits - 32);
+    return (uint8_t)(__builtin_clzg(streamData, (int) (sizeof(streamData) * 8)) + numBits - 32);
 #else
     /* clzg is only available in GCC version 14 or later. Outside that, we just do it manually. */
     if (streamData == 0) {
