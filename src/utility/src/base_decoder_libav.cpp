@@ -37,6 +37,7 @@ extern "C"
 }
 
 #include <fmt/core.h>
+#include <fmt/format.h>
 //
 #include <cassert>
 #include <iostream>
@@ -273,7 +274,7 @@ int BaseDecoderLibAV::addFilter(std::string_view filter)
 
     const std::string args =
         fmt::format("width={}:height={}:pix_fmt={}:time_base=1/1:sar={}/{}", m_videoDecCtx->width,
-                    m_videoDecCtx->height, m_videoDecCtx->pix_fmt,
+                    m_videoDecCtx->height, (int) m_videoDecCtx->pix_fmt,
                     m_videoDecCtx->time_base.num ? m_videoDecCtx->time_base.num : 1,
                     m_videoDecCtx->time_base.den, m_videoDecCtx->sample_aspect_ratio.num,
                     m_videoDecCtx->sample_aspect_ratio.den);
@@ -498,7 +499,7 @@ bool BaseDecoderLibAV::update()
             }
             if (extractResult < 0) {
                 fmt::print(stderr, "extract function failed, data {}, size {}\n",
-                           m_videoPacket->data, m_videoPacket->size);
+                           fmt::ptr(m_videoPacket->data), m_videoPacket->size);
             }
 
             av_packet_unref(m_videoPacket);
@@ -713,7 +714,7 @@ namespace {
 #endif
             case AV_PIX_FMT_GRAY16LE: return LCEVC_GRAY_16_LE;
             default: {
-                fmt::print("base_decoder_libav: Couldn't deduce format from AVPixelFormat ({}).\n", fmt);
+                fmt::print("base_decoder_libav: Couldn't deduce format from AVPixelFormat ({}).\n", (int) fmt);
                 return LCEVC_ColorFormat_Unknown;
             }
         }
