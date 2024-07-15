@@ -30,7 +30,7 @@ option(VN_SDK_USE_GHC_FILESYSTEM "Use ghc-filesystem instead of C++ standard <fi
 option(VN_SDK_COVERAGE "Generate gcov statistics for coverage" OFF)
 
 set(VN_SDK_FFMPEG_LIBS_PACKAGE
-    "ffmpeg-libs-minimal"
+    "pkgconfig"
     CACHE
         STRING
         "SDK: Package to find for the 'ffmpeg...'' libraries used by samples and tests to decode base streams, or empty string for none"
