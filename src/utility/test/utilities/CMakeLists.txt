@@ -26,4 +26,4 @@ target_link_libraries(lcevc_dec_unit_test_utilities lcevc_dec::utility fmt::fmt
 
 add_library(lcevc_dec::unit_test_utilities ALIAS lcevc_dec_unit_test_utilities)
 
-install(TARGETS lcevc_dec_unit_test_utilities DESTINATION lib)
+install(TARGETS lcevc_dec_unit_test_utilities)

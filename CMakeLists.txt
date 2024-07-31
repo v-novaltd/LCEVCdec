@@ -30,7 +30,7 @@ option(VN_SDK_USE_GHC_FILESYSTEM "Use ghc-filesystem instead of C++ standard <fi
 option(VN_SDK_COVERAGE "Generate gcov statistics for coverage" OFF)
 
 set(VN_SDK_FFMPEG_LIBS_PACKAGE
-    "ffmpeg-libs-minimal"
+    "pkgconfig"
     CACHE
         STRING
         "SDK: Package to find for the 'ffmpeg...'' libraries used by samples and tests to decode base streams, or empty string for none"
@@ -124,21 +124,26 @@ if(VN_SDK_DOCS)
     lcevc_add_subdirectory(docs/sphinx)
 endif()
 
+# Define the variabels to install files based on the GNU conventions
+include(GNUInstallDirs)
+
 # Record configuration - header and README
 configure_file("cmake/templates/lcevc_config.h.in" "generated/lcevc_config.h")
 configure_file("cmake/templates/README.md.in" "install_config/README.md")
 
+configure_file("cmake/templates/lcevc_dec.pc.in" "generated/lcevc_dec.pc" @ONLY)
+
 # Top level install
 #
-install(FILES "COPYING" DESTINATION "./")
-install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "./")
-install(FILES "cmake/install/conanfile.txt" DESTINATION "./")
-install(FILES "cmake/install/lcevc_dec.pc" DESTINATION "./pkgconfig/")
-install(DIRECTORY "licenses" DESTINATION "./")
-install(FILES "LICENSE.md" DESTINATION "./licenses/LCEVCdec")
+install(FILES "COPYING" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES "cmake/install/conanfile.txt" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_dec.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
+install(DIRECTORY "licenses" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES "LICENSE.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses/LCEVCdec")
 
 #
-install(FILES "include/LCEVC/lcevc.h" DESTINATION "./include/LCEVC")
+install(FILES "include/LCEVC/lcevc.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC")
 
 #
 if(VN_SDK_EXECUTABLES)

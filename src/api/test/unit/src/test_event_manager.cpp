@@ -18,6 +18,7 @@
 #include <LCEVC/lcevc_dec.h>
 
 #include <array>
+#include <algorithm>
 
 using namespace lcevc_dec::decoder;
 
