@@ -16,7 +16,9 @@
 #include "LCEVC/utility/check.h"
 #include "LCEVC/utility/string_utils.h"
 
-#include <fmt/core.h>
+#if __MINGW32__ && (__cplusplus >= 202207L)
+#include "../fmt/core.h"
+#endif
 
 #include <regex>
 
@@ -104,7 +106,11 @@ LCEVC_PictureDesc parseRawName(std::string_view name, float& rate)
 
     LCEVC_PictureDesc pictureDescription{};
     if (colorFormat == LCEVC_ColorFormat_Unknown) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print("parse_raw_name: Couldn't deduce format from filename\n");
+#else
+        printf("parse_raw_name: Couldn't deduce format from filename\n");
+#endif
         return pictureDescription;
     }
 
