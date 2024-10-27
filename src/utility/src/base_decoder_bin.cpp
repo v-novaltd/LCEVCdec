@@ -15,7 +15,9 @@
 #include "LCEVC/utility/picture_layout.h"
 #include "LCEVC/utility/raw_reader.h"
 
+#if __MINGW32__ && (__cplusplus >= 202207L)
 #include <fmt/core.h>
+#endif
 
 #include <iterator>
 #include <set>
@@ -198,12 +200,20 @@ bool BaseDecoderBin::probe(std::string_view binFile)
     }
 
     if (timestamps.empty()) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print("base_decoder_bin: probe found empty BIN file.\n");
+#else
+        printf("base_decoder_bin: probe found empty BIN file.\n");
+#endif
         return false;
     }
 
     if (timestamps.size() != count) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print("base_decoder_bin: probe found duplicate timestamps in BIN file.\n");
+#else
+        printf("base_decoder_bin: probe found empty BIN file.\n");
+#endif
         return false;
     }
 
@@ -220,7 +230,11 @@ bool BaseDecoderBin::probe(std::string_view binFile)
     int64_t testTimestamp = m_timestampStart;
     for (const auto ts : timestamps) {
         if (ts != testTimestamp) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
             fmt::print("base_decoder_bin: warning: probe found missing timestamp {}.\n", ts);
+#else
+            printf("base_decoder_bin: warning: probe found missing timestamp %lld.\n", (int64_t)ts);
+#endif
             break;
         }
         testTimestamp += m_timestampStep;
