@@ -14,7 +14,9 @@
 #include "LCEVC/utility/check.h"
 #include "math_utils.h"
 
-#include <fmt/core.h>
+#if __MINGW32__ && (__cplusplus >= 201907L)
+#include "../fmt/core.h"
+#endif
 #include <LCEVC/utility/picture_layout.h>
 
 #include <cassert>
@@ -290,7 +292,13 @@ uint32_t PictureLayout::planeGroups() const
 // Construct a vooya/YUView style filename from base
 std::string PictureLayout::makeRawFilename(std::string_view name) const
 {
+#if __MINGW32__ && (__cplusplus >= 201907L)
     return fmt::format("{}_{}x{}{}", name, width(), height(), m_layoutInfo->suffix);
+#else
+    std::string s = {name.begin(), name.end()};
+    return std::string(s+"_"+std::to_string(width())+"x"+\
+                       std::to_string(height())+m_layoutInfo->suffix);
+#endif
 }
 
 } // namespace lcevc_dec::utility
