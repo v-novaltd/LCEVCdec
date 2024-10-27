@@ -13,7 +13,9 @@
 
 #include "LCEVC/lcevc_dec.h"
 
+#if __MINGW32__ && (__cplusplus >= 202207L)
 #include <fmt/core.h>
+#endif
 #include <rapidjson/document.h>
 
 #include <algorithm>
@@ -172,7 +174,11 @@ LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std
         }
 
         if (ret != LCEVC_NotFound && ret != LCEVC_Success) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
             fmt::print("Unknown parameter '{}'\n", item->name.GetString());
+#else
+            printf("Unknown parameter '%s'\n", item->name);
+#endif
             return ret;
         }
     }
