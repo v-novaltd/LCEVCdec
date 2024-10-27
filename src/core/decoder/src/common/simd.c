@@ -28,11 +28,11 @@ static CPUAccelerationFeatures_t detectX86Features(void) { return CAFSSE; }
 /*! \brief Helper function for loading CPUID. */
 static void loadCPUInfo(int32_t cpuInfo[4], int32_t field)
 {
-#if VN_OS(WINDOWS)
+#if VN_OS(WINDOWS) && !defined(__GNUC__)
     __cpuid(cpuInfo, field);
 #elif (VN_OS(LINUX) || VN_OS(ANDROID)) && !VN_OS(BROWSER)
     __cpuid_count(field, 0, cpuInfo[0], cpuInfo[1], cpuInfo[2], cpuInfo[3]);
-#elif VN_OS(MACOS) || VN_OS(IOS) || VN_OS(TVOS)
+#elif VN_OS(MACOS) || VN_OS(IOS) || VN_OS(TVOS) || defined(__GNUC__)
     __asm__ __volatile__("xchg %%ebx, %k[tempreg]\n\t"
                          "cpuid\n\t"
                          "xchg %%ebx, %k[tempreg]\n"
