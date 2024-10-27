@@ -16,7 +16,9 @@
 #include "bin_format.h"
 #include "LCEVC/utility/byte_order.h"
 
+#if __MINGW32__ && (__cplusplus >= 202207L)
 #include <fmt/core.h>
+#endif
 
 #include <algorithm>
 #include <fstream>
@@ -33,12 +35,20 @@ bool BinReader::readHeader()
     char magic[8] = {};
     uint32_t version = 0;
     if (!m_stream->read(magic, sizeof(magic)) || !readBigEndian(*m_stream, version)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Short BIN header.");
+#else
+        fprintf(stderr, "Short BIN header.");
+#endif
         return false;
     }
 
     if (std::memcmp(magic, kMagicBytes, sizeof(magic)) != 0 || version != kVersion) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Bad BIN header.");
+#else
+        fprintf(stderr, "Bad BIN header.");
+#endif
         return false;
     }
 
@@ -57,18 +67,30 @@ bool BinReader::read(int64_t& decodeIndex, int64_t& presentationIndex, std::vect
     }
 
     if (!readBigEndian(*m_stream, size)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Short BIN block.");
+#else
+        fprintf(stderr, "Short BIN block.");
+#endif
         return false;
     }
 
     // Payload header
     if (type != static_cast<uint16_t>(BlockTypes::LCEVCPayload) || size < 16) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Unrecognized BIN block.");
+#else
+        fprintf(stderr, "Unrecognized BIN block.");
+#endif
         return false;
     }
 
     if (!readBigEndian(*m_stream, decodeIndex) || !readBigEndian(*m_stream, presentationIndex)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Short Payload block.");
+#else
+        fprintf(stderr, "Short Payload block.");
+#endif
         return false;
     }
 
@@ -77,7 +99,11 @@ bool BinReader::read(int64_t& decodeIndex, int64_t& presentationIndex, std::vect
     char* data = static_cast<char*>(static_cast<void*>(payload.data()));
     auto sz = static_cast<std::streamsize>(payload.size());
     if (!m_stream->read(data, sz)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Short payload.");
+#else
+        fprintf(stderr, "Short payload.");
+#endif
         return false;
     }
 
