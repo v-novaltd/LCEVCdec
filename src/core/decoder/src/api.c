@@ -138,7 +138,7 @@ static inline bool bitdepthMatchesExpected(Logger_t log, const BitDepth_t expect
 }
 /*-----------------------------------------------------------------------------*/
 
-VN_DEC_CORE_API const char* perseus_get_version(void) { return CoreVersionFull(); }
+VN_DEC_CORE_API const char* perseus_get_version(void) { return CoreVersionFull; }
 
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_config_init(perseus_decoder_config* cfg)
 {
