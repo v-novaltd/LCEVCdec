@@ -15,7 +15,7 @@
 #include "math_utils.h"
 
 #if __MINGW32__ && (__cplusplus >= 201907L)
-#include "../fmt/core.h"
+#include <fmt/core.h>
 #endif
 #include <LCEVC/utility/picture_layout.h>
 
