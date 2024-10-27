@@ -13,7 +13,9 @@
 //
 #include "LCEVC/utility/string_utils.h"
 
+#if __MINGW32__ && (__cplusplus >= 201907L)
 #include <fmt/core.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -92,11 +94,19 @@ std::string hexDump(const uint8_t* data, uint32_t size, uint32_t offset)
     result.reserve(size * outputCharsByte + (size / bytesPerLine) * outputCharsPerLine);
 
     for (uint64_t line = 0; line < size; line += bytesPerLine) {
+#if __MINGW32__ && (__cplusplus >= 201907L)
         result += fmt::format("{:#06x} : ", offset + line);
+#else
+        result += std::string(std::to_string(offset + line));
+#endif
         // Bytes
         for (uint64_t byte = 0; byte < bytesPerLine; ++byte) {
             if (line + byte < size) {
+#if __MINGW32__ && (__cplusplus >= 201907L)
                 result += fmt::format("{:02x} ", data[line + byte]);
+#else
+                result += std::string(std::to_string(data[line + byte]));
+#endif
             } else {
                 result += "-- ";
             }
