@@ -17,7 +17,7 @@
 
 #include <string_view>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <direct.h>
 #include <io.h>
 #include <processthreadsapi.h>
@@ -37,7 +37,7 @@ namespace lcevc_dec::decoder {
 
 static const LogComponent kComp = LogComponent::Threading;
 
-#if defined(WIN32)
+#if defined(_WIN32)
 void setThreadName(std::wstring_view name)
 {
     if (!name.empty()) {
