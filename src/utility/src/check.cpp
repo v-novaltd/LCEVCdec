@@ -13,6 +13,8 @@
 
 #include "LCEVC/utility/types.h"
 
+#include <cstring>
+
 #include <fmt/core.h>
 
 void LCEVC_CheckFn(const char* file, int line, const char* expr, LCEVC_ReturnCode r)
