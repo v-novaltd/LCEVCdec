@@ -16,8 +16,6 @@
 #include "bin_format.h"
 #include "LCEVC/utility/byte_order.h"
 
-#include <fmt/core.h>
-
 #include <algorithm>
 #include <fstream>
 #include <ios>
