@@ -17,7 +17,7 @@
 #include "LCEVC/utility/string_utils.h"
 
 #if __MINGW32__ && (__cplusplus >= 202207L)
-#include "../fmt/core.h"
+#include <fmt/core.h>
 #endif
 
 #include <regex>
