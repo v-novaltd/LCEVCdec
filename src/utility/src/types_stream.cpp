@@ -13,7 +13,9 @@
 
 #include "LCEVC/utility/types_convert.h"
 
+#if __MINGW32__ && (__cplusplus >= 202207L)
 #include <fmt/core.h>
+#endif
 
 using namespace lcevc_dec::utility;
 
@@ -23,7 +25,11 @@ std::istream& operator>>(std::istream& in, LCEVC_ColorFormat& v)
     in >> str;
 
     if (!fromString(str.c_str(), v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ColorFormat: '{}'\n", str);
+#else
+        fprintf(stderr, "Not a valid ColorFormat: '%s'\n", str.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -36,7 +42,11 @@ std::istream& operator>>(std::istream& in, LCEVC_ReturnCode& v)
     in >> str;
 
     if (!fromString(str.c_str(), v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ReturnCode: '{}'\n", str);
+#else
+        fprintf(stderr, "Not a valid ReturnCode: '%s'\n", str.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -49,7 +59,11 @@ std::istream& operator>>(std::istream& in, LCEVC_ColorRange& v)
     in >> str;
 
     if (!fromString(str.c_str(), v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ColorRange: '{}'\n", str);
+#else
+        fprintf(stderr, "Not a valid ColorRange: '%s'\n", str.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -62,7 +76,11 @@ std::istream& operator>>(std::istream& in, LCEVC_ColorPrimaries& v)
     in >> str;
 
     if (fromString(str.c_str(), v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ColorPrimaries: '{}'\n", str);
+#else
+        fprintf(stderr, "Not a valid ColorPrimaries: '%s'\n", str.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -75,7 +93,11 @@ std::istream& operator>>(std::istream& in, LCEVC_TransferCharacteristics& v)
     in >> str;
 
     if (fromString(str.c_str(), v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ColorTransfer: '{}'\n", str);
+#else
+        fprintf(stderr, "Not a valid ColorTransfer: '%s'\n", str.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -88,7 +110,11 @@ std::istream& operator>>(std::istream& in, LCEVC_PictureFlag& v)
     in >> str;
 
     if (fromString(str.c_str(), v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid PictureFlag: '{}'\n", str);
+#else
+        fprintf(stderr, "Not a valid PictureFlag: '%s'\n", str.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -101,7 +127,11 @@ std::istream& operator>>(std::istream& in, LCEVC_Access& v)
     in >> str;
 
     if (fromString(str.c_str(), v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid Access: '{}'\n", str);
+#else
+        fprintf(stderr, "Not a valid Access: '%s'\n", str.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -114,7 +144,11 @@ std::istream& operator>>(std::istream& in, LCEVC_Event& v)
     in >> str;
 
     if (fromString(str.c_str(), v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid Event: '{}'\n", str);
+#else
+        fprintf(stderr, "Not a valid Event: '%s'\n", str.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
