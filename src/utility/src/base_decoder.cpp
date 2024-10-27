@@ -9,7 +9,6 @@
  * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
  * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include <fmt/core.h>
 #include <LCEVC/utility/base_decoder.h>
 #include <LCEVC/utility/picture_lock.h>
 

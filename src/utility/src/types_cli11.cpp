@@ -15,14 +15,20 @@
 #include "LCEVC/utility/types_convert.h"
 #include "LCEVC/utility/types_stream.h"
 
+#if __MINGW32__ && (__cplusplus >= 202207L)
 #include <fmt/core.h>
+#endif
 
 using namespace lcevc_dec::utility;
 
 bool lexical_cast(const std::string& input, LCEVC_ColorFormat& v) // NOLINT
 {
     if (!fromString(input, v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ColorFormat: '{}'\n", input);
+#else
+        fprintf(stderr, "Not a valid ColorFormat: '%s'\n", input.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -32,7 +38,11 @@ bool lexical_cast(const std::string& input, LCEVC_ColorFormat& v) // NOLINT
 bool lexical_cast(const std::string& input, LCEVC_ReturnCode& v) // NOLINT
 {
     if (!fromString(input, v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ReturnCode: '{}'\n", input);
+#else
+        fprintf(stderr, "Not a valid ReturnCode: '%s'\n", input.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -42,7 +52,11 @@ bool lexical_cast(const std::string& input, LCEVC_ReturnCode& v) // NOLINT
 bool lexical_cast(const std::string& input, LCEVC_ColorRange& v) // NOLINT
 {
     if (!fromString(input, v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ColorRange: '{}'\n", input);
+#else
+        fprintf(stderr, "Not a valid ColorRange: '%s'\n", input.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -52,7 +66,11 @@ bool lexical_cast(const std::string& input, LCEVC_ColorRange& v) // NOLINT
 bool lexical_cast(const std::string& input, LCEVC_ColorPrimaries& v) // NOLINT
 {
     if (!fromString(input, v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ColorPrimaries: '{}'\n", input);
+#else
+        fprintf(stderr, "Not a valid ColorPrimaries: '%s'\n", input.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -62,7 +80,11 @@ bool lexical_cast(const std::string& input, LCEVC_ColorPrimaries& v) // NOLINT
 bool lexical_cast(const std::string& input, LCEVC_TransferCharacteristics& v) // NOLINT
 {
     if (!fromString(input, v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ColorTransfer: '{}'\n", input);
+#else
+        fprintf(stderr, "Not a valid ColorTransfer: '%s'\n", input.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -72,7 +94,11 @@ bool lexical_cast(const std::string& input, LCEVC_TransferCharacteristics& v) //
 bool lexical_cast(const std::string& input, LCEVC_PictureFlag& v) // NOLINT
 {
     if (!fromString(input, v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid PictureFlag: '{}'\n", input);
+#else
+        fprintf(stderr, "Not a valid PictureFlag: '%s'\n", input.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -82,7 +108,11 @@ bool lexical_cast(const std::string& input, LCEVC_PictureFlag& v) // NOLINT
 bool lexical_cast(const std::string& input, LCEVC_Access& v) // NOLINT
 {
     if (!fromString(input, v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid ColorFormat: '{}'\n", input);
+#else
+        fprintf(stderr, "Not a valid ColorFormat: '%s'\n", input.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -92,7 +122,11 @@ bool lexical_cast(const std::string& input, LCEVC_Access& v) // NOLINT
 bool lexical_cast(const std::string& input, LCEVC_Event& v) // NOLINT
 {
     if (!fromString(input, v)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "Not a valid Event: '{}'\n", input);
+#else
+        fprintf(stderr, "Not a valid Event: '%s'\n", input.c_str());
+#endif
         std::exit(EXIT_FAILURE);
     }
 

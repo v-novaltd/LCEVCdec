@@ -30,6 +30,8 @@
 
 // Implementations of {fmt} specific formatters for types
 //
+#if __MINGW32__ && (__cplusplus >= 201907L)
 #include "LCEVC/utility/types_fmt.h"
+#endif
 
 #endif

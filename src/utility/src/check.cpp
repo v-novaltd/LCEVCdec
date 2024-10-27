@@ -13,12 +13,18 @@
 
 #include "LCEVC/utility/types.h"
 
+#if __MINGW32__ && (__cplusplus >= 202207L)
 #include <fmt/core.h>
+#endif
 
 void LCEVC_CheckFn(const char* file, int line, const char* expr, LCEVC_ReturnCode r)
 {
     if (r != LCEVC_Success) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "{}:{} '{}' failed: {}\n", file, line, expr, r);
+#else
+        fprintf(stderr, "%s:%d '%s' failed: %s\n", file, line, expr, (const char*)r);
+#endif
         std::exit(EXIT_FAILURE);
     }
 }
@@ -30,7 +36,11 @@ bool LCEVC_AgainFn(const char* file, int line, const char* expr, LCEVC_ReturnCod
     }
 
     if (r != LCEVC_Success) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "{}:{} '{}' failed: {}\n", file, line, expr, r);
+#else
+        fprintf(stderr, "%s:%d '%s' failed: %s\n", file, line, expr, (const char*)r);
+#endif
         std::exit(EXIT_FAILURE);
     }
 
@@ -41,9 +51,15 @@ void utilityCheckFn(const char* file, int line, const char* expr, bool r, const 
 {
     if (!r) {
         if (strcmp(msg, "") == 0) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
             fmt::print(stderr, "{}:{} '{}' returned {}\n", file, line, expr, r);
         } else {
             fmt::print(stderr, "{}:{} '{}' failed: {}\n", file, line, expr, msg);
+#else
+            fprintf(stderr, "%s:%d '%s' returned %s\n", file, line, expr, (const char*)r);
+        } else {
+            fprintf(stderr, "%s:%d '%s' failed: %s\n", file, line, expr, msg);
+#endif
         }
         std::exit(EXIT_FAILURE);
     }

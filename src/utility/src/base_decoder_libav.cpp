@@ -12,7 +12,6 @@
 // Implementation of base::Decoder that uses libavcodec and libavfilter
 //
 #include "LCEVC/utility/base_decoder.h"
-//
 #include "LCEVC/utility/extract.h"
 #include "LCEVC/utility/picture_layout.h"
 #include "LCEVC/utility/string_utils.h"
@@ -36,8 +35,10 @@ extern "C"
 #endif
 }
 
+#if __MINGW32__ && (__cplusplus >= 201907L)
 #include <fmt/core.h>
 #include <fmt/format.h>
+#endif
 //
 #include <cassert>
 #include <iostream>
@@ -182,7 +183,12 @@ int BaseDecoderLibAV::openInput(std::string_view input, std::string_view inputFo
     if (!inputFormatStr.empty()) {
         inputFormat = av_find_input_format(std::string(inputFormatStr).c_str());
         if (!inputFormat) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
             fmt::print("Unknown input format: {}\n", inputFormatStr);
+#else
+            std::string s = {inputFormatStr.begin(), inputFormatStr.end()};
+            printf("Unknown input format: %s\n", s.c_str());
+#endif
             return -1;
         }
     }
@@ -273,11 +279,20 @@ int BaseDecoderLibAV::addFilter(std::string_view filter)
     const AVFilter* bufferSrc = avfilter_get_by_name("buffer");
 
     const std::string args =
-        fmt::format("width={}:height={}:pix_fmt={}:time_base=1/1:sar={}/{}", m_videoDecCtx->width,
+#if __MINGW32__ && (__cplusplus >= 201907L)
+        fmt::format("width={}:height={}:pix_fmt={}:time_base={}/{}:sar={}/{}", m_videoDecCtx->width,
                     m_videoDecCtx->height, (int) m_videoDecCtx->pix_fmt,
                     m_videoDecCtx->time_base.num ? m_videoDecCtx->time_base.num : 1,
                     m_videoDecCtx->time_base.den, m_videoDecCtx->sample_aspect_ratio.num,
                     m_videoDecCtx->sample_aspect_ratio.den);
+#else
+        std::string("width="+std::to_string(m_videoDecCtx->width)+":height="+std::to_string(m_videoDecCtx->height)+\
+        ":pix_fmt="+std::to_string((int)m_videoDecCtx->pix_fmt)+\
+        ":time_base="+std::to_string(m_videoDecCtx->time_base.num?m_videoDecCtx->time_base.num:1)+\
+        "/"+std::to_string(m_videoDecCtx->time_base.den)+\
+        ":sar="+std::to_string(m_videoDecCtx->sample_aspect_ratio.num)+\
+        "/"+std::to_string(m_videoDecCtx->sample_aspect_ratio.den));
+#endif
 
     if (int r = avfilter_graph_create_filter(&m_bufferSrcCtx, bufferSrc, "in", args.c_str(),
                                              nullptr, m_filterGraph);
@@ -392,7 +407,11 @@ void BaseDecoderLibAV::copyImage(AVFrame* frame)
                                         frame->linesize, static_cast<AVPixelFormat>(frame->format),
                                         frame->width, frame->height, 1);
         r < 0) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "av_image_copy_to_buffer error: {}\n", libavError(r));
+#else
+        fprintf(stderr, "av_image_copy_to_buffer error: %s\n", libavError(r).c_str());
+#endif
         return;
     }
 
@@ -411,7 +430,11 @@ bool BaseDecoderLibAV::update()
                 if (r == AVERROR_EOF) {
                     m_state = State::FlushingParser;
                 } else {
+#if __MINGW32__ && (__cplusplus >= 202207L)
                     fmt::print(stderr, "av_read_frame error: {}\n", libavError(r));
+#else
+                    fprintf(stderr, "av_read_frame error: %s\n", libavError(r).c_str());
+#endif
                     break;
                 }
             } else {
@@ -498,8 +521,12 @@ bool BaseDecoderLibAV::update()
                 av_packet_ref(m_basePacket, m_videoPacket);
             }
             if (extractResult < 0) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
                 fmt::print(stderr, "extract function failed, data {}, size {}\n",
                            fmt::ptr(m_videoPacket->data), m_videoPacket->size);
+#else
+                fprintf(stderr, "extract function failed, data X, size %d\n", m_videoPacket->size);
+#endif
             }
 
             av_packet_unref(m_videoPacket);
@@ -523,7 +550,11 @@ bool BaseDecoderLibAV::update()
             }
             if (int r = avcodec_send_packet(m_videoDecCtx, m_basePacket); r < 0) {
                 if (r != AVERROR(EAGAIN)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
                     fmt::print(stderr, "avcodec_send_packet error: {}\n", libavError(r));
+#else
+                    fprintf(stderr, "avcodec_send_packet error: %s\n", libavError(r).c_str());
+#endif
                     break;
                 }
             } else {
@@ -540,7 +571,11 @@ bool BaseDecoderLibAV::update()
                     break;
                 }
                 if (r != AVERROR(EAGAIN)) {
-                    fmt::print(stderr, "avcodec_receive_frame error:  {}\n", libavError(r));
+#if __MINGW32__ && (__cplusplus >= 202207L)
+                    fmt::print(stderr, "avcodec_receive_frame error: {}\n", libavError(r));
+#else
+                    fprintf(stderr, "avcodec_receive_frame error: %s\n", libavError(r).c_str());
+#endif
                     break;
                 }
             } else {
@@ -548,7 +583,11 @@ bool BaseDecoderLibAV::update()
                 if (m_bufferSrcCtx) {
                     // Add frame to the filter
                     if (av_buffersrc_add_frame(m_bufferSrcCtx, m_frame) < 0) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
                         fmt::print(stderr, "av_buffersrc_add_frame error\n");
+#else
+                        fprintf(stderr, "av_buffersrc_add_frame error\n");
+#endif
                         break;
                     }
                 } else {
@@ -569,7 +608,11 @@ bool BaseDecoderLibAV::update()
                 }
 
                 if (r != AVERROR(EAGAIN)) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
                     fmt::print(stderr, "av_buffersink_get_frame error\n");
+#else
+                    fprintf(stderr, "av_buffersink_get_frame error\n");
+#endif
                     break;
                 }
             } else {
@@ -662,7 +705,11 @@ std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view input, std:
         av_image_get_buffer_size(decoder->m_pixelFormat, static_cast<int>(decoder->m_pictureDesc.width),
                                  static_cast<int>(decoder->m_pictureDesc.height), 1);
     if (imageBufferSize < 0) {
+#if __MINGW32__ && (__cplusplus >= 202207L)
         fmt::print(stderr, "av_image_get_buffer_size error\n");
+#else
+        fprintf(stderr, "av_image_get_buffer_size error\n");
+#endif
         return nullptr;
     }
     decoder->m_image.resize(imageBufferSize);
@@ -714,7 +761,11 @@ namespace {
 #endif
             case AV_PIX_FMT_GRAY16LE: return LCEVC_GRAY_16_LE;
             default: {
+#if __MINGW32__ && (__cplusplus >= 202207L)
                 fmt::print("base_decoder_libav: Couldn't deduce format from AVPixelFormat ({}).\n", (int) fmt);
+#else
+                printf("base_decoder_libav: Couldn't deduce format from AVPixelFormat (%d).\n", (int) fmt);
+#endif
                 return LCEVC_ColorFormat_Unknown;
             }
         }
@@ -830,7 +881,11 @@ namespace {
             return tmp;
         }
 
+#if __MINGW32__ && (__cplusplus >= 201907L)
         return fmt::format("?{:#08x}", r);
+#else
+        return std::string("?"+std::to_string(r));
+#endif
     }
 
     uint32_t pocIncrement(AVCodecID codecId) { return (codecId == AV_CODEC_ID_H264) ? 2 : 1; }
@@ -849,7 +904,11 @@ namespace {
         if (level <= AV_LOG_ERROR) {
             char tmp[1024];
             vsnprintf(tmp, sizeof(tmp) - 1, fmt, args);
+#if __MINGW32__ && (__cplusplus >= 202207L)
             fmt::print("libav: {}\n", tmp);
+#else
+            printf("libav: %s\n", (const char*)tmp);
+#endif
         }
     }
 } // namespace
