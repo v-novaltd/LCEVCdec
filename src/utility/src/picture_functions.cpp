@@ -13,7 +13,6 @@
 //
 #include <LCEVC/utility/picture_functions.h>
 //
-#include <fmt/core.h>
 #include <LCEVC/lcevc_dec.h>
 #include <LCEVC/utility/check.h>
 #include <LCEVC/utility/picture_layout.h>
