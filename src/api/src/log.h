@@ -18,6 +18,7 @@
 #include <array>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdint>
 #include <string>
 
 #if defined(__APPLE__)
