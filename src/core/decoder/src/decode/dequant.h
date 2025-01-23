@@ -1,29 +1,43 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef VN_DEC_CORE_DEQUANT_H_
 #define VN_DEC_CORE_DEQUANT_H_
 
-#include "common/simd.h"
 #include "common/types.h"
+#include "lcevc_config.h"
+
+#if VN_CORE_FEATURE(SSE)
+#include "common/sse.h"
+#elif VN_CORE_FEATURE(NEON)
+#include "common/neon.h"
+#endif
+
+#include <stddef.h>
+#include <stdint.h>
 
 /*------------------------------------------------------------------------------*/
 
 typedef struct QuantMatrix
 {
     uint8_t values[LOQEnhancedCount][RCLayerCountDDS];
+    bool set;
 } QuantMatrix_t;
 
 /*! \brief Restore the supplied quant-matrix to the standard defined default values. */
-void quantMatrixSetDefault(QuantMatrix_t* matrix, ScalingMode_t loq0Scaling, TransformType_t transform);
+void quantMatrixSetDefault(QuantMatrix_t* matrix, ScalingMode_t loq0Scaling,
+                           TransformType_t transform, LOQIndex_t index);
 
 /*! \brief Copies the LOQ-0 quant matrix to LOQ-1. */
 void quantMatrixDuplicateLOQs(QuantMatrix_t* matrix);
@@ -31,6 +45,16 @@ void quantMatrixDuplicateLOQs(QuantMatrix_t* matrix);
 /*! \brief Retrieve a pointer to the quant-matrix for LOQ-0 based upon the scaling
  *         mode used. */
 static inline uint8_t* quantMatrixGetValues(QuantMatrix_t* matrix, LOQIndex_t index)
+{
+    if (!matrix || ((uint32_t)index >= LOQEnhancedCount)) {
+        return NULL;
+    }
+    return matrix->values[index];
+}
+
+/*! \brief Retrieve a const pointer to the quant-matrix for LOQ-0 based upon the scaling
+ *         mode used. */
+static inline const uint8_t* quantMatrixGetValuesConst(const QuantMatrix_t* matrix, LOQIndex_t index)
 {
     if (!matrix || ((uint32_t)index >= LOQEnhancedCount)) {
         return NULL;
@@ -77,9 +101,9 @@ typedef struct DequantArgs
     bool temporalEnabled;
     bool temporalRefresh;
     uint8_t temporalStepWidthModifier;
-    uint32_t stepWidth[LOQEnhancedCount];
+    int32_t stepWidth[LOQEnhancedCount];
     uint8_t chromaStepWidthMultiplier;
-    QuantMatrix_t* quantMatrix;
+    const QuantMatrix_t* quantMatrix;
 } DequantArgs_t;
 
 /*! \brief Copies a deserialised data struct to a dequant args struct.

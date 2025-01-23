@@ -1,53 +1,75 @@
 # Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
-# This software is licensed under the BSD-3-Clause-Clear License.
+# This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
 # The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
 # If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
 # AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
-# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
-# DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
-# EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
+# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+# software may be incorporated into a project under a compatible license provided the requirements
+# of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+# licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+# ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+# THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
 # Find some ffmpeg or libav libraries
 #
 include(FindPackageHandleStandardArgs)
 
-if(NOT TARGET ffmpeg-libs::ffmpeg-libs)
-
+if (NOT TARGET ffmpeg-libs::ffmpeg-libs)
     add_library(ffmpeg-libs::ffmpeg-libs INTERFACE IMPORTED)
-    if(VN_SDK_FFMPEG_LIBS_PACKAGE STREQUAL "custom")
-        target_include_directories(ffmpeg-libs::ffmpeg-libs
-                                   INTERFACE "/home/sam/work/ocd/fork-ffmpeg")
 
-        target_link_libraries(
-            ffmpeg-libs::ffmpeg-libs
-            INTERFACE "/home/sam/work/ocd/fork-ffmpeg/libavcodec/libavcodec.a"
-                      "/home/sam/work/ocd/fork-ffmpeg/libavformat/libavformat.a"
-                      "/home/sam/work/ocd/fork-ffmpeg/libavfilter/libavfilter.a"
-                      "/home/sam/work/ocd/fork-ffmpeg/libswscale/libswscale.a"
-                      "/home/sam/work/ocd/fork-ffmpeg/libswresample/libswresample.a"
-                      "/home/sam/work/ocd/fork-ffmpeg/libavutil/libavutil.a"
-                      "-lxml2")
-    elseif(VN_SDK_FFMPEG_LIBS_PACKAGE STREQUAL "pkgconfig")
-        # pkgconfig
+    # Search for libav packages, first from conan via package names 'ffmpeg-libs-minimal' and then
+    # 'ffmpeg', then search via pkg-config, then finally using the set path
+    find_package("ffmpeg-libs-minimal" QUIET)
+    find_package("ffmpeg" QUIET)
+    get_cmake_property(PACKAGE_LIST PACKAGES_FOUND)
+    if ("ffmpeg-libs-minimal" IN_LIST PACKAGE_LIST)
+        message("Found libav packages from conan package 'ffmpeg-libs-minimal'")
+        target_link_libraries(ffmpeg-libs::ffmpeg-libs
+                              INTERFACE ffmpeg-libs-minimal::ffmpeg-libs-minimal)
+    elseif ("ffmpeg" IN_LIST PACKAGE_LIST)
+        message("Found libav packages from conan package 'ffmpeg'")
+        target_link_libraries(ffmpeg-libs::ffmpeg-libs INTERFACE ffmpeg::ffmpeg)
+    else ()
+        # Attempt to find via pkgconfig
         find_package(PkgConfig)
-        pkg_check_modules(libavcodec REQUIRED IMPORTED_TARGET libavcodec)
-        pkg_check_modules(libavformat REQUIRED IMPORTED_TARGET libavformat)
-        pkg_check_modules(libavutil REQUIRED IMPORTED_TARGET libavutil)
-        pkg_check_modules(libavfilter REQUIRED IMPORTED_TARGET libavfilter)
-        pkg_check_modules(libswscale REQUIRED IMPORTED_TARGET libswscale)
+        pkg_check_modules(libavcodec IMPORTED_TARGET libavcodec)
+        pkg_check_modules(libavformat IMPORTED_TARGET libavformat)
+        pkg_check_modules(libavutil IMPORTED_TARGET libavutil)
+        pkg_check_modules(libavfilter IMPORTED_TARGET libavfilter)
 
         target_link_libraries(
-            ffmpeg-libs::ffmpeg-libs
-            INTERFACE PkgConfig::libavcodec PkgConfig::libavformat PkgConfig::libavutil
-                      PkgConfig::libavfilter PkgConfig::libswscale)
-    else()
-        # conan
-        find_package(${VN_SDK_FFMPEG_LIBS_PACKAGE} REQUIRED)
+            ffmpeg-libs::ffmpeg-libs INTERFACE PkgConfig::libavcodec PkgConfig::libavformat
+                                               PkgConfig::libavutil PkgConfig::libavfilter)
+        if (NOT libavcodec_FOUND
+            OR NOT libavformat_FOUND
+            OR NOT libavutil_FOUND
+            OR NOT libavfilter_FOUND)
+            # Still not found, so assume it's a custom file path
+            target_include_directories(ffmpeg-libs::ffmpeg-libs
+                                       INTERFACE ${VN_SDK_FFMPEG_LIBS_PACKAGE})
 
-        target_link_libraries(
-            ffmpeg-libs::ffmpeg-libs
-            INTERFACE ${VN_SDK_FFMPEG_LIBS_PACKAGE}::${VN_SDK_FFMPEG_LIBS_PACKAGE})
-    endif()
-endif()
+            target_link_libraries(
+                ffmpeg-libs::ffmpeg-libs
+                INTERFACE "${VN_SDK_FFMPEG_LIBS_PACKAGE}/libavcodec/libavcodec.a"
+                          "${VN_SDK_FFMPEG_LIBS_PACKAGE}/libavformat/libavformat.a"
+                          "${VN_SDK_FFMPEG_LIBS_PACKAGE}/libavfilter/libavfilter.a"
+                          "${VN_SDK_FFMPEG_LIBS_PACKAGE}/libavutil/libavutil.a"
+                          "-lxml2")
+            if (libavcodec_FOUND
+                AND libavformat_FOUND
+                AND libavutil_FOUND
+                AND libavfilter_FOUND)
+                message("Found libav packages from path: ${VN_SDK_FFMPEG_LIBS_PACKAGE}")
+            else ()
+                message(
+                    FATAL_ERROR
+                        "Could not find libav packages, either install from conan, pkg-config or manually specify a path with VN_SDK_FFMPEG_LIBS_PACKAGE"
+                )
+            endif ()
+        else ()
+            message("Found libav packages from pkg-config")
+        endif ()
+    endif ()
+endif ()

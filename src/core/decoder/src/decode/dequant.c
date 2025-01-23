@@ -1,22 +1,30 @@
 /* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decode/dequant.h"
 
 #include "common/memory.h"
+#include "common/types.h"
 #include "decode/deserialiser.h"
+#include "lcevc_config.h"
 
+#include <assert.h>
 #include <math.h>
+#include <stddef.h>
+#include <stdint.h>
 
-/*------------------------------------------------------------------------------*/
+/*- Constants -----------------------------------------------------------------------------------*/
 
 static const uint8_t kQuantMatrixDefaultDD1D[LOQEnhancedCount][RCLayerCountDD] = {
     {0u, 2u, 0u, 0u},
@@ -38,6 +46,24 @@ static const uint8_t kQuantMatrixDefaultDDS2D[LOQEnhancedCount][RCLayerCountDDS]
     {0u, 0u, 0u, 2u, 52u, 1u, 78u, 9u, 26u, 72u, 0u, 3u, 150u, 91u, 91u, 19u},
 };
 
+/* Constants for step-width & offset formulas [Section 8.5.3]. Note that divisors cannot be
+ * trivially replaced with shifts, since they may be operating on signed data. */
+static const int32_t kA = 39;            /* 0.0006 * (1 << 16) 16-bit integer representation */
+static const int32_t kB = 126484;        /* 1.9200 * (1 << 16) 16-bit integer representation */
+static const int32_t kC = 5242;          /* 0.0800 * (1 << 16) 16-bit integer representation */
+static const int32_t kD = 99614;         /* 1.5200 * (1 << 16) 16-bit integer representation */
+static const int32_t kSWDivisor = 32768; /* Like a right-shift of 15, but unambiguous on signed ints */
+static const int64_t kSWDivisorNoDQOffset =
+    2147483648; /* Like a right-shift of 31, but unambiguous on signed ints */
+static const int32_t kQMScaleMax = 196608; /* 3 << 16 */
+static const int32_t kDeadZoneSWLimit =
+    12249; /* Largest stepwidth that does not overflow deadzone calculation */
+
+/* 1/255, expressed as a U0_16 fixed point. floor((1.0f / 255.0f) * (1 << 16));*/
+static const uint16_t kFPOneOver255 = 257;
+
+/*- QuantMatrix ---------------------------------------------------------------------------------*/
+
 static inline const uint8_t* quantMatrixGetDefault(ScalingMode_t scaling, TransformType_t transform,
                                                    LOQIndex_t index)
 {
@@ -49,13 +75,11 @@ static inline const uint8_t* quantMatrixGetDefault(ScalingMode_t scaling, Transf
     return (transform == TransformDDS) ? kQuantMatrixDefaultDDS2D[index] : kQuantMatrixDefaultDD2D[index];
 }
 
-void quantMatrixSetDefault(QuantMatrix_t* matrix, ScalingMode_t loq0Scaling, TransformType_t transform)
+void quantMatrixSetDefault(QuantMatrix_t* matrix, ScalingMode_t loq0Scaling,
+                           TransformType_t transform, LOQIndex_t index)
 {
     const size_t layerCount = transformTypeLayerCount(transform);
-    memorySet(matrix, 0, sizeof(QuantMatrix_t));
-    memoryCopy(matrix->values[LOQ0], quantMatrixGetDefault(loq0Scaling, transform, LOQ0),
-               layerCount * sizeof(uint8_t));
-    memoryCopy(matrix->values[LOQ1], quantMatrixGetDefault(loq0Scaling, transform, LOQ1),
+    memoryCopy(matrix->values[index], quantMatrixGetDefault(loq0Scaling, transform, index),
                layerCount * sizeof(uint8_t));
 }
 
@@ -64,28 +88,39 @@ void quantMatrixDuplicateLOQs(QuantMatrix_t* matrix)
     memoryCopy(matrix->values[LOQ1], matrix->values[LOQ0], RCLayerCountDDS * sizeof(uint8_t));
 }
 
-/*------------------------------------------------------------------------------*/
+/*- Dequant (private functions) -----------------------------------------------------------------*/
 
-/* Constants for step-width & offset formulas [Section 8.5.3]  */
-enum DequantConstants
+double calculateFixedPointU12_4Ln(int32_t stepWidth)
 {
-    Aconst = 39,             /* 0.0006 * (1 << 16) 16-bit integer representation */
-    Bconst = 126484,         /* 1.9200 * (1 << 16) 16-bit integer representation */
-    Cconst = 5242,           /* 0.0800 * (1 << 16) 16-bit integer representation */
-    Dconst = 99614,          /* 1.5200 * (1 << 16) 16-bit integer representation */
-    DivShift = 15,           /* val / 32768 */
-    QMScaleMax = 196608,     /* 3 << 16 */
-    DeadZoneSWLimit = 12249, /* Largest stepwidth that does njot overflow deadzone calculation */
-};
+    /* Calculate the natural log (ln) of stepWidth, with U12_4 fixed-point precision. */
+    const uint8_t integerLogSw = (uint8_t)(floor(log(stepWidth)));
+    /* The maximum value of stepWidth is 32768, and ln(32768) = 10.3972. Therefore, integerLogSw
+     * should really never exceed 10, but all that really matters is that it remains within 4
+     * bits, i.e. less than 16. */
+    assert(integerLogSw < 16);
+    const double fractionalLogSw = floor((log(stepWidth) - integerLogSw) * 4096) / 4096;
+    return integerLogSw + fractionalLogSw;
+}
 
-/*------------------------------------------------------------------------------*/
+uint16_t calculateFixedPointTemporalSW(uint32_t temporalSWModifier, int16_t temporalSWUnmodified)
+{
+    /* Calculate the modified temporal step width, treating floats as U16s with no whole-number
+     * part, i.e. 0.0 to 1.0 is mapped to 0 to 65536 (1<<16) */
 
-static int32_t calculateDequantOffsetActual(uint32_t layerSW, uint32_t masterSW,
+    /* clamp between 0 and 0.5, noting that 0.5 is represented as (1<<16)/2 */
+    const uint16_t stepWidthModifier =
+        clampU16((uint16_t)(temporalSWModifier * kFPOneOver255), 0, 1 << 15);
+    const uint32_t stepWidthMultiplier = (1 << 16) - stepWidthModifier;
+    const uint32_t flooredStepWidth = (stepWidthMultiplier * temporalSWUnmodified) >> 16;
+    return clampU16((int16_t)flooredStepWidth, QMinStepWidth, QMaxStepWidth);
+}
+
+static int32_t calculateDequantOffsetActual(int32_t layerSW, int32_t masterSW,
                                             int32_t dequantOffset, DequantOffsetMode_t mode)
 {
     int64_t dequantOffsetActual = 0;
-    const int32_t logLayerSW = (int32_t)(-Cconst * log(layerSW));
-    const int32_t logMasterSW = (int32_t)(Cconst * log(masterSW));
+    const int32_t logLayerSW = (int32_t)(-kC * calculateFixedPointU12_4Ln(layerSW));
+    const int32_t logMasterSW = (int32_t)(kC * calculateFixedPointU12_4Ln(masterSW));
 
     if (dequantOffset == -1 || dequantOffset == 0) {
         return 0;
@@ -102,40 +137,42 @@ static int32_t calculateDequantOffsetActual(uint32_t layerSW, uint32_t masterSW,
     return (int32_t)(dequantOffsetActual >> 16);
 }
 
-static int32_t calculateStepWidthModifier(uint32_t layerSW, int32_t dequantOffsetActual,
+static int32_t calculateStepWidthModifier(int32_t layerSW, int32_t dequantOffsetActual,
                                           int32_t offset, DequantOffsetMode_t mode)
 {
+    /* See 8.5.3 of the standard. Note that the standard doesn't have any formatting, so it says
+     * "qm[x...][y]2" to indicated "layerSW squared".*/
     if (offset == -1) {
-        const int64_t logByLayerSW = (int64_t)(Dconst - Cconst * log(layerSW));
+        const int64_t logByLayerSW = (int64_t)(kD - kC * calculateFixedPointU12_4Ln(layerSW));
         const int64_t logByLayerSWPow = (logByLayerSW * layerSW * layerSW);
-        const int64_t intLogByLayerSWDiv = (logByLayerSWPow >> DivShift);
+        const int64_t intLogByLayerSWDiv = (logByLayerSWPow / kSWDivisorNoDQOffset);
 
-        return (int32_t)(intLogByLayerSWDiv >> 16);
+        return (int32_t)intLogByLayerSWDiv;
     }
 
     if (mode == DQMDefault) {
         const int64_t stepWidthModifier = ((int64_t)dequantOffsetActual * layerSW);
-        return (int32_t)(stepWidthModifier >> DivShift);
+        return (int32_t)(stepWidthModifier / kSWDivisor);
     }
 
     /*mode == DQM_ConstOffset*/
     return 0;
 }
 
-static int32_t calculateDeadzoneWidth(uint32_t masterSW, uint32_t layerSW)
+static int32_t calculateDeadzoneWidth(int32_t masterSW, int32_t layerSW)
 {
     if (masterSW <= 16) {
-        return (int32_t)(masterSW >> 1);
+        return (masterSW >> 1);
     }
 
-    if (layerSW > DeadZoneSWLimit) {
+    if (layerSW > kDeadZoneSWLimit) {
         return INT32_MAX;
     }
 
-    return ((((1 << 16) - ((int32_t)((Aconst * layerSW) + Bconst) >> 1)) * (int32_t)layerSW) >> 16);
+    return ((((1 << 16) - (((kA * layerSW) + kB) >> 1)) * layerSW) >> 16);
 }
 
-static int16_t calculateAppliedDequantOffset(uint32_t dequantOffsetActual, int32_t deadzoneWidth,
+static int16_t calculateAppliedDequantOffset(int32_t dequantOffsetActual, int32_t deadzoneWidth,
                                              int32_t offset, DequantOffsetMode_t mode)
 {
     if (offset == -1 || mode == DQMDefault) {
@@ -149,12 +186,12 @@ static int16_t calculateAppliedDequantOffset(uint32_t dequantOffsetActual, int32
     return 0;
 }
 
-static uint32_t applyChromaSWMultiplier(uint32_t stepwidth, uint8_t multiplier)
+static int32_t applyChromaSWMultiplier(int32_t stepwidth, uint8_t multiplier)
 {
-    return clampU32((stepwidth * (uint32_t)multiplier) >> 6, 1u, 32767u);
+    return clampS32((stepwidth * (int32_t)multiplier) >> 6, QMinStepWidth, QMaxStepWidth);
 }
 
-static uint32_t calculateLOQStepWidth(const DequantArgs_t* args, int32_t planeIdx, LOQIndex_t loqIdx)
+static int32_t calculateLOQStepWidth(const DequantArgs_t* args, int32_t planeIdx, LOQIndex_t loqIdx)
 {
     return (planeIdx > 0 && loqIdx == LOQ0)
                ? applyChromaSWMultiplier(args->stepWidth[loqIdx], args->chromaStepWidthMultiplier)
@@ -163,54 +200,45 @@ static uint32_t calculateLOQStepWidth(const DequantArgs_t* args, int32_t planeId
 
 static int32_t calculatePlaneLOQ(Dequant_t* dst, const DequantArgs_t* args, int32_t planeIdx, LOQIndex_t loqIdx)
 {
-    const uint8_t* quantMatrix = quantMatrixGetValues(args->quantMatrix, loqIdx);
-    const uint32_t loqSW = calculateLOQStepWidth(args, planeIdx, loqIdx);
+    const uint8_t* quantMatrix = quantMatrixGetValuesConst(args->quantMatrix, loqIdx);
+    assert(quantMatrix != NULL);
+    const int32_t loqSW = calculateLOQStepWidth(args, planeIdx, loqIdx);
 
     /* Calculate individual layer step-widths for each temporal type. */
     for (uint32_t temporalIdx = 0; temporalIdx < TSCount; ++temporalIdx) {
-        uint32_t temporalSW = loqSW;
+        int32_t temporalSW = loqSW;
 
         /* Modify the step-width in the inter-case based upon temporal step width
          * modifier */
         if ((temporalIdx == TSInter) && (loqIdx == LOQ0) && args->temporalEnabled && !args->temporalRefresh) {
-            const float modifier =
-                1.0f - clampF32(((float)args->temporalStepWidthModifier / 255.0f), 0.0f, 0.5f);
-            const uint32_t flooredSW = (uint32_t)floorF32(modifier * (float)temporalSW);
-            temporalSW = clampU32(flooredSW, QMinStepWidth, QMaxStepWidth);
+            temporalSW =
+                calculateFixedPointTemporalSW(args->temporalStepWidthModifier, (int16_t)temporalSW);
         }
 
         for (uint32_t layerIdx = 0; layerIdx < args->layerCount; ++layerIdx) {
-            /* Calculate a scaled QM - rounding up. */
-            uint32_t layerQM = (quantMatrix[layerIdx] * temporalSW) + (1 << 16);
+            /* Calculate a scaled QM - rounding up (and clamped to maximum range). layerQM is
+             * called qm_p in the standard. */
+            int64_t layerQM = quantMatrix[layerIdx];
+            layerQM *= temporalSW;
+            layerQM += (1 << 16);
+            layerQM = clampS64(layerQM, 0, kQMScaleMax);
+            layerQM *= temporalSW;
+            layerQM >>= 16;
 
-            /* Clamp into maximum scaling range. */
-            layerQM = clampU32(layerQM, 0, QMScaleMax);
-
-            /* Scale layer SW using QM and shift out. This assumes the result of
-             * the multiplication uses less-than 48-bits. Current implementation
-             * uses 33-bits based upon the value
-             * of qm_scale_max and max_step_width. */
-            uint32_t layerSW = (uint32_t)(((uint64_t)layerQM * temporalSW) >> 16);
-
-            /* Finally clamp SW into valid range. */
-            layerSW = clampU32(layerSW, QMinStepWidth, QMaxStepWidth);
+            /* Scale layer SW using QM and shift out. Safe because layerQM and temporalSW are, at
+             * most, 17 and 16 bits respectively. */
+            int32_t layerSW = (int32_t)clampS64(layerQM, QMinStepWidth, QMaxStepWidth);
 
             int32_t dequantOffsetActual = calculateDequantOffsetActual(
                 layerSW, temporalSW, args->dequantOffset, args->dequantOffsetMode);
             int32_t stepWidthModifier = calculateStepWidthModifier(
                 layerSW, dequantOffsetActual, args->dequantOffset, args->dequantOffsetMode);
 
-            layerSW = (uint32_t)clampS32(((int32_t)layerSW + stepWidthModifier), QMinStepWidth,
-                                         QMaxStepWidth);
-            int32_t deadzoneWidth = calculateDeadzoneWidth(temporalSW, layerSW);
-
-            /* @note: Step width can wrap int16_t. Though a max step-width (32768)
-             * will have disabled the layer at the encode end, as such all residuals
-             * will be 0, so its not super dangerous, unless someone uses
-             * layer_step_widths[i] at some point for anything other than
-             * dequantization. */
+            layerSW = clampS32((layerSW + stepWidthModifier), QMinStepWidth, QMaxStepWidth);
+            /* @note: this is safe, because we've clamped layerSW to QMaxStepWidth, which is INT16_MAX */
             dst->stepWidth[temporalIdx][layerIdx] = (int16_t)layerSW;
 
+            const int32_t deadzoneWidth = calculateDeadzoneWidth(temporalSW, layerSW);
             dst->offset[temporalIdx][layerIdx] = calculateAppliedDequantOffset(
                 dequantOffsetActual, deadzoneWidth, args->dequantOffset, args->dequantOffsetMode);
         }
@@ -233,7 +261,7 @@ static int32_t calculatePlaneLOQ(Dequant_t* dst, const DequantArgs_t* args, int3
     return 0;
 }
 
-/*------------------------------------------------------------------------------*/
+/*- Dequant (public functions) ------------------------------------------------------------------*/
 
 int32_t initialiseDequantArgs(const DeserialisedData_t* data, DequantArgs_t* args)
 {
@@ -247,7 +275,7 @@ int32_t initialiseDequantArgs(const DeserialisedData_t* data, DequantArgs_t* arg
     args->stepWidth[LOQ0] = data->stepWidths[LOQ0];
     args->stepWidth[LOQ1] = data->stepWidths[LOQ1];
     args->chromaStepWidthMultiplier = data->chromaStepWidthMultiplier;
-    args->quantMatrix = (QuantMatrix_t*)&data->quantMatrix;
+    args->quantMatrix = &data->quantMatrix;
 
     return 0;
 }
@@ -270,4 +298,4 @@ int32_t dequantCalculate(DequantParams_t* params, const DequantArgs_t* args)
     return 0;
 }
 
-/*------------------------------------------------------------------------------*/
+/*-----------------------------------------------------------------------------------------------*/

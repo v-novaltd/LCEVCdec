@@ -1,13 +1,16 @@
 # Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
-# This software is licensed under the BSD-3-Clause-Clear License.
+# This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
 # The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
 # If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
 # AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
-# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
-# DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
-# EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
+# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+# software may be incorporated into a project under a compatible license provided the requirements
+# of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+# licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+# ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+# THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
 import os
 
@@ -30,7 +33,6 @@ class LCEVCDecoderSDK(ConanFile):
         "utility": [True, False],
         "benchmark": [True, False],
         "simd": [True, False],
-        "decoder_profiler": [True, False],
         "force_overlay": [True, False],
         "debug_syntax": [True, False],
         "api_layer": [True, False],
@@ -39,14 +41,13 @@ class LCEVCDecoderSDK(ConanFile):
         "base_decoder": ["ffmpeg-libs-minimal", "ffmpeg", "libav", "none"],
     }
 
+    # NB: executables, unit_tests, base_decoder, use_ghc_filesystem have defaults set by
+    # config_options()
     default_options = {
         "shared": True,
-        "executables": True,
-        "unit_tests": True,
         "utility": True,
         "benchmark": False,
         "simd": True,
-        "decoder_profiler": False,
         "force_overlay": False,
         "debug_syntax": False,
         "api_layer": True,
@@ -73,13 +74,15 @@ class LCEVCDecoderSDK(ConanFile):
     def is_android_vndk(self):
         return (self.settings.os == "Android" and self.settings.compiler.libcxx != "c++_shared")
 
+    def can_have_executables(self):
+        return not ((self.settings.os == 'iOS' or self.settings.os == 'tvOS')
+                    or (self.settings.os == 'Windows' and self.settings.compiler.runtime == 'MD')
+                    or (self.is_android_vndk()))
+
     def config_options(self):
         # Some targets don't support the sample and test harness exes
         if self.options.executables == None:
-            self.options.executables = \
-                not ((self.settings.os == 'iOS' or self.settings.os == 'tvOS')
-                     or (self.settings.os == 'Windows' and self.settings.compiler.runtime == 'MD')
-                     or (self.is_android_vndk()))
+            self.options.executables = self.can_have_executables()
 
         if self.options.base_decoder == None:
             if ((self.settings.os == 'iOS' or self.settings.os == 'tvOS')
@@ -91,19 +94,11 @@ class LCEVCDecoderSDK(ConanFile):
 
         # Install test dependencies if installing in dev dir
         if self.options.unit_tests == None:
-            self.options.unit_tests = not self.in_local_cache
+            self.options.unit_tests = not self.in_local_cache and self.can_have_executables()
 
-        # Use std::filesystem replacement on Ubuntu 18, armv7, and iOS
+        # Use std::filesystem replacement on android vndk
         if self.options.use_ghc_filesystem == None:
-            if (self.is_android_vndk()) or \
-               (self.settings.os == 'Linux'
-                    and (self.settings.os.distribution == 'ubuntu'
-                         and self.settings.os.distribution.version == '18.04'
-                         or self.settings.os.distribution == 'debian'
-                         and self.settings.os.distribution.version == '10')):
-                self.options.use_ghc_filesystem = True
-            else:
-                self.options.use_ghc_filesystem = False
+            self.options.use_ghc_filesystem = self.is_android_vndk()
 
         # Now set the default options for ffmpeg for android
         if self.options.base_decoder == "ffmpeg-libs-minimal" and self.settings.os == "Android":
@@ -206,12 +201,6 @@ class LCEVCDecoderSDK(ConanFile):
         else:
             return "OFF"
 
-    @property
-    def _enable_integration_workaround_no_gl_x11_libs(self):
-        # Workaround for cross compiling to Ubuntu 18 aarch64 - multiarch x11 dev libs are broken
-        return self.settings.arch == 'armv8' and self.settings.os == 'Linux' and \
-            self.settings.os.distribution == 'ubuntu' and self.settings.os.distribution.version == '18.04'
-
     def _configure_cmake(self):
         cmake = CMake(self, generator=self._generators.get(str(self.settings.os), "Ninja"))
         cmake.definitions["TARGET_ARCH"] = self.settings.arch
@@ -227,8 +216,6 @@ class LCEVCDecoderSDK(ConanFile):
         cmake.definitions["VN_SDK_FFMPEG_LIBS_PACKAGE"] = self.options.base_decoder if self.options.base_decoder else ""
         cmake.definitions["VN_CORE_BENCHMARK"] = self._on_off(self.options.benchmark)
         cmake.definitions["VN_CORE_SIMD"] = self._on_off(self.options.simd)
-        cmake.definitions["VN_CORE_DECODER_PROFILER"] = self._on_off(self.options.decoder_profiler)
-        cmake.definitions["VN_CORE_DEBUG_SYNTAX"] = self._on_off(self.options.debug_syntax)
         cmake.definitions["VN_CORE_FORCE_OVERLAY"] = self._on_off(self.options.force_overlay)
 
         if self.settings.os == 'Android' and self.settings.arch == 'armv7':

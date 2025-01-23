@@ -8,7 +8,7 @@ For these instructions, this 'out of source' build directory is specified as `_b
 
 Most of these steps only need to be done once. The exceptions are: when you *edit* files, you will obviously need to *build* again (`cmake . --build`, or click 'build' in an IDE); and, when you *add* files, you will typically need to update `Sources.cmake` and then *cmake and build* again.
 
-If you get stuck or make a typo during the conan step, it's usually sufficient to clear the build directory and the conan data directory and try the conan install again. That is, from `lcevc_dec`, run `rm -rf _build ~/.conan/data`.
+If you get stuck or make a typo during the conan step, it's usually sufficient to clear the build directory and the conan data directory and try the conan install again. That is, from `LCEVCdec`, run `rm -rf _build ~/.conan/data`.
 
 ---
 
@@ -90,4 +90,4 @@ conan remove lcevc_dec
 conan export .
 ```
 
-This will produce dynamic libaries (`.so` files) in `_build/install/lib`, and will also allow you to add `lcevc_dec` as a conan depedency in your player (such as in a `conanfile.py` or `conanfile.txt`). By default, shared libraries will be produced for the API and core targets and static libraries for all other targets. To force static libraries for all targets use the CMake option `-DBUILD_SHARED_LIBS=OFF`. 
+This will produce dynamic libaries (`.so` files) in `_build/install/lib`, and will also allow you to add `lcevc_dec` as a conan depedency in your player (such as in a `conanfile.py` or `conanfile.txt`). By default, shared libraries will be produced for the API and core targets and static libraries for all other targets. To force static libraries for all targets use the CMake option `-DBUILD_SHARED_LIBS=OFF`.

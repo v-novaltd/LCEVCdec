@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decoder_config.h"
 
@@ -32,16 +35,16 @@ static const LogComponent kComp = LogComponent::DecoderConfig;
 
 // This callback allows us to accept logs from the Core decoder and turn them into VNLog-style
 // logs. It duplicates "decoderLogCallback" in the core_test_harness.
-static void coreDecLogCallback(void* userData, perseus_decoder_log_type type, const char* msg, size_t msgLength)
-{
-    VN_UNUSED(userData);
-
-    // Note double-debug. That's the core's "unknown" log level, which we default to Debug.
-    static constexpr std::array<LogLevel, PSS_LT_UNKNOWN + 1> kTable = {
-        LogLevel::Error, LogLevel::Info, LogLevel::Warning, LogLevel::Debug, LogLevel::Debug};
-    std::string strToPrint(msg, msgLength);
-    sLog.print(LogComponent::CoreDecoder, kTable[type], "?", 0, "%s", strToPrint.c_str());
-}
+namespace {
+    void coreDecLogCallback(void*, perseus_decoder_log_type type, const char* msg, size_t msgLength)
+    {
+        // Core doesn't have a "fatal", so that's absent here, but otherwise this is one-to-one.
+        static constexpr std::array<LogLevel, PSS_LT_UNKNOWN> kTable = {
+            LogLevel::Error, LogLevel::Warning, LogLevel::Info, LogLevel::Debug, LogLevel::Trace};
+        const std::string strToPrint(msg, msgLength);
+        sLog.print(LogComponent::CoreDecoder, kTable[type], "?", 0, "%s", strToPrint.c_str());
+    }
+} // namespace
 
 // - DecoderConfig --------------------------------------------------------------------------------
 
@@ -54,9 +57,10 @@ const ConfigMap<DecoderConfig> DecoderConfig::kConfigMap({
     {"dither_strength", makeBinding(&DecoderConfig::m_ditherStrength)},
     {"enable_logo_overlay", makeBinding(&DecoderConfig::m_enableLogoOverlay)},
     {"events", makeBinding(&DecoderConfig::m_events)},
+    {"force_bitstream_version", makeBinding(&DecoderConfig::m_forceBitstreamVersion)},
     {"generate_cmdbuffers", makeBinding(&DecoderConfig::m_generateCmdbuffers)},
-    {"highlight_residuals", makeBinding(&DecoderConfig::m_highlightResiduals)},
     {"high_precision", makeBinding(&DecoderConfig::m_highPrecision)},
+    {"highlight_residuals", makeBinding(&DecoderConfig::m_highlightResiduals)},
     {"log_level", makeBinding(&DecoderConfig::m_logLevelGlobal)},
     {"log_level_api",
      makeBindingArrElement<static_cast<size_t>(LogComponent::API)>(&DecoderConfig::m_logLevels)},
@@ -98,6 +102,9 @@ bool DecoderConfig::validate() const
     if (m_ditherSeed != -1 && (m_ditherStrength == 0 || m_allowDithering == false)) {
         VNLogWarning("Setting a custom dither seed, but dithering has been manually disabled. No "
                      "dithering will occur\n");
+    }
+    if (m_ditherSeed != -1 && m_coreDecoderNumThreads != 1) {
+        VNLogWarning("core_threads must be 1 to give deterministic dithering with a dither seed\n");
     }
 
     // m_ditherStrength
@@ -175,13 +182,19 @@ bool DecoderConfig::validate() const
               m_logLevelGlobal, iterableToString(m_events).c_str());
 
     VNLogDebug("Additional config:\n"
+               "\tallow_dithering           : %d\n"
+               "\tcore_parallel_decode      : %d\n"
+               "\tdisable_simd              : %d\n"
                "\tenable_logo_overlay       : %d\n"
+               "\tgenerate_cmdbuffers       : %d\n"
                "\thighlight_residuals       : %d\n"
+               "\thigh_precision            : %d\n"
                "\tlog_stdout                : %d\n"
                "\ts_filter_strength         : %f\n"
-               "\tdpi_pipeline_mode         : %d\n"
-               "\tdpi_threads               : %d\n"
+               "\tcore_threads              : %d\n"
+               "\tdither_seed               : %d\n"
                "\tdither_strength           : %d\n"
+               "\tforce_bitstream_version   : %d\n"
                "\tlog_timestamp_precision   : %d\n"
                "\tlogo_overlay_delay_frames : %d\n"
                "\tlogo_overlay_position_x   : %d\n"
@@ -192,11 +205,13 @@ bool DecoderConfig::validate() const
                "\tpss_surface_fp_setting    : %d\n"
                "\tresults_queue_cap         : %d\n"
                "\tper-component log levels  : %s\n",
-               m_enableLogoOverlay, m_highlightResiduals, m_logToStdOut, m_sFilterStrength,
-               m_highPrecision, m_coreDecoderNumThreads, m_ditherStrength, m_logTimestampPrecision,
-               m_logoOverlayDelayFrames, m_logoOverlayPositionX, m_logoOverlayPositionY,
-               m_loqUnprocessedCap, m_passthroughMode, m_predictedAverageMethod,
-               m_residualSurfaceFPSetting, m_resultsQueueCap, iterableToString(m_logLevels).c_str());
+               m_allowDithering, m_coreParallelDecode, m_disableSIMD, m_enableLogoOverlay,
+               m_generateCmdbuffers, m_highlightResiduals, m_highPrecision, m_logToStdOut,
+               m_sFilterStrength, m_coreDecoderNumThreads, m_ditherSeed, m_ditherStrength,
+               m_forceBitstreamVersion, m_logTimestampPrecision, m_logoOverlayDelayFrames,
+               m_logoOverlayPositionX, m_logoOverlayPositionY, m_loqUnprocessedCap,
+               m_passthroughMode, m_predictedAverageMethod, m_residualSurfaceFPSetting,
+               m_resultsQueueCap, iterableToString(m_logLevels).c_str());
     return valid;
 }
 
@@ -241,9 +256,10 @@ void DecoderConfig::initialiseCoreConfig(perseus_decoder_config& cfgOut) const
     // Settings where negative means "don't set/auto"
     if (m_coreDecoderNumThreads != -1) {
         cfgOut.num_worker_threads = m_coreDecoderNumThreads;
-    }
-    if (m_coreDecoderNumThreads != -1) {
         cfgOut.apply_cmdbuffers_threads = static_cast<uint16_t>(m_coreDecoderNumThreads);
+    }
+    if (m_forceBitstreamVersion >= 0) {
+        cfgOut.force_bitstream_version = static_cast<uint8_t>(m_forceBitstreamVersion);
     }
     if (m_logoOverlayDelayFrames > 0) {
         cfgOut.logo_overlay_delay = static_cast<uint16_t>(m_logoOverlayDelayFrames);
@@ -259,8 +275,9 @@ void DecoderConfig::initialiseCoreConfig(perseus_decoder_config& cfgOut) const
     }
 
     VNLogTrace("Core decoder config:\n"
-               "\tdisable_dithering         : %d\n"
+               "\tdisable_dithering         : %" PRIu8 "\n"
                "\tdither_override_strength  : %d\n"
+               "\fforce_bitstream_version   : %" PRIu8 "\n"
                "\tgenerate_cmdbuffers       : %d\n"
                "\tlogo_overlay_delay        : %" PRIu16 "\n"
                "\tlogo_overlay_enable       : %" PRIu8 "\n"
@@ -271,8 +288,9 @@ void DecoderConfig::initialiseCoreConfig(perseus_decoder_config& cfgOut) const
                "\ts_strength                : %f\n"
                "\tsimd_enabled              : %d\n"
                "\tuse_approximate_pa        : %" PRIu8 "\n",
-               cfgOut.dither_override_strength, cfgOut.generate_cmdbuffers, cfgOut.logo_overlay_delay,
-               cfgOut.logo_overlay_enable, cfgOut.logo_overlay_position_x, cfgOut.logo_overlay_position_y,
+               cfgOut.disable_dithering, cfgOut.dither_override_strength, cfgOut.force_bitstream_version,
+               cfgOut.generate_cmdbuffers, cfgOut.logo_overlay_delay, cfgOut.logo_overlay_enable,
+               cfgOut.logo_overlay_position_x, cfgOut.logo_overlay_position_y,
                cfgOut.num_worker_threads, cfgOut.pipeline_mode, cfgOut.use_parallel_decode,
                cfgOut.s_strength, cfgOut.simd_type, cfgOut.use_approximate_pa);
 }

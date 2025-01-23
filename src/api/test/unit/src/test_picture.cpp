@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 // This tests api/src/picture.h
 
@@ -402,8 +405,9 @@ TYPED_TEST(PictureFixture, copyData)
     // Now the actual copy, and check that it succeeded:
     EXPECT_TRUE(this->m_pic.copyData(pic));
 
-    for (uint32_t plane = 0; plane < this->m_pic.getNumPlanes(); plane++) {
-        const uint8_t* ptrToPlaneNV12 = pic.getPlaneFirstSample(std::min(plane, 1U));
+    for (uint8_t plane = 0; plane < this->m_pic.getNumPlanes(); plane++) {
+        const uint8_t nv12Plane = (plane < 1 ? plane : 1);
+        const uint8_t* ptrToPlaneNV12 = pic.getPlaneFirstSample(nv12Plane);
         const uint8_t* ptrToPlaneI420 = this->m_pic.getPlaneFirstSample(plane);
 
         if (plane == 0) {
@@ -416,15 +420,15 @@ TYPED_TEST(PictureFixture, copyData)
             ptrToPlaneNV12++;
         }
 
-        for (uint32_t row = 0; row < pic.getPlaneHeight(plane); row++) {
-            const uint8_t* ptrToRowNV12 = ptrToPlaneNV12 + row * pic.getPlaneByteStride(plane);
+        for (uint32_t row = 0; row < pic.getPlaneHeight(nv12Plane); row++) {
+            const uint8_t* ptrToRowNV12 = ptrToPlaneNV12 + row * pic.getPlaneByteStride(nv12Plane);
             const uint8_t* ptrToRowI420 = ptrToPlaneI420 + row * this->m_pic.getPlaneByteStride(plane);
-            const uint8_t* const nv12End = ptrToRowNV12 + pic.getPlaneWidthBytes(plane);
+            const uint8_t* const nv12End = ptrToRowNV12 + pic.getPlaneWidthBytes(nv12Plane);
             while (ptrToRowNV12 < nv12End) {
                 // Assert here, so it fails fast, rather than printing one error per pixel.
                 ASSERT_EQ(*ptrToRowNV12, *ptrToRowI420)
-                    << "Failed at row " << row << " out of " << pic.getPlaneHeight(plane);
-                ptrToRowNV12 += pic.getPlaneBytesPerPixel(plane);
+                    << "Failed at row " << row << " out of " << pic.getPlaneHeight(nv12Plane);
+                ptrToRowNV12 += pic.getPlaneBytesPerPixel(nv12Plane);
                 ptrToRowI420 += this->m_pic.getPlaneBytesPerPixel(plane);
             }
         }

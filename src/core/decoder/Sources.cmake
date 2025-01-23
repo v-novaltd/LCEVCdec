@@ -1,13 +1,16 @@
 # Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
-# This software is licensed under the BSD-3-Clause-Clear License.
+# This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
 # The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
 # If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
 # AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
-# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
-# DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
-# EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
+# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+# software may be incorporated into a project under a compatible license provided the requirements
+# of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+# licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+# ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+# THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
 set(CONFIG ${CMAKE_BINARY_DIR}/generated/lcevc_config.h)
 
@@ -26,15 +29,11 @@ set(SOURCE_COMMON
     "src/common/memory.h"
     "src/common/neon.h"
     "src/common/platform.h"
-    "src/common/profiler.c"
-    "src/common/profiler.h"
     "src/common/random.c"
     "src/common/random.h"
     "src/common/simd.c"
     "src/common/simd.h"
     "src/common/sse.h"
-    "src/common/stats.c"
-    "src/common/stats.h"
     "src/common/threading.c"
     "src/common/threading.h"
     "src/common/tile.c"
@@ -102,9 +101,9 @@ set(SOURCE_SURFACE
     "src/surface/upscale_sse.c"
     "src/surface/upscale_sse.h")
 
-if(VN_CORE_OVERLAY_IMAGE)
+if (VN_CORE_OVERLAY_IMAGE)
     list(APPEND SOURCE_SURFACE "src/surface/overlay.c" "src/surface/overlay.h")
-endif()
+endif ()
 
 set(SOURCE_ROOT "src/api.c" "src/context.c" "src/context.h")
 

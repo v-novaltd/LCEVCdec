@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "common/bytestream.h"
 
@@ -171,7 +174,7 @@ int32_t readU64(const uint8_t* ptr, uint64_t* out)
 {
     /* clang-format off */
 	*out =    (((uint64_t)ptr[0]) << 56) | (((uint64_t)ptr[1]) << 48)
-			| (((uint64_t)ptr[2]) << 40) | (((uint64_t)ptr[3]) << 32) 
+			| (((uint64_t)ptr[2]) << 40) | (((uint64_t)ptr[3]) << 32)
 			| (((uint64_t)ptr[4]) << 24) | (((uint64_t)ptr[5]) << 16)
 			| (((uint64_t)ptr[6]) << 8)  |   (uint64_t)ptr[7];
     /* clang-format on */

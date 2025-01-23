@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef LCEVC_DEC_H
 #define LCEVC_DEC_H
@@ -258,9 +261,9 @@ typedef enum LCEVC_PictureFlag {
  * This struct represents the Static Metadata Descriptor payload, excluding the descriptor ID, of a Dynamic Range and Mastering InfoFrame as defined by CTA-861.3.
  *
  * The descriptor payload has a fixed size of 24 bytes. Display primaries describe the chromaticity of the Red, Green and Blue color primaries of the mastering display.
- * The correspondence between Red, Green and Blue color primaries and indices 0, 1, or 2 is determined by the following relationship: 
- * The Red color primary corresponds to the index of the largest display_primaries_x[] value. 
- * The Green color primary corresponds to the index of the largest display_primaries_y[] value. 
+ * The correspondence between Red, Green and Blue color primaries and indices 0, 1, or 2 is determined by the following relationship:
+ * The Red color primary corresponds to the index of the largest display_primaries_x[] value.
+ * The Green color primary corresponds to the index of the largest display_primaries_y[] value.
  * The Blue color primary corresponds to the index with neither the largest display_primaries_y[] value nor the largest display_primaries_x[] value
  * NOTE: individual fields are LSB first, so little-endian.
  */
@@ -399,7 +402,7 @@ typedef struct LCEVC_PictureBufferDesc
 } LCEVC_PictureBufferDesc;
 
 /*!
- * This struct describes the location of a plane within the Picture's buffer. If colour components
+ * This struct describes the location of a plane within the Picture's buffer. If color components
  * are interleaved, they are considered to be sharing one plane.
  *
  */
@@ -412,7 +415,7 @@ typedef struct LCEVC_PicturePlaneDesc
 /*!
  * Get an initialised LCEVC_PictureDesc with default values, only basic size and color
  * format parameters are required.
- * 
+ *
  * @param[in]    format              An LCEVC_ColorFormat enum
  * @param[in]    width               Image width
  * @param[in]    height              Image height
@@ -430,7 +433,7 @@ LCEVC_ReturnCode LCEVC_DefaultPictureDesc( LCEVC_PictureDesc* pictureDesc,
  *
  * @param[in]    decHandle           LCEVC Decoder handle
  * @param[in]    pictureDesc         Describing picture configurations
- * @param[out]   picture             Result LCEVC_PictureHandle if creation is successful, 
+ * @param[out]   picture             Result LCEVC_PictureHandle if creation is successful,
  *                                   otherwise NULL
  * @return                           LCEVC_Error if pictureDesc contains incompatible values
  */
@@ -448,7 +451,7 @@ LCEVC_ReturnCode LCEVC_AllocPicture( LCEVC_DecoderHandle decHandle,
  * @param[in]    buffer              Optional: Underlying pixel buffer. If null, then planes is
  *                                   required. It will also be impossible to get the buffer desc
  *                                   for this image (since you haven't told it to us).
- * @param[in]    planes              Optional: Description for each plane of picture - first 
+ * @param[in]    planes              Optional: Description for each plane of picture - first
  *                                   sample and byte stride. If null, then buffer is required. It
  *                                   will also be impossible to get the plane desc for this image
  *                                   (since you haven't told it to us).
@@ -470,8 +473,8 @@ LCEVC_ReturnCode LCEVC_AllocPictureExternal( LCEVC_DecoderHandle decHandle,
  *                                   method
  * @param[in]    decHandle           LCEVC Decoder handle
  * @param[in]    picHandle           Handle to picture instance to be released
- * @return                           LCEVC_InvalidParam if an invalid picHandle is given, 
- *                                   LCEVC_Error if the picture cannot be release, otherwise 
+ * @return                           LCEVC_InvalidParam if an invalid picHandle is given,
+ *                                   LCEVC_Error if the picture cannot be release, otherwise
  *                                   LCEVC_Success
  */
 LCEVC_API
@@ -526,7 +529,7 @@ LCEVC_ReturnCode LCEVC_GetPictureDesc( LCEVC_DecoderHandle decHandle,
 
 /*!
  * Update the description of a picture instance, and potentially reallocate memory.
- * 
+ *
  * When using a decoder-managed picture (created by LCEVC_AllocPicture) the underlying memory will
  * be released and re-allocated automatically. Otherwise, memory reallocation will not be handled
  * by this function: the original memory will be reused.
@@ -580,7 +583,7 @@ LCEVC_ReturnCode LCEVC_GetPicturePlaneCount( LCEVC_DecoderHandle decHandle,
  * @param[in]    decHandle           LCEVC Decoder handle
  * @param[in]    picHandle           Handle to picture instance to be updated
  * @param[in]    userData            The user data to associate with the picture
- * @return                           LCEVC_InvalidParam if the picture is not valid, 
+ * @return                           LCEVC_InvalidParam if the picture is not valid,
  *                                   LCEVC_Success otherwise
  */
 LCEVC_API
@@ -611,7 +614,7 @@ LCEVC_ReturnCode LCEVC_GetPictureUserData( LCEVC_DecoderHandle decHandle,
  * @param[in]    access              How plane data will be accessed (Read, Write, or Modify)
  * @param[out]   pictureLock         Destination PictureLockHandle representing the locked state
  * @return                           LCEVC_InvalidParam if the picture or access is invalid,
- *                                   LCEVC_Error if picture has already been locked, and 
+ *                                   LCEVC_Error if picture has already been locked, and
  *                                   LCEVC_Success otherwise.
  */
 LCEVC_API
@@ -685,13 +688,13 @@ LCEVC_ReturnCode LCEVC_UnlockPicture( LCEVC_DecoderHandle decHandle,
  *                                   LCEVC_Success
  */
 LCEVC_API
-LCEVC_ReturnCode LCEVC_CreateDecoder( LCEVC_DecoderHandle* decHandle, 
+LCEVC_ReturnCode LCEVC_CreateDecoder( LCEVC_DecoderHandle* decHandle,
                                       LCEVC_AccelContextHandle accelContext);
 
-/*! 
+/*!
  * @defgroup LCEVC_ConfigureDecoder LCEVC_ConfigureDecoder[type]
- * 
- * Set a configuration variable of type [type]. [type] may be: Bool, Int, Float, String, or an array 
+ *
+ * Set a configuration variable of type [type]. [type] may be: Bool, Int, Float, String, or an array
  * of those (e.g. BoolArray).
  * @{
  */
@@ -746,7 +749,7 @@ void LCEVC_DestroyDecoder( LCEVC_DecoderHandle decHandle );
  * @return                           LCEVC_Again if the decoder cannot consume the enhancement
  *                                   data in its current state, but may be able to later
  *                                   (typically this means receiving decoded pictures). If
- *                                   LCEVC_Again is returned, then the decoder state has not 
+ *                                   LCEVC_Again is returned, then the decoder state has not
  *                                   changed, EXCEPT to accommodate discontinuities.
  */
 LCEVC_API
@@ -828,8 +831,8 @@ LCEVC_ReturnCode LCEVC_SendDecoderPicture( LCEVC_DecoderHandle decHandle,
                                      Decoder will fill
  * @return                           LCEVC_InvalidParam for an invalid decHandle or output;
  *                                   LCEVC_Flushed if the next picture got flushed during/after it
- *                                   was decoded; LCEVC_Timeout if the picture took too long to 
- *                                   decode (set by timeoutUs in LCEVC_SendDecoderBase) or 
+ *                                   was decoded; LCEVC_Timeout if the picture took too long to
+ *                                   decode (set by timeoutUs in LCEVC_SendDecoderBase) or
  *                                   LCEVC_Error for a failed decode. Otherwise returns
  *                                   LCEVC_Success.
  */
@@ -886,7 +889,7 @@ LCEVC_API
 LCEVC_ReturnCode LCEVC_SkipDecoder( LCEVC_DecoderHandle decHandle,
                                     int64_t timestamp );
 
-/*! 
+/*!
  * Synchronize client and LCEVC Decoder.
  *
  * All pending frame events will be generated.
@@ -906,7 +909,7 @@ LCEVC_ReturnCode LCEVC_SynchronizeDecoder( LCEVC_DecoderHandle decHandle,
 /*!
  * Throw away any data that hasn't been emitted yet.
  *
- * After this is called, calls to LCEVC_PeekDecoder and LCEVC_ReceiveDecoderPicture will return 
+ * After this is called, calls to LCEVC_PeekDecoder and LCEVC_ReceiveDecoderPicture will return
  * LCEVC_Flushed for any pictures that were in the decoder when flushed.
  *
  * @param[in]    decHandle           LCEVC Decoder instance
@@ -917,13 +920,13 @@ LCEVC_ReturnCode LCEVC_FlushDecoder( LCEVC_DecoderHandle decHandle );
 
 /*!
  * Events generated by Decoder
- *        
+ *
  * The possible events are selected when the decoder is configured.
  *
  * Parameters to the callback are used to associate data with events:
  * - LCEVC_Log: 'data' and 'data_size' describe a printable string.
  * - LCEVC_OutputPictureDone: 'picture' is a handle to the picture that the event refers to.
- * 'decode_information' is a pointer to the decode information for the relevant frame - 
+ * 'decode_information' is a pointer to the decode information for the relevant frame -
  * it is only valid for duration of event callback.
  */
 typedef enum LCEVC_Event {

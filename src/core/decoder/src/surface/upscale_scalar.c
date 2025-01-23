@@ -1,26 +1,31 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "surface/upscale_scalar.h"
 
 #include "common/dither.h"
 #include "common/memory.h"
-#include "common/random.h"
-#include "context.h"
+#include "common/types.h"
 #include "surface/upscale.h"
+#include "surface/upscale_common.h"
 
 #include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /*
-@TODO(bob): Remove context being passed in
 @TODO(bob): Merge horizontal U8 and U16.
 @TODO(bob): Investigate merging all variants for loads/stores since main body is identical.
 */
@@ -43,14 +48,20 @@ static inline int16_t shiftResultUnsaturated(int32_t value)
     return (int16_t)result;
 }
 
-/* Performs the inversion shift for the calculated convolution result.
+/* Perform the inversion shift for the calculated convolution result, and saturate to 15-bit.
  *
- * The result is saturated to 16-bit - this is to facilitate implementation detail
- * in SIMD codepaths and maintain consistency. */
+ * 15 bits is the saturation performed in the middle of upscale operations, to ensure that residuals
+ * (which have, at most, 16 bits) can correct all upscaling differences.
+ *
+ * TODO: is it valid to use the same saturation for U8, U16, and S16? Or should U8 be unsaturated?
+ * And should U16 saturate at 0 to 2^15 instead of +/-2^14? For now, the scalar implementation will
+ * use +/-2^14 everywhere, while the SIMD implementations will only use it for 16bit data (since
+ * they use 8bit intermediate types for 8bit data).
+ */
 static inline int16_t shiftResultSaturated(int32_t value)
 {
     value = shiftResultUnsaturated(value);
-    return saturateS16(value);
+    return saturateS15(value);
 }
 
 /*------------------------------------------------------------------------------*/
@@ -257,7 +268,7 @@ static inline void horizontalU8(Dither_t dither, const uint8_t* in[2], uint8_t* 
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows
      * for each channel */
     if (dither != NULL) {
-        ditherBuffer = ditherGetBuffer(dither, 4 * (xEnd - xStart) * channelCount);
+        ditherBuffer = ditherGetBuffer(dither, (xEnd - xStart) * (size_t)channelCount * 4);
     }
 
     for (uint32_t x = xStart; x < xEnd; ++x) {
@@ -391,6 +402,7 @@ static void horizontalS16(Dither_t dither, const uint8_t* in[2], uint8_t* out[2]
                                      initialStoreOffset + 2, initialStoreOffset + 3};
 
     const int8_t* ditherBuffer = NULL;
+    int8_t shift = 0;
 
     assert((channelCount > 0) && (channelCount <= 4));
 
@@ -418,7 +430,8 @@ static void horizontalS16(Dither_t dither, const uint8_t* in[2], uint8_t* out[2]
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows
      * for each channel */
     if (dither != NULL) {
-        ditherBuffer = ditherGetBuffer(dither, 4 * (xEnd - xStart) * channelCount);
+        ditherBuffer = ditherGetBuffer(dither, (xEnd - xStart) * (size_t)channelCount * 4);
+        shift = ditherGetShiftS16(dither);
     }
 
     for (uint32_t x = xStart; x < xEnd; ++x) {
@@ -474,10 +487,10 @@ static void horizontalS16(Dither_t dither, const uint8_t* in[2], uint8_t* out[2]
 
             /* Apply dithering */
             if (ditherBuffer) {
-                values[0] += *ditherBuffer++;
-                values[1] += *ditherBuffer++;
-                values[2] += *ditherBuffer++;
-                values[3] += *ditherBuffer++;
+                values[0] += *ditherBuffer++ << shift;
+                values[1] += *ditherBuffer++ << shift;
+                values[2] += *ditherBuffer++ << shift;
+                values[3] += *ditherBuffer++ << shift;
             }
 
             outI16[0][storeOffset] = saturateS16(values[0]);
@@ -580,7 +593,7 @@ static void horizontalU16(Dither_t dither, const uint8_t* in[2], uint8_t* out[2]
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows
      * for each channel */
     if (dither != NULL) {
-        ditherBuffer = ditherGetBuffer(dither, 4 * (xEnd - xStart) * channelCount);
+        ditherBuffer = ditherGetBuffer(dither, (size_t)channelCount * (xEnd - xStart) * 4);
     }
 
     for (uint32_t x = xStart; x < xEnd; ++x) {
@@ -712,7 +725,7 @@ static void horizontalU8ToU16BaseUN(Dither_t dither, const uint8_t* in[2], uint8
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows
      * for each channel */
     if (dither != NULL) {
-        ditherBuffer = ditherGetBuffer(dither, 4 * (xEnd - xStart) * channelCount);
+        ditherBuffer = ditherGetBuffer(dither, (xEnd - xStart) * (size_t)channelCount * 4);
     }
 
     for (uint32_t x = xStart; x < xEnd; ++x) {
@@ -821,23 +834,22 @@ void horizontalUNPlanar(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
 /*!
  * Perform vertical upscaling of 2 columns at a time for unsigned 8-bit surfaces.
  *
- * \param ctx          Decoder context
- * \param in           Byte pointer to the input surface data pointer offset by
- *                     the first column to upscale from.
+ * \param in           Byte pointer to the input surface data pointer offset by the first column to
+ *                     upscale from.
  * \param inStride     The pixel stride of the input surface.
- * \param out          Byte pointer to the output surface data pointer offset by
- *                     the first column to upscale to.
+ * \param out          Byte pointer to the output surface data pointer offset by the first column
+ *                     to upscale to.
  * \param outStride    The pixel stride of the output surface.
  * \param y            The y coordinate to start upscaling from on the input surface.
  * \param rows         The number of rows in the column to upscale starting from y.
  * \param height       The pixel height of the input surface.
  * \param kernel       The kernel to perform convolution upscaling with.
  *
- * \note To reiterate the `in` and `out` pointers are pointers to the surface
- *       allocation offset by the pixel column intended to be upscaled from/to.
+ * \note To reiterate, the `in` and `out` pointers are pointers to the allocated surface, offsset by
+ *       the pixel column that you're upscaling from/to.
  *
- *       These pointers are then offset by (y * <>_stride). This is because the in surface
- *       is indexed accordingly:
+ *       These pointers are then offset by (y * <>_stride). This is because the `in` surface is
+ *       indexed like so:
  *           index_range = clamp([y - (kernel_length / 2) <-> y + rows + (kernel_length / 2)],
  *                               0,
  *                               height - 1);
@@ -1176,11 +1188,11 @@ static const uint32_t kLumaShift_UYVY   = 1;
 static const uint32_t kLumaShift_RGB    = 0;
 static const uint32_t kLumaShift_RGBA   = 0;
 
-#define VN_HORI_MAX_VALUE_U8() 
+#define VN_HORI_MAX_VALUE_U8()
 #define VN_HORI_MAX_VALUE_U10() , 1023
 #define VN_HORI_MAX_VALUE_U12() , 4095
 #define VN_HORI_MAX_VALUE_U14() , 16383
-#define VN_HORI_MAX_VALUE_S16() 
+#define VN_HORI_MAX_VALUE_S16()
 
 static const uint16_t kMaxValuePromotion_U10 = 1023;
 static const uint16_t kMaxValuePromotion_U12 = 4095;
@@ -1190,7 +1202,7 @@ static const uint16_t kMaxValuePromotion_U14 = 16383;
 
 /* Helper macro for generating a new upscale_horizontal() function specialisation
  * as a functor.
- * 
+ *
  * \param fn   The function to be invoked by this functor.
  * \param ilv  The interleaving type for determining the channel skip and mapping.
  * \param fp   The fixedpoint type - for all signed types s16 should be used. */
@@ -1203,13 +1215,13 @@ static const uint16_t kMaxValuePromotion_U14 = 16383;
            kernel, kChannelCount_##ilv, kChannelSkip##ilv,                                     \
            kChannelMap##ilv VN_HORI_MAX_VALUE_##fp()); }
 
-/* Helper macro for generating a single upscale_horizontal() unsigned promotion 
+/* Helper macro for generating a single upscale_horizontal() unsigned promotion
  * function specialisation as a functor.
- * 
- * This macro generates a functor that calls upscale_horizontal_uN_u16_base_uN_impl 
+ *
+ * This macro generates a functor that calls upscale_horizontal_uN_u16_base_uN_impl
  * function with the appropriate arguments based upon interleaving type, the source
  * fixedpoint type, the destination fixedpoint type and the base fixedpoint type.
- * 
+ *
  * \param ilv      The interleaving type for determing the channel skip and mapping.
  * \param srcFP   The source data fixedpoint type, must be one of u8, u10, u12.
  * \param dstFP   The destination data fixedpoint type, must be one of u10, u12.
@@ -1227,9 +1239,9 @@ static const uint16_t kMaxValuePromotion_U14 = 16383;
             kShift_##srcFP##_##dstFP, kFormatBytes_##baseFP,                                   \
             kShift_##baseFP##_##dstFP, kMaxValuePromotion_##dstFP); }
 
-/* Helper macro for generating the various horizontal functor interleaving 
+/* Helper macro for generating the various horizontal functor interleaving
  * non-converting combinations required for a given fixedpoint type.
- * 
+ *
  * \param fn   The function to be invoked by the functors.
  * \param fp   The fixedpoint type - for all signed types s16 should be used.
  */
@@ -1241,9 +1253,9 @@ static const uint16_t kMaxValuePromotion_U14 = 16383;
     VN_GEN_HORI_FUNCTION(fn, RGB,    fp) \
     VN_GEN_HORI_FUNCTION(fn, RGBA,   fp)
 
-/* Helper macro for generating the various functor fixedpoint converting 
+/* Helper macro for generating the various functor fixedpoint converting
  * combinations required for a given interleaving type.
- * 
+ *
  * \param ilv   The interleaving type to generate the functors for.
  */
 #define VN_GEN_HORI_UNSIGNED_PROMOTION_FOR_ILV(ilv)          \
@@ -1296,12 +1308,12 @@ VN_GEN_HORI_UNSIGNED_PROMOTION_FOR_ILV(RGBA);
     }
 
 /* Helper macro for generating a single top-level entry in the kHoriFuncTablePromotion
- * lookup table for unsigned promotion horizontal upscales. 
- * 
+ * lookup table for unsigned promotion horizontal upscales.
+ *
  * This table is relatively sparse as the current valid upscale operations are always
  * promoting, which eliminates a whole bunch of potential combinations - this will
  * eventually change to support demotions for full conformance.
- * 
+ *
  * \param ilv   The interleaving type of the functions to register.
  */
 #define VN_REG_HORI_UNSIGNED_PROMOTION_FUNCS(ilv)                                                             \

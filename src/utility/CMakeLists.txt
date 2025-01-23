@@ -1,26 +1,29 @@
 # Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
-# This software is licensed under the BSD-3-Clause-Clear License.
+# This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
 # The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
 # If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
 # AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
-# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
-# DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
-# EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
+# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+# software may be incorporated into a project under a compatible license provided the requirements
+# of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+# licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+# ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+# THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
 include("Sources.cmake")
 
-if(VN_SDK_JSON_CONFIG)
+if (VN_SDK_JSON_CONFIG)
     find_package(rapidjson NAMES RapidJSON rapidjson REQUIRED)
-endif()
+endif ()
 find_package(fmt REQUIRED)
-if(VN_SDK_BASE_DECODER)
+if (VN_SDK_BASE_DECODER)
     find_package(ffmpeg-libs REQUIRED)
-endif()
-if(VN_SDK_USE_GHC_FILESYSTEM)
+endif ()
+if (VN_SDK_USE_GHC_FILESYSTEM)
     find_package(ghc_filesystem REQUIRED)
-endif()
+endif ()
 
 add_library(lcevc_dec_utility STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_utility)
@@ -39,6 +42,6 @@ add_library(lcevc_dec::utility ALIAS lcevc_dec_utility)
 
 include(GNUInstallDirs)
 
-install(TARGETS lcevc_dec_utility)
-install(FILES ${INTERFACES} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/utility)
+install(TARGETS lcevc_dec_utility DESTINATION lib)
+install(FILES ${INTERFACES} DESTINATION include/LCEVC/utility)
 install(FILES ${SOURCES} ${HEADERS} DESTINATION ${CMAKE_INSTALL_DOCDIR}/src/utility)

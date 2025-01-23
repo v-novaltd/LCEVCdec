@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "surface/overlay.h"
 
@@ -91,7 +94,7 @@ static const StaticImageDesc_t* getOverlaySource(int32_t targetWidth)
     return getBestSizeImage(images, sizeof(images) / sizeof(images[0]), targetWidth);
 }
 
-int32_t overlayApply(Logger_t log, Context_t* ctx, const OverlayArgs_t* params)
+int32_t overlayApply(Logger_t log, const OverlayArgs_t* params)
 {
     const Surface_t* surf = params->dst;
     FixedPoint_t fp = surf->type;
@@ -104,10 +107,10 @@ int32_t overlayApply(Logger_t log, Context_t* ctx, const OverlayArgs_t* params)
     const size_t srcHeight = (size_t)overlaySrc->header.h;
     const size_t srcWidth = (size_t)overlaySrc->header.w;
     const size_t dstOffset =
-        ctx->logoOverlayPositionX + srcWidth > xMax ? xMax - srcWidth : ctx->logoOverlayPositionX;
+        params->overlay->positionX + srcWidth > xMax ? xMax - srcWidth : params->overlay->positionX;
 
-    size_t dstY =
-        ctx->logoOverlayPositionY + srcHeight > yMax ? yMax - srcHeight : ctx->logoOverlayPositionY;
+    size_t dstY = params->overlay->positionY + srcHeight > yMax ? yMax - srcHeight
+                                                                : params->overlay->positionY;
 
     if (applyPixel == NULL) {
         VN_ERROR(log, "Could not find function to apply overlay to pixel type %s\n",
@@ -135,4 +138,4 @@ int32_t overlayApply(Logger_t log, Context_t* ctx, const OverlayArgs_t* params)
     return 0;
 }
 
-bool overlayIsEnabled(const Context_t* ctx) { return ctx->useLogoOverlay; }
+bool overlayIsEnabled(const Context_t* ctx) { return ctx->logoOverlay.enabled; }

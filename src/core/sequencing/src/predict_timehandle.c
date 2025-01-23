@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "predict_timehandle.h"
 
@@ -116,6 +119,11 @@ void timehandlePredictorDestroy(TimehandlePredictor_t* predictor) { free(predict
 
 void timehandlePredictorFeed(TimehandlePredictor_t* predictor, uint64_t timehandle)
 {
+    // do nothing if its the same as last time
+    if (predictor->lastFedTimehandle == timehandle) {
+        return;
+    }
+
     // note that these are uints so you can't just do abs(x-y) without risking bad conversions.
     const uint64_t largerTH =
         (timehandle > predictor->lastFedTimehandle ? timehandle : predictor->lastFedTimehandle);
@@ -123,12 +131,15 @@ void timehandlePredictorFeed(TimehandlePredictor_t* predictor, uint64_t timehand
         (timehandle > predictor->lastFedTimehandle ? predictor->lastFedTimehandle : timehandle);
     const uint64_t newDelta = largerTH - smallerTH;
 
-    char th1Buf[32];
-    char th2Buf[32];
-    VN_SEQ_DEBUG("Feeding (%s) = last (%s) +/- %" PRIu64 ". old delta: (%" PRIu64 "-%" PRIu64 ")\n",
-                 timehandlePredictorPrintTimehandle(predictor, th1Buf, 32, timehandle),
-                 timehandlePredictorPrintTimehandle(predictor, th2Buf, 32, predictor->lastFedTimehandle),
-                 newDelta, predictor->deltaLowerBound, predictor->deltaUpperBound);
+    // Don't do any of the work, or declare things on the stack if we are not going to do te debug
+    if (LTDebug <= sLogLevel) {
+        char th1Buf[32];
+        char th2Buf[32];
+        VN_SEQ_DEBUG("Feeding (%s) = last (%s) +/- %" PRIu64 ". old delta: (%" PRIu64 "-%" PRIu64 ")\n",
+                     timehandlePredictorPrintTimehandle(predictor, th1Buf, 32, timehandle),
+                     timehandlePredictorPrintTimehandle(predictor, th2Buf, 32, predictor->lastFedTimehandle),
+                     newDelta, predictor->deltaLowerBound, predictor->deltaUpperBound);
+    }
 
     if (predictor->lastFedTimehandle != kInvalidTimehandle) {
         // FIXME: Next line should be using (m_maxNumReorder+1) instead of kDeltaJumpCoefficient,
@@ -143,6 +154,13 @@ void timehandlePredictorFeed(TimehandlePredictor_t* predictor, uint64_t timehand
             timehandlePredictorUpdateDelta(predictor, newDelta);
         }
     }
+    // reset the counter if the PTS seems to behaving in an odd way.
+    // we expect them to be out-of order which should mean that this test should never pass
+    // unless we are being fed hi -> low
+    if (predictor->deltaRepeatCount && (predictor->lastFedTimehandle > timehandle) &&
+        (predictor->lastHintedTimehandle > timehandle)) {
+        predictor->deltaRepeatCount = predictor->maxNumReorderFrames / 2;
+    }
     predictor->lastFedTimehandle = timehandle;
 
     // First timestamp in the stream, so use it to initialise m_lastHintedTimehandle
@@ -153,6 +171,10 @@ void timehandlePredictorFeed(TimehandlePredictor_t* predictor, uint64_t timehand
 
 void timehandlePredictorHint(TimehandlePredictor_t* predictor, uint64_t timehandle)
 {
+    // No need to do anything if it's the same as last time
+    if (predictor->lastHintedTimehandle == timehandle) {
+        return;
+    }
     // note that these are uints so you can't just do abs(x-y) without risking bad conversions.
     const uint64_t largerTH =
         (timehandle > predictor->lastHintedTimehandle ? timehandle : predictor->lastHintedTimehandle);
@@ -160,12 +182,15 @@ void timehandlePredictorHint(TimehandlePredictor_t* predictor, uint64_t timehand
         (timehandle > predictor->lastHintedTimehandle ? predictor->lastHintedTimehandle : timehandle);
     const uint64_t accurateDelta = largerTH - smallerTH;
 
-    char th1Buf[32];
-    char th2Buf[32];
-    VN_SEQ_DEBUG("Hinting (%s) = last (%s + %" PRIu64 ")\n",
-                 timehandlePredictorPrintTimehandle(predictor, th1Buf, 32, timehandle),
-                 timehandlePredictorPrintTimehandle(predictor, th2Buf, 32, predictor->lastHintedTimehandle),
-                 accurateDelta);
+    // Don't do any of the work, or declare things on the stack if we are not going to do te debug
+    if (LTDebug <= sLogLevel) {
+        char th1Buf[32];
+        char th2Buf[32];
+        VN_SEQ_DEBUG("Hinting (%s) = last (%s + %" PRIu64 ")\n",
+                     timehandlePredictorPrintTimehandle(predictor, th1Buf, 32, timehandle),
+                     timehandlePredictorPrintTimehandle(predictor, th2Buf, 32, predictor->lastHintedTimehandle),
+                     accurateDelta);
+    }
 
     if (predictor->lastHintedTimehandle == kInvalidTimehandle) {
         VN_SEQ_WARNING("hint called when no timehandles have been fed\n");

@@ -1,23 +1,27 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef VN_API_TEST_UNIT_UTILS_H_
 #define VN_API_TEST_UNIT_UTILS_H_
 
 #include <gtest/gtest.h>
 #include <LCEVC/lcevc_dec.h>
+#include <LCEVC/utility/chrono.h>
 #include <LCEVC/utility/picture_layout.h>
 
+#include <array>
 #include <atomic>
-#include <chrono>
 #include <thread>
 
 // Macros -----------------------------------------------------------------------------------------
@@ -39,7 +43,7 @@ using SmartBuffer = std::shared_ptr<std::vector<uint8_t>>;
 constexpr uint32_t kI420NumPlanes = 3; // i.e. Y, U, and V
 constexpr uint32_t kNV12NumPlanes = 2; // i.e. Y and interleaved UV
 
-static const uint32_t kMaxNumPlanes = lcevc_dec::utility::PictureLayout::kMaxPlanes;
+static const uint32_t kMaxNumPlanes = lcevc_dec::utility::PictureLayout::kMaxNumPlanes;
 
 static const std::vector<int32_t> kAllEvents = {
     LCEVC_Log,
@@ -65,17 +69,17 @@ static inline bool greaterThan(std::atomic<uint32_t>& lhs, uint32_t rhs) { retur
 // These are essentially an implementation of the atomic "wait" function (with a timeout), but
 // std::atomic::wait is only available in C++20.
 template <typename Fn, typename... Args>
-static bool atomicWaitUntilTimeout(bool& wasTimeout, std::chrono::milliseconds manualTimeout,
+static bool atomicWaitUntilTimeout(bool& wasTimeout, lcevc_dec::utility::MilliSecond manualTimeout,
                                    Fn pred, Args&&... args)
 {
     // Note that we don't do any checks inside this function: if you do ASSERT_TRUE in here, it
     // only quits the function, not the test.
-    const std::chrono::milliseconds waitIncrement(1);
-    std::chrono::time_point curTime = std::chrono::high_resolution_clock::now();
-    const std::chrono::time_point waitEnd = curTime + manualTimeout;
+    const lcevc_dec::utility::MilliSecond waitIncrement(1);
+    lcevc_dec::utility::TimePoint curTime = lcevc_dec::utility::getTimePoint();
+    const auto waitEnd = curTime + manualTimeout;
     while ((curTime < waitEnd) && (!pred(args...))) {
         std::this_thread::sleep_for(waitIncrement);
-        curTime = std::chrono::high_resolution_clock::now();
+        curTime = lcevc_dec::utility::getTimePoint();
     }
     wasTimeout = (curTime >= waitEnd);
     return pred(args...);
@@ -86,7 +90,7 @@ static bool atomicWaitUntil(bool& wasTimeout, Fn pred, Args&&... args)
 {
     // In tests, 3ms was enough, but 50ms is not enough on a debug build with coverage enabled, so
     // we use 200ms.
-    return atomicWaitUntilTimeout(wasTimeout, std::chrono::milliseconds(200), pred, args...);
+    return atomicWaitUntilTimeout(wasTimeout, lcevc_dec::utility::MilliSecond(200), pred, args...);
 }
 
 // Helpers for PictureExternal:

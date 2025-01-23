@@ -18,6 +18,17 @@ Via apt or a package manager in your distro. You will also need pip, and it is r
 
 ```shell
 sudo apt install python3 pip python3-venv
+pip install -r requirements.txt
+pip install -r cmake/tools/lint_requirements.txt
+pip install -r src/func_tests/test_requirements.txt
+```
+
+## Ninja
+
+Ninja is highly recommended to improve compile times for LCEVCdec and dependencies.
+
+```shell
+sudo apt install ninja-build
 ```
 
 ## Compiler
@@ -27,7 +38,7 @@ It is up to you which compiler you want to use for development. However, be awar
 Via apt:
 
 ```shell
-sudo apt install gcc-11 g++-11
+sudo apt install gcc-11 g++-11 build-essential
 ```
 
 If you want to cross-compile for ARM64, you'll also need gnu compilers for that:
@@ -36,37 +47,16 @@ If you want to cross-compile for ARM64, you'll also need gnu compilers for that:
 sudo apt install gcc-11-aarch64-linux-gnu g++-11-aarch64-linux-gnu
 ```
 
-These will be needed when running `create_all_linux_conan_profiles.py`.
-
-## Installing and Configuring Conan
-
-Conan is software that uses python to manage C/C++ packages. You will need to have Conan installed to get V-Nova's package recipes and prebuilt packages, which will then be fed into CMake to come up with build configurations. Most steps involving Conan will require access to the VPN, or an in-office ethernet connection.
-
-You should anticipate a mountain of failures in the 'create all profiles' step, because it will be unable to create most profiles. All you need is for *your* profiles to be created (that is, `gcc-11-Release` and/or `gcc-11-Debug`, if you're on gcc 11).
-
-Conan is installed and configured from the `lcevc_dec` repo, like so:
-
-```shell
-pip install -r requirements.txt
-pip install -r cmake/tools/lint_requirements.txt
-pip install -r src/func_tests/test_requirements.txt
-export PATH=$PATH:~/.local/bin # or add this to the bottom of your ~/.bashrc
-conan config install "https://gitlab.com/v-nova-public/conan-profiles.git" --type=git
-
-sudo apt install libx11-xcb-dev libxcb*
-python3 [CONAN_HOME]/linux/create_all_linux_conan_profiles.py
-```
-
-The `pip install` step will also get other required python modules, as a happy little bonus.
+These will be needed if using conan when running `create_all_linux_conan_profiles.py`.
 
 ## CMake
 
-Version 3.18.1 or newer is required for a full build. It should be available via `sudo apt install cmake`. 
+Version 3.22.1 or newer is required for a full build. It should be available via `sudo apt install cmake`.
 
 If not, you can always install via installer script
 ```shell
 sudo mkdir /opt/cmake
-wget https://github.com/Kitware/CMake/releases/download/v3.18.1/cmake-3.18.1-Linux-x86_64.sh -O cmake.sh
+wget https://github.com/Kitware/CMake/releases/download/v3.22.1/cmake-3.22.1-linux-x86_64.sh -O cmake.sh
 sudo /bin/bash cmake.sh --skip-license --prefix=/opt/cmake
 rm cmake.sh
 ```
@@ -76,9 +66,35 @@ Add the following line at the end of ~/.bashrc to use cmake 3.18 by default
 export PATH=/opt/cmake/bin:${PATH}
 ```
 
-## Ninja
+## Gathering dependencies
 
-`sudo apt install ninja-build`
+The core and API compile targets of the repo are structured to have no dependencies to ensure the core functionality is as portable as possible. Components such as the test harness and unit tests require hashing libraries, JSON parsers and gtest for unit testing to allow for easier testing. An important dependency of the test harness are various libav components that allow base decoding and parsing of common container formats such as .ts and .mp4. By default, the repo uses `conan` to fetch these. `pkg-config` is an automatic fallback if `conan` fails or paths can be manually specified with the `-DVN_SDK_FFMPEG_LIBS_PACKAGE` cmake option.
+
+Either follow Gathering pkg-config Dependencies OR Gathering conan Dependencies below.
+
+## Gathering conan Dependencies
+
+Conan is software that uses python to manage C/C++ packages. Internally at V-Nova we use conan to manage package recipes and prebuilt packages across platforms. The following steps involving Conan will require access to the V-Nova VPN, or an in-office ethernet connection.
+
+After installing the repo, profiles are installed with the python script. Conan profiles set many constants about your environment such as the compiler, build type and architecture. For linux development `gcc-11-Release` and `gcc-11-Debug` are required. After installing conan profiles, they can be listed with `conan profile list`.
+
+Conan is configured from the `lcevc_dec` repo, like so:
+
+```shell
+export PATH=$PATH:~/.local/bin # or add this to the bottom of your ~/.bashrc
+conan config install "https://gitlab.com/v-nova-public/conan-profiles.git" --type=git
+
+sudo apt install libx11-xcb-dev libxcb*
+python3 ~/.conan/linux/create_all_linux_conan_profiles.py
+```
+
+## Gathering pkg-config Dependencies
+
+All dependencies can be retrieved via `apt` on debian based systems.
+
+```shell
+sudo apt-get install -y pkg-config rapidjson-dev libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev
+```
 
 ## Android development
 
@@ -107,4 +123,4 @@ sdkmanager "platforms;android-33"
 sdkmanager "ndk;25.2.9519653"
 ```
 
-We use 25.2.9519653 here, as that's an NDK version which is known to work.
+NDK version 25.2.9519653 is known to work.

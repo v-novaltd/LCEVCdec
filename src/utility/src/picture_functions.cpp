@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 // Functions for common Picture operations - read/write/dump.
 //
@@ -115,7 +118,7 @@ LCEVC_ReturnCode copyPictureFromMemory(LCEVC_DecoderHandle decoder, LCEVC_Pictur
     PictureLock lock(decoder, picture, LCEVC_Access_Write);
     const uint8_t* const limit = data + size;
 
-    for (uint32_t plane = 0; plane < lock.numPlaneGroups(); ++plane) {
+    for (uint32_t plane = 0; plane < lock.numPlanes(); ++plane) {
         const uint32_t rowSize = lock.rowSize(plane);
         const uint32_t height = lock.height(plane);
 
@@ -159,7 +162,7 @@ LCEVC_ReturnCode createPaddedDesc(const LCEVC_PictureDesc& srcDesc, const uint8_
                                   LCEVC_PictureBufferDesc* dstBufferDesc,
                                   LCEVC_PicturePlaneDesc* dstPlaneDesc)
 {
-    uint32_t rowStrides[PictureLayout::kMaxPlanes] = {0};
+    uint32_t rowStrides[PictureLayout::kMaxNumPlanes] = {0};
     if (!PictureLayout::getPaddedStrides(srcDesc, rowStrides)) {
         return LCEVC_Error;
     }
@@ -174,7 +177,7 @@ LCEVC_ReturnCode createPaddedDesc(const LCEVC_PictureDesc& srcDesc, const uint8_
     }
     const uint8_t* baseData = data;
     uint8_t* descData = dstBufferDesc->data;
-    for (uint32_t plane = 0; plane < baseLayout.planeGroups(); plane++) {
+    for (uint32_t plane = 0; plane < baseLayout.planes(); plane++) {
         for (unsigned row = 0; row < descLayout.planeHeight(plane); ++row) {
             memcpy(descData, baseData, baseLayout.rowSize(plane));
             baseData += baseLayout.rowStride(plane);

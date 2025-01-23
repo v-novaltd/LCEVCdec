@@ -490,6 +490,8 @@ Option                      Type       Description
 "enable_logo_overlay"       boolean    If true, an LCEVC logo will appear, to let you know that LCEVC is being used.
 "events"                    intArray   Array of :cpp:enum:`LCEVC_Event`. The events that will be generated via the
                                        event callback.
+"force_bitstream_version"   int        Override bitstream version information. Version information is typically present
+                                       in streams produced by V-Nova, but absent in conformance streams.
 "generate_cmd_buffers"      boolean    If true, residuals are generated as command buffers. Otherwise, residuals are
                                        arrays of pixels.
 "high_precision"            boolean    If true, Core decoder runs in Precision mode. Otherwise, runs in Speed mode.

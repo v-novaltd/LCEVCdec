@@ -1,0 +1,179 @@
+# Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+# This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
+# No patent licenses are granted under this license. For enquiries about patent licenses,
+# please contact legal@v-nova.com.
+# The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+# If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+# AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+# software may be incorporated into a project under a compatible license provided the requirements
+# of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+# licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+# ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+# THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
+
+name: CI Linux
+
+on:
+  pull_request:
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          lfs: true
+
+      - name: Install required lib
+        run: pip3 install -r cmake/tools/lint_requirements.txt
+
+      - name: Run Lint Check
+        run: python3 cmake/tools/lint.py --check-only --diff-master
+
+  build:
+    name: Build
+    needs: lint
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Update System Packages
+        run: sudo apt-get update
+
+      - name: Cache APT Packages
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: rapidjson-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev unzip
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-${{ github.ref_name }}
+          append-timestamp: false
+
+      - name: Cmake Build
+        run: |
+          export PATH="/usr/lib/ccache:$PATH"
+          mkdir build && cd build
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} ..
+          cmake --build .
+
+      - name: Cmake Install
+        run: cmake --install build --prefix $GITHUB_WORKSPACE/install
+
+      - name: Create Build Archive
+        run: tar -czf install.tar.gz -C $GITHUB_WORKSPACE install
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-artifacts
+          path: install.tar.gz
+
+  unit_tests:
+    name: Unit tests
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          lfs: true
+
+      - name: Cache APT Packages
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: rapidjson-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev unzip
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: install-artifacts
+
+      - name: Extract Build Archive
+        run: tar -xzf install.tar.gz
+
+      - name: Run Unit Tests
+        run: |
+          export LD_LIBRARY_PATH=$GITHUB_WORKSPACE/install/lib
+          status=0
+          for test in install/bin/*test_unit; do
+            echo "Running test: ${test}"
+            "${test}"
+            if [[ $? -ne 0 ]]; then
+              echo "Unit Test failed: ${test}"
+              status=1
+              continue
+            fi
+          done
+          exit "${status}"
+
+  func_tests:
+    name: Functional Tests
+    needs: unit_tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          lfs: true
+
+      - name: Cache APT Packages
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: rapidjson-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev unzip
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: install-artifacts
+
+      - name: Extract Build Archive
+        run: tar -xzf install.tar.gz
+
+      - name: Create URLs
+        run: |
+          git fetch --tags
+          echo "https://nbg1.your-objectstorage.com/lcevcdec/LCEVCdec_3.3.3_external_test_assets.zip" > url.txt
+
+      - name: Cache External Assets
+        id: cache-assets
+        uses: actions/cache@v3
+        with:
+          path: external_assets/
+          key: test-assets-${{ hashFiles('url.txt') }}
+
+      - name: Download External Assets
+        if: steps.cache-assets.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p external_assets
+          curl -L -o external_assets/test_cache.zip $(cat url.txt)
+
+      - name: Unzip Test Assets
+        run: unzip external_assets/test_cache.zip
+
+      - name: Install required lib
+        run: pip3 install -r src/func_tests/test_requirements.txt
+
+      - name: Run Functional Tests
+        run: |
+          export PLATFORM=External
+          export BIN_DIR=install/bin
+          export LEVEL=MR
+          if ! python3 src/func_tests/run_tests.py; then
+            echo "Function test failed, see error in pipeline"
+              exit 1
+          fi

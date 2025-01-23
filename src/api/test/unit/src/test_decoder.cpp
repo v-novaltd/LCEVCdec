@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 // This tests api/src/decoder.h
 
@@ -45,6 +48,13 @@ struct LCEVC_Decoder
 {
     std::mutex mutex;
     Decoder* decoder = nullptr;
+};
+
+enum class EnhancementOption
+{
+    Valid,
+    Empty,
+    None
 };
 
 // - Fixtures -------------------------------------------------------------------------------------
@@ -245,33 +255,37 @@ protected:
 
     // Sends an output, enhancement, and base, and sets expected callback results for "canReceive"
     // (i.e. can receive decoded output) and "basePictureDone".
-    void sendOneOfEach(int64_t pts, LCEVC_ReturnCode& outputResult, LCEVC_ReturnCode& enhancedResult,
-                       LCEVC_ReturnCode& baseResult, bool withEnhancement = true)
+    void sendOneOfEach(int64_t pts, LCEVC_ReturnCode& outputResult,
+                       LCEVC_ReturnCode& enhancedResult, LCEVC_ReturnCode& baseResult,
+                       EnhancementOption enhancementOption = EnhancementOption::Valid)
     {
         m_expectedCallbackResults[LCEVC_CanReceive].emplace(m_pretendDecoderHdl.hdl);
 
-        allocOutputManaged();
-        outputResult = m_decoder.feedOutputPicture(m_outputs.back().first.hdl);
-
-        if (withEnhancement) {
+        if (enhancementOption == EnhancementOption::Valid) {
             const auto [enhancementData, enhancementSize] = getEnhancement(pts);
             enhancedResult = m_decoder.feedEnhancementData(pts, false, enhancementData, enhancementSize);
+        } else if (enhancementOption == EnhancementOption::Empty) {
+            enhancedResult = m_decoder.feedEnhancementData(pts, false, nullptr, 0);
         }
 
         allocBaseManaged(pts);
         m_expectedCallbackResults[LCEVC_BasePictureDone].emplace(m_pretendDecoderHdl.hdl,
                                                                  m_bases.back().handle.handle);
         baseResult = m_decoder.feedBase(pts, false, m_bases.back().handle, UINT32_MAX, nullptr);
+
+        allocOutputManaged();
+        outputResult = m_decoder.feedOutputPicture(m_outputs.back().first.hdl);
     }
 
-    void sendOneOfEach(int64_t pts, bool withEnhancement = true)
+    void sendOneOfEach(int64_t pts, EnhancementOption enhancementOption = EnhancementOption::Valid)
     {
         LCEVC_ReturnCode outputResult = LCEVC_Error;
         LCEVC_ReturnCode enhancedResult = LCEVC_Error;
         LCEVC_ReturnCode baseResult = LCEVC_Error;
-        sendOneOfEach(pts, outputResult, enhancedResult, baseResult, withEnhancement);
+        sendOneOfEach(pts, outputResult, enhancedResult, baseResult, enhancementOption);
         ASSERT_TRUE(outputResult == LCEVC_Success &&
-                    ((enhancedResult == LCEVC_Success) || !withEnhancement) && baseResult == LCEVC_Success);
+                    ((enhancedResult == LCEVC_Success) || enhancementOption == EnhancementOption::None) &&
+                    baseResult == LCEVC_Success);
     }
 
     void receiveOneOfEach(LCEVC_ReturnCode expectedCode, bool expectEnhanced)
@@ -1132,13 +1146,24 @@ TEST_P(DecoderFixturePassthrough, peekInvalidCases)
 
 TEST_P(DecoderFixturePassthrough, passthrough)
 {
-    // Send a full set, and expect success, plus enhanced iff not forcing passthrough
+    // Send a full set, and expect success, plus enhanced iff not forcing passthrough. Likewise,
+    // update m_outputDesc before alloc'ing an output, to ensure it matches expectations
+    if (forcePassthrough()) {
+        m_outputDesc = m_inputDesc;
+    }
     sendOneOfEach(0);
     receiveOneOfEach(LCEVC_Success, !forcePassthrough());
 
     // Send a base and output but no enhancement: success if passthrough is allowed, but never
     // enhanced.
-    sendOneOfEach(1, false);
+    m_outputDesc = m_inputDesc;
+    sendOneOfEach(1, EnhancementOption::None);
+    receiveOneOfEach(allowPassthrough() ? LCEVC_Success : LCEVC_Error, false);
+
+    // Send a base, an output, and an EMPTY enhancement: success if passthrough is allowed, but
+    // never enhanced (in other words, same as no enhancement).
+    m_outputDesc = m_inputDesc;
+    sendOneOfEach(2, EnhancementOption::Empty);
     receiveOneOfEach(allowPassthrough() ? LCEVC_Success : LCEVC_Error, false);
 }
 

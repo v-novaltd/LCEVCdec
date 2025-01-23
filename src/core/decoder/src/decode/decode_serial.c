@@ -1,25 +1,26 @@
 /* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
-
-/** \file apply_residual.c
- * Residual application functions
- */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decode/decode_serial.h"
 
 #include "common/cmdbuffer.h"
+#include "common/log.h"
 #include "common/memory.h"
-#include "common/profiler.h"
-#include "common/stats.h"
+#include "common/platform.h"
+#include "common/threading.h"
 #include "common/tile.h"
+#include "common/types.h"
 #include "context.h"
 #include "decode/apply_cmdbuffer.h"
 #include "decode/decode_common.h"
@@ -28,11 +29,12 @@
 #include "decode/transform.h"
 #include "decode/transform_unit.h"
 #include "surface/blit.h"
+#include "surface/surface.h"
 
 #include <assert.h>
-#include <inttypes.h>
 #include <limits.h>
-#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -203,22 +205,22 @@ static void addResidualsDDS_S16(ResidualArgs_t* args, uint32_t x, uint32_t y, co
 
     /* Add inverse to S8.7/S10.4/S12.3/S14.1 buffer. */
     /* clang-format off */
-	pel[0]                     = saturateS16(pel[0] + residuals[0]);
-	pel[skip]                  = saturateS16(pel[skip] + residuals[1]);
-	pel[stride]                = saturateS16(pel[stride] + residuals[2]);
-	pel[skip + stride]         = saturateS16(pel[skip + stride] + residuals[3]);
-	pel[2 * skip]              = saturateS16(pel[2 * skip] + residuals[4]);
-	pel[3 * skip]              = saturateS16(pel[3 * skip] + residuals[5]);
-	pel[2 * skip + stride]     = saturateS16(pel[2 * skip + stride] + residuals[6]);
-	pel[3 * skip + stride]     = saturateS16(pel[3 * skip + stride] + residuals[7]);
-	pel[2 * stride]            = saturateS16(pel[2 * stride] + residuals[8]);
-	pel[skip + 2 * stride]     = saturateS16(pel[skip + 2 * stride] + residuals[9]);
-	pel[3 * stride]            = saturateS16(pel[3 * stride] + residuals[10]);
-	pel[skip + 3 * stride]     = saturateS16(pel[skip + 3 * stride] + residuals[11]);
-	pel[2 * skip + 2 * stride] = saturateS16(pel[2 * skip + 2 * stride] + residuals[12]);
-	pel[3 * skip + 2 * stride] = saturateS16(pel[3 * skip + 2 * stride] + residuals[13]);
-	pel[2 * skip + 3 * stride] = saturateS16(pel[2 * skip + 3 * stride] + residuals[14]);
-	pel[3 * skip + 3 * stride] = saturateS16(pel[3 * skip + 3 * stride] + residuals[15]);
+    pel[0]                     = saturateS16(pel[0] + residuals[0]);
+    pel[skip]                  = saturateS16(pel[skip] + residuals[1]);
+    pel[stride]                = saturateS16(pel[stride] + residuals[2]);
+    pel[skip + stride]         = saturateS16(pel[skip + stride] + residuals[3]);
+    pel[2 * skip]              = saturateS16(pel[2 * skip] + residuals[4]);
+    pel[3 * skip]              = saturateS16(pel[3 * skip] + residuals[5]);
+    pel[2 * skip + stride]     = saturateS16(pel[2 * skip + stride] + residuals[6]);
+    pel[3 * skip + stride]     = saturateS16(pel[3 * skip + stride] + residuals[7]);
+    pel[2 * stride]            = saturateS16(pel[2 * stride] + residuals[8]);
+    pel[skip + 2 * stride]     = saturateS16(pel[skip + 2 * stride] + residuals[9]);
+    pel[3 * stride]            = saturateS16(pel[3 * stride] + residuals[10]);
+    pel[skip + 3 * stride]     = saturateS16(pel[skip + 3 * stride] + residuals[11]);
+    pel[2 * skip + 2 * stride] = saturateS16(pel[2 * skip + 2 * stride] + residuals[12]);
+    pel[3 * skip + 2 * stride] = saturateS16(pel[3 * skip + 2 * stride] + residuals[13]);
+    pel[2 * skip + 3 * stride] = saturateS16(pel[2 * skip + 3 * stride] + residuals[14]);
+    pel[3 * skip + 3 * stride] = saturateS16(pel[3 * skip + 3 * stride] + residuals[15]);
     /* clang-format on */
 }
 
@@ -291,14 +293,14 @@ typedef struct ApplyResidualFunctions
 
 /* clang-format off */
 static const ResidualFunctions_t kResidualFunctionTable[FPCount][2] = {
-	{{addResidualsDD_U8,  NULL,                 writeHighlightDD_U8},  {addResidualsDDS_U8,  NULL,                  writeHighlightDDS_U8}},  /* U8 */
-	{{addResidualsDD_U10, NULL,                 writeHighlightDD_U16}, {addResidualsDDS_U10, NULL,                  writeHighlightDDS_U16}}, /* U10 */
-	{{addResidualsDD_U12, NULL,                 writeHighlightDD_U16}, {addResidualsDDS_U12, NULL,                  writeHighlightDDS_U16}}, /* U12 */
-	{{addResidualsDD_U14, NULL,                 writeHighlightDD_U16}, {addResidualsDDS_U14, NULL,                  writeHighlightDDS_U16}}, /* U14 */
-	{{addResidualsDD_S16, writeResidualsDD_S16, writeHighlightDD_S16}, {addResidualsDDS_S16, writeResidualsDDS_S16, writeHighlightDDS_S16}}, /* S8.7 */
-	{{addResidualsDD_S16, writeResidualsDD_S16, writeHighlightDD_S16}, {addResidualsDDS_S16, writeResidualsDDS_S16, writeHighlightDDS_S16}}, /* S10.5 */
-	{{addResidualsDD_S16, writeResidualsDD_S16, writeHighlightDD_S16}, {addResidualsDDS_S16, writeResidualsDDS_S16, writeHighlightDDS_S16}}, /* S12.3 */
-	{{addResidualsDD_S16, writeResidualsDD_S16, writeResidualsDD_S16}, {addResidualsDDS_S16, writeResidualsDDS_S16, writeResidualsDDS_S16}}, /* S14.1 */
+    {{addResidualsDD_U8,  NULL,                 writeHighlightDD_U8},  {addResidualsDDS_U8,  NULL,                  writeHighlightDDS_U8}},  /* U8 */
+    {{addResidualsDD_U10, NULL,                 writeHighlightDD_U16}, {addResidualsDDS_U10, NULL,                  writeHighlightDDS_U16}}, /* U10 */
+    {{addResidualsDD_U12, NULL,                 writeHighlightDD_U16}, {addResidualsDDS_U12, NULL,                  writeHighlightDDS_U16}}, /* U12 */
+    {{addResidualsDD_U14, NULL,                 writeHighlightDD_U16}, {addResidualsDDS_U14, NULL,                  writeHighlightDDS_U16}}, /* U14 */
+    {{addResidualsDD_S16, writeResidualsDD_S16, writeHighlightDD_S16}, {addResidualsDDS_S16, writeResidualsDDS_S16, writeHighlightDDS_S16}}, /* S8.7 */
+    {{addResidualsDD_S16, writeResidualsDD_S16, writeHighlightDD_S16}, {addResidualsDDS_S16, writeResidualsDDS_S16, writeHighlightDDS_S16}}, /* S10.5 */
+    {{addResidualsDD_S16, writeResidualsDD_S16, writeHighlightDD_S16}, {addResidualsDDS_S16, writeResidualsDDS_S16, writeHighlightDDS_S16}}, /* S12.3 */
+    {{addResidualsDD_S16, writeResidualsDD_S16, writeHighlightDD_S16}, {addResidualsDDS_S16, writeResidualsDDS_S16, writeHighlightDDS_S16}}, /* S14.1 */
 };
 /* clang-format on */
 
@@ -354,10 +356,10 @@ static void convertDD_S87_S8(ConvertArgs_t* args, uint32_t x, uint32_t y)
     assert(src->type == FPS8);
 
     /* clang-format off */
-	dstPels[0]                   = (uint8_t)(srcPels[0] >> 8);
-	dstPels[dstSkip]             = (uint8_t)(srcPels[srcSkip] >> 8);
-	dstPels[dstStride]           = (uint8_t)(srcPels[srcStride] >> 8);
-	dstPels[dstSkip + dstStride] = (uint8_t)(srcPels[srcSkip + srcStride] >> 8);
+    dstPels[0]                   = (uint8_t)(srcPels[0] >> 8);
+    dstPels[dstSkip]             = (uint8_t)(srcPels[srcSkip] >> 8);
+    dstPels[dstStride]           = (uint8_t)(srcPels[srcStride] >> 8);
+    dstPels[dstSkip + dstStride] = (uint8_t)(srcPels[srcSkip + srcStride] >> 8);
     /* clang-format on */
 }
 
@@ -368,22 +370,22 @@ static void convertDDS_S87_S8(ConvertArgs_t* args, uint32_t x, uint32_t y)
     assert(src->type == FPS8);
 
     /* clang-format off */
-	dstPels[0]                           = (uint8_t)(srcPels[0] >> 8);
-	dstPels[dstSkip]                     = (uint8_t)(srcPels[srcSkip] >> 8);
-	dstPels[dstStride]                   = (uint8_t)(srcPels[srcStride] >> 8);
-	dstPels[dstSkip + dstStride]         = (uint8_t)(srcPels[srcSkip + srcStride] >> 8);
-	dstPels[2 * dstSkip]                 = (uint8_t)(srcPels[2 * srcSkip] >> 8);
-	dstPels[3 * dstSkip]                 = (uint8_t)(srcPels[3 * srcSkip] >> 8);
-	dstPels[2 * dstSkip + dstStride]     = (uint8_t)(srcPels[2 * srcSkip + srcStride] >> 8);
-	dstPels[3 * dstSkip + dstStride]     = (uint8_t)(srcPels[3 * srcSkip + srcStride] >> 8);
-	dstPels[2 * dstStride]               = (uint8_t)(srcPels[2 * srcStride] >> 8);
-	dstPels[dstSkip + 2 * dstStride]     = (uint8_t)(srcPels[srcSkip + 2 * srcStride] >> 8);
-	dstPels[3 * dstStride]               = (uint8_t)(srcPels[3 * srcStride] >> 8);
-	dstPels[dstSkip + 3 * dstStride]     = (uint8_t)(srcPels[srcSkip + 3 * srcStride] >> 8);
-	dstPels[2 * dstSkip + 2 * dstStride] = (uint8_t)(srcPels[2 * srcSkip + 2 * srcStride] >> 8);
-	dstPels[3 * dstSkip + 2 * dstStride] = (uint8_t)(srcPels[3 * srcSkip + 2 * srcStride] >> 8);
-	dstPels[2 * dstSkip + 3 * dstStride] = (uint8_t)(srcPels[2 * srcSkip + 3 * srcStride] >> 8);
-	dstPels[3 * dstSkip + 3 * dstStride] = (uint8_t)(srcPels[3 * srcSkip + 3 * srcStride] >> 8);
+    dstPels[0]                           = (uint8_t)(srcPels[0] >> 8);
+    dstPels[dstSkip]                     = (uint8_t)(srcPels[srcSkip] >> 8);
+    dstPels[dstStride]                   = (uint8_t)(srcPels[srcStride] >> 8);
+    dstPels[dstSkip + dstStride]         = (uint8_t)(srcPels[srcSkip + srcStride] >> 8);
+    dstPels[2 * dstSkip]                 = (uint8_t)(srcPels[2 * srcSkip] >> 8);
+    dstPels[3 * dstSkip]                 = (uint8_t)(srcPels[3 * srcSkip] >> 8);
+    dstPels[2 * dstSkip + dstStride]     = (uint8_t)(srcPels[2 * srcSkip + srcStride] >> 8);
+    dstPels[3 * dstSkip + dstStride]     = (uint8_t)(srcPels[3 * srcSkip + srcStride] >> 8);
+    dstPels[2 * dstStride]               = (uint8_t)(srcPels[2 * srcStride] >> 8);
+    dstPels[dstSkip + 2 * dstStride]     = (uint8_t)(srcPels[srcSkip + 2 * srcStride] >> 8);
+    dstPels[3 * dstStride]               = (uint8_t)(srcPels[3 * srcStride] >> 8);
+    dstPels[dstSkip + 3 * dstStride]     = (uint8_t)(srcPels[srcSkip + 3 * srcStride] >> 8);
+    dstPels[2 * dstSkip + 2 * dstStride] = (uint8_t)(srcPels[2 * srcSkip + 2 * srcStride] >> 8);
+    dstPels[3 * dstSkip + 2 * dstStride] = (uint8_t)(srcPels[3 * srcSkip + 2 * srcStride] >> 8);
+    dstPels[2 * dstSkip + 3 * dstStride] = (uint8_t)(srcPels[2 * srcSkip + 3 * srcStride] >> 8);
+    dstPels[3 * dstSkip + 3 * dstStride] = (uint8_t)(srcPels[3 * srcSkip + 3 * srcStride] >> 8);
     /* clang-format on */
 }
 
@@ -423,19 +425,19 @@ static void clearBlock(Surface_t* dst, uint32_t x, uint32_t y, uint32_t elementS
 
 int32_t prepareLayerDecoders(Logger_t log, const TileState_t* tile,
                              EntropyDecoder_t residualDecoders[RCLayerCountDDS],
-                             EntropyDecoder_t* temporalDecoder, int32_t layerCount, bool useOldCodeLengths)
+                             EntropyDecoder_t* temporalDecoder, int32_t layerCount, uint8_t bitstreamVersion)
 {
     int32_t res = 0;
 
     if (tile->chunks) {
         for (int32_t layerIdx = 0; layerIdx < layerCount; ++layerIdx) {
             VN_CHECK(entropyInitialise(log, &residualDecoders[layerIdx], &tile->chunks[layerIdx],
-                                       EDTDefault, useOldCodeLengths));
+                                       EDTDefault, bitstreamVersion));
         }
     }
 
     if (tile->temporalChunk) {
-        VN_CHECK(entropyInitialise(log, temporalDecoder, tile->temporalChunk, EDTTemporal, useOldCodeLengths));
+        VN_CHECK(entropyInitialise(log, temporalDecoder, tile->temporalChunk, EDTTemporal, bitstreamVersion));
     }
 
     return 0;
@@ -460,8 +462,9 @@ typedef struct ApplyResidualJobData
     LOQIndex_t loq;
     const Dequant_t* dequant;
     FieldType_t fieldType;
-    bool temporal;
+    uint8_t bitstreamVersion;
     bool tuCoordsAreInSurfaceRasterOrder;
+    bool applyTemporal;
     Surface_t* dst;
     uint32_t dstChannel;
     TileState_t* tiles;
@@ -514,7 +517,7 @@ static int32_t applyResidualJob(void* jobData)
     /* general */
     const LOQIndex_t loq = applyData->loq;
     const Dequant_t* dequant = applyData->dequant;
-    const bool applyTemporal = applyData->temporal;
+    const bool applyTemporal = applyData->applyTemporal;
     const uint8_t numLayers = data->numLayers;
     const bool dds = data->transform == TransformDDS;
     const uint8_t tuWidthShift = dds ? 2 : 1; /* The width, log2, of the transform unit */
@@ -534,8 +537,6 @@ static int32_t applyResidualJob(void* jobData)
     ConvertFunction_t convertFn = NULL;
     ConvertArgs_t convertArgs = {0};
     const ResidualMode_t residualMode = ctx->highlightState[loq].enabled ? RM_Highlight : RM_Add;
-
-    VN_PROFILE_START_DYNAMIC("apply_plane loq=%d plane=%d", (loq == LOQ0) ? 0 : 1, applyData->plane);
 
     residualArgs.highlight = &ctx->highlightState[loq];
 
@@ -617,7 +618,7 @@ static int32_t applyResidualJob(void* jobData)
         EntropyDecoder_t residualDecoders[RCLayerCountDDS] = {{0}};
         EntropyDecoder_t temporalDecoder = {0};
         VN_CHECKJ(prepareLayerDecoders(applyData->log, tile, residualDecoders, &temporalDecoder,
-                                       numLayers, ctx->useOldCodeLengths));
+                                       numLayers, applyData->bitstreamVersion));
 
         /* Setup TU */
         VN_CHECKJ(tuStateInitialise(&tuState, tile->width, tile->height, tile->x, tile->y, tuWidthShift));
@@ -717,10 +718,17 @@ static int32_t applyResidualJob(void* jobData)
                      * could be intra. */
 
                     for (uint8_t layer = 0; layer < numLayers; layer++) {
-                        const int16_t coeffSign = (coeffs[layer] > 0) ? 1 : (coeffs[layer] >> 15);
-                        coeffs[layer] *= dequant->stepWidth[temporal][layer]; /* Simple dequant */
-                        coeffs[layer] +=
-                            (coeffSign * dequant->offset[temporal][layer]); /* Applying dead zone */
+                        if (coeffs[layer] > 0) {
+                            coeffs[layer] = (int16_t)clampS32(
+                                (int32_t)coeffs[layer] * dequant->stepWidth[temporal][layer] +
+                                    dequant->offset[temporal][layer],
+                                INT16_MIN, INT16_MAX);
+                        } else if (coeffs[layer] < 0) {
+                            coeffs[layer] = (int16_t)clampS32(
+                                (int32_t)coeffs[layer] * dequant->stepWidth[temporal][layer] -
+                                    dequant->offset[temporal][layer],
+                                INT16_MIN, INT16_MAX);
+                        }
                     }
 
                     /* Inverse hadamard */
@@ -836,7 +844,6 @@ static int32_t applyResidualJob(void* jobData)
     }
 
 error_exit:
-    VN_PROFILE_STOP();
     return (res < 0) ? res : 0;
 }
 
@@ -853,8 +860,6 @@ static int32_t applyResidualExecute(Context_t* ctx, const DecodeSerialArgs_t* pa
     int32_t planeIndex = 0;
 
     assert(planeCount <= AC_MaxResidualParallel);
-
-    VN_PROFILE_START_DYNAMIC("apply_residual_execute %s", loqIndexToString(loq));
 
     for (; planeIndex < planeCount && planeIndex < RCMaxPlanes; planeIndex += 1) {
         CacheTileData_t* tileCache = &ctx->decodeSerial[loq]->tileDataPerPlane[planeIndex];
@@ -879,7 +884,8 @@ static int32_t applyResidualExecute(Context_t* ctx, const DecodeSerialArgs_t* pa
         threadData[planeIndex].plane = planeIndex;
         threadData[planeIndex].loq = loq;
         threadData[planeIndex].fieldType = data->fieldType;
-        threadData[planeIndex].temporal = params->applyTemporal;
+        threadData[planeIndex].bitstreamVersion = params->bitstreamVersion;
+        threadData[planeIndex].applyTemporal = params->applyTemporal;
         threadData[planeIndex].tuCoordsAreInSurfaceRasterOrder = params->tuCoordsAreInSurfaceRasterOrder;
         threadData[planeIndex].tiles = tileCache->tiles;
         threadData[planeIndex].tileCount = tileCache->tileCount;
@@ -891,7 +897,6 @@ static int32_t applyResidualExecute(Context_t* ctx, const DecodeSerialArgs_t* pa
               : -1;
 
 error_exit:
-    VN_PROFILE_STOP();
     return res;
 }
 
@@ -923,17 +928,16 @@ int32_t decodeSerial(Context_t* ctx, const DecodeSerialArgs_t* params)
         return -1;
     }
 
-    FrameStats_t frameStats = params->stats;
-    VN_FRAMESTATS_RECORD_START(
-        frameStats, (params->loq == LOQ0 ? STSerialDecodeLOQ0Start : STSerialDecodeLOQ1Start));
+    if (!ctx->deserialised.entropyEnabled[params->loq]) {
+        VN_DEBUG(params->log, "Nothing to decode in LOQ%d\n", params->loq);
+        return 0;
+    }
+
     int32_t res = 0;
     VN_CHECK(applyResidualExecute(ctx, params));
-    VN_FRAMESTATS_RECORD_STOP(frameStats,
-                              (params->loq == LOQ0 ? STSerialDecodeLOQ0Stop : STSerialDecodeLOQ1Stop));
 
     if (ctx->applyCmdBuffers) {
         const Highlight_t* highlight = &ctx->highlightState[params->loq];
-        VN_FRAMESTATS_RECORD_START(frameStats, (params->loq == LOQ0 ? STApplyLOQ0Start : STApplyLOQ1Start));
         /* TODO: thread this per-plane? That's the way that applyResidualExecute is threaded. */
         for (uint32_t planeIdx = 0; planeIdx < AC_MaxResidualParallel; planeIdx++) {
             const CacheTileData_t* tileData = &decode->tileDataPerPlane[planeIdx];
@@ -949,21 +953,6 @@ int32_t decodeSerial(Context_t* ctx, const DecodeSerialArgs_t* params)
                                         highlight));
             }
         }
-        VN_FRAMESTATS_RECORD_STOP(frameStats, (params->loq == LOQ0 ? STApplyLOQ0Stop : STApplyLOQ1Stop));
-
-        if (params->loq == LOQ0) {
-            size_t totalSize = 0;
-            for (uint32_t planeIdx = 0; planeIdx < AC_MaxResidualParallel; planeIdx++) {
-                const CacheTileData_t* tileData = &decode->tileDataPerPlane[planeIdx];
-                const uint32_t tileCount = tileData->tileCount;
-                for (uint32_t tileIndex = 0; tileIndex < tileCount; ++tileIndex) {
-                    const TileState_t* tile = &tileData->tiles[tileIndex];
-                    totalSize += cmdBufferGetSize(tile->cmdBuffer);
-                }
-            }
-            VN_FRAMESTATS_RECORD_VALUE(frameStats, STCmdBufferSize, totalSize);
-        }
-        VN_PROFILE_STOP();
     }
 
     return res;

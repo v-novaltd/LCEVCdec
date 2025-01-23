@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "lcevc_container.h"
 
@@ -319,24 +322,37 @@ size_t lcevcContainerCapacity(const LCEVCContainer_t* container)
 void lcevcContainerSetMaxNumReorderFrames(LCEVCContainer_t* container, uint32_t maxNumReorderFrames)
 {
     timehandlePredictorSetMaxNumReorderFrames(container->predictor, maxNumReorderFrames);
+    // As the predictor will be reset now we should give it a hint if we have any time handles
+    // As the list is ordered we can use the head of the list to do the hinting
+    if (container->list.head != NULL) {
+        timehandlePredictorHint(container->predictor, container->list.head->timehandle);
+    }
 }
 
 bool lcevcContainerInsert(LCEVCContainer_t* container, const uint8_t* data, uint32_t size,
                           uint64_t timehandle, uint64_t inputTime)
 {
-    timehandlePredictorFeed(container->predictor, timehandle);
-
     // This will allocate the buffer itself, and fail if duplicate.
-    return stampedBufferAlloc(&container->list, data, size, timehandle, inputTime, true);
+    bool ret = stampedBufferAlloc(&container->list, data, size, timehandle, inputTime, true);
+    // Hint with the list head as that will be the smallest PTS
+    if (container->list.head != NULL) {
+        timehandlePredictorHint(container->predictor, container->list.head->timehandle);
+    }
+    timehandlePredictorFeed(container->predictor, timehandle);
+    return ret;
 }
 
 bool lcevcContainerInsertNoCopy(LCEVCContainer_t* container, const uint8_t* data, uint32_t size,
                                 uint64_t timehandle, uint64_t inputTime)
 {
-    timehandlePredictorFeed(container->predictor, timehandle);
-
     // This will allocate the buffer itself, and fail if duplicate.
-    return stampedBufferAlloc(&container->list, data, size, timehandle, inputTime, false);
+    bool ret = stampedBufferAlloc(&container->list, data, size, timehandle, inputTime, false);
+    // Hint with the list head as that will be the smallest PTS
+    if (container->list.head != NULL) {
+        timehandlePredictorHint(container->predictor, container->list.head->timehandle);
+    }
+    timehandlePredictorFeed(container->predictor, timehandle);
+    return ret;
 }
 
 bool lcevcContainerExists(const LCEVCContainer_t* container, uint64_t timehandle, bool* isAtHeadOut)
@@ -409,13 +425,14 @@ StampedBuffer_t* lcevcContainerExtractNextInOrder(LCEVCContainer_t* container, b
     }
 
     const uint64_t headTimehandle = container->list.head->timehandle;
+    // Moving to here allows the top of the list to always hint even if it's not next
+    timehandlePredictorHint(container->predictor, headTimehandle);
     if (!force && !timehandlePredictorIsNext(container->predictor, headTimehandle)) {
         return NULL;
     }
 
     bool isAtHead = false;
     StampedBuffer_t* result = stampedBufferExtract(&container->list, headTimehandle, &isAtHead);
-    timehandlePredictorHint(container->predictor, headTimehandle);
     if (!container->processedFirst) {
         char thString[128] = "unknown timehandle";
         VN_SEQ_DEBUG("processing first lcevc block: %s. Force %d, queue size %zu.\n",

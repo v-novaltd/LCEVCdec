@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decode/transform.h"
 
@@ -152,7 +155,7 @@ void inverseDDS2D(const int16_t* coeffs, int16_t* residuals)
         coeffs[12] + coeffs[13] + coeffs[14] + coeffs[15]
     };
 
-    const int32_t h[4] = 
+    const int32_t h[4] =
     {
         coeffs[0]  - coeffs[1]  + coeffs[2]  - coeffs[3],
         coeffs[4]  - coeffs[5]  + coeffs[6]  - coeffs[7],
@@ -168,7 +171,7 @@ void inverseDDS2D(const int16_t* coeffs, int16_t* residuals)
         coeffs[12] + coeffs[13] - coeffs[14] - coeffs[15]
     };
 
-    const int32_t d[4] = 
+    const int32_t d[4] =
     {
         coeffs[0]  - coeffs[1]  - coeffs[2]  + coeffs[3],
         coeffs[4]  - coeffs[5]  - coeffs[6]  + coeffs[7],
@@ -497,7 +500,7 @@ static inline void inverseDD1DImpl_NEON(const int16x4_t coeffs, int16_t* residua
     const int32x4_t data0 = vmulq_s32(vzip1q_s32(ahvd, ahvd), negateMask0);
     const int32x4_t data1 = vmulq_s32(vzip1q_s32(hvda, hvda), negateMask1);
     const int32x4_t data2 = vmulq_s32(vzip1q_s32(vdah, vdah), negateMask2);
-    
+
     const int32x4_t result = vaddq_s32(data0, vaddq_s32(data1, data2));
     vst1_s16(residuals, vqmovn_s32(result));
 }
@@ -531,7 +534,7 @@ static inline void inverseDD2DImpl_NEON(const int16x4_t coeffs, int16_t* residua
     const int32x4_t data1 = vmulq_s32(hvda, negateMask1);
     const int32x4_t data2 = vmulq_s32(vdah, negateMask2);
     const int32x4_t data3 = vmulq_s32(dahv, negateMask3);
-    
+
     const int32x4_t result = vaddq_s32(data0, vaddq_s32(data1, vaddq_s32(data2, data3)));
 
     vst1_s16(residuals, vqmovn_s32(result));

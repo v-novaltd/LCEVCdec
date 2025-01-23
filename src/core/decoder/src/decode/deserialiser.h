@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef VN_DEC_CORE_DESERIALIZER_H_
 #define VN_DEC_CORE_DESERIALIZER_H_
@@ -23,6 +26,16 @@ typedef struct Logger* Logger_t;
 typedef struct Memory* Memory_t;
 
 /*------------------------------------------------------------------------------*/
+
+enum
+{
+    BitstreamVersionInitial = 0,
+    BitstreamVersionNewCodeLengths = 1,
+    BitstreamVersionAlignWithSpec = 2,
+
+    BitstreamVersionCurrent = BitstreamVersionAlignWithSpec,
+    BitstreamVersionInvalid = UINT8_MAX
+};
 
 typedef enum ParseType
 {
@@ -40,15 +53,14 @@ typedef struct Chunk
 
 typedef struct VNConfig
 {
-    bool valid;
+    bool set; /* Set to false at the start of deserialising, set to true if the V-Nova config
+               * exists and is valid */
     uint8_t bitstreamVersion;
 } VNConfig_t;
 
 typedef struct Deblock
 {
-    bool enabled;    /**< Whether deblocking is enabled, noting that
-                      *   if it is false the values for `corner` and
-                      *   `side` are undefined */
+    bool enabled;    /**< Whether or not deblocking (also called level 1 filtering) is enabled. */
     uint32_t corner; /**< The corner coefficient to use. */
     uint32_t side;   /**< The side coefficient to use */
 } Deblock_t;
@@ -56,7 +68,7 @@ typedef struct Deblock
 typedef struct DeserialisedData
 {
     Memory_t memory;
-    VNConfig_t vnova_config;
+    VNConfig_t vnovaConfig;
 
     NALType_t type;
     uint8_t* unencapsulatedData;
@@ -77,7 +89,7 @@ typedef struct DeserialisedData
     ScalingMode_t scalingModes[LOQEnhancedCount];
     bool enhancementEnabled;
 
-    uint32_t stepWidths[LOQEnhancedCount];
+    int32_t stepWidths[LOQEnhancedCount];
     uint8_t numPlanes;
     uint8_t numLayers;
     uint32_t numChunks;
@@ -88,8 +100,9 @@ typedef struct DeserialisedData
     uint8_t temporalUseReducedSignalling;
     uint8_t temporalEnabled;
     uint8_t temporalRefresh;
-    uint8_t temporalChunkEnabled;
+    uint8_t temporalSignallingPresent;
     uint8_t temporalStepWidthModifier;
+    uint8_t ditherControlFlag;
     DitherType_t ditherType;
     uint8_t ditherStrength;
     bool globalConfigSet;
@@ -122,9 +135,6 @@ typedef struct DeserialisedData
 
     bool currentGlobalConfigSet; /* Set to false at the start of deserialising, is
                                   * set to true if global config exists */
-
-    bool currentVnovaConfigSet; /* Set to false at the start of deserialising, is
-                                 * set to true if the V-Nova config exists */
 } DeserialisedData_t;
 
 /*------------------------------------------------------------------------------*/
@@ -132,7 +142,7 @@ typedef struct DeserialisedData
 /*! \brief Initialise deserialised data into a default state.
  *
  *  \param data  deserialised data instance to initialise. */
-void deserialiseInitialise(Memory_t memory, DeserialisedData_t* data);
+void deserialiseInitialise(Memory_t memory, DeserialisedData_t* data, uint8_t forceBitstreamVersion);
 
 /*! \brief Release allocations on deserialised data. This should be called when
  *		   closing the decoder instance.

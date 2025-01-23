@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef VN_DEC_CORE_MEMORY_H_
 #define VN_DEC_CORE_MEMORY_H_
@@ -75,18 +78,6 @@ bool memoryInitialise(Memory_t* handle, const MemorySettings_t* settings);
 /*! Destroy an instance of the memory system. */
 void memoryRelease(Memory_t memory);
 
-/*! Report memory usage stats.
- *
- *  This only reports details if the build config `VN_CORE_FEATURE(MEMORY_TRACING)` is
- *  enabled
- *
- *  \note There are 4 allocations not tracked, the decoder instance, the context, the
- *        memory object itself, and the logger.
- *
- *  \param memory  The memory system to report details for.
- *  \param log     The logger interface to report onto. */
-void memoryReport(Memory_t memory, Logger_t log);
-
 /*! \brief Perform a dynamic memory allocation.
  *
  * If successful this function will allocate at least `size` bytes of memory.
@@ -94,11 +85,9 @@ void memoryReport(Memory_t memory, Logger_t log);
  * \param memory  The memory system to allocate with.
  * \param size    The number of bytes to allocate.
  * \param zero    If the allocation should be zeroed.
- * \param file    The file where the allocation is being performed.
- * \param line    The line where the allocation is being performed.
  *
  * \return A valid pointer to some memory of at least `size` bytes, or NULL on failure. */
-void* memoryAllocate(Memory_t memory, size_t size, bool zero, const char* file, uint32_t line);
+void* memoryAllocate(Memory_t memory, size_t size, bool zero);
 
 /*! Perform a dynamic memory reallocation.
  *
@@ -114,11 +103,9 @@ void* memoryAllocate(Memory_t memory, size_t size, bool zero, const char* file, 
  * \param memory  The memory system to allocate with.
  * \param ptr     A pointer to memory to reallocate, or NULL.
  * \param size    The number of bytes to reallocate to.
- * \param file    The file where the reallocation is being performed.
- * \param line    The line where the reallocation is being performed.
  *
  * \return A valid pointer to some memory of at least `size` bytes, or NULL on failure. */
-void* memoryReallocate(Memory_t memory, void* ptr, size_t size, const char* file, uint32_t line);
+void* memoryReallocate(Memory_t memory, void* ptr, size_t size);
 
 /*! Perform dynamic memory freeing.
  *
@@ -167,22 +154,22 @@ void memorySet(void* dst, int32_t value, size_t size);
 /* clang-format off */
 
 /**! Helper for performing malloc for a single object. */
-#define VN_MALLOC_T(memory, type) (type*)memoryAllocate(memory, sizeof(type), false, __FILE__, __LINE__)
+#define VN_MALLOC_T(memory, type) (type*)memoryAllocate(memory, sizeof(type), false)
 
 /**! Helper for performing malloc for an array of objects. */
-#define VN_MALLOC_T_ARR(memory, type, count) (type*)memoryAllocate(memory, sizeof(type) * (count), false, __FILE__, __LINE__)
+#define VN_MALLOC_T_ARR(memory, type, count) (type*)memoryAllocate(memory, sizeof(type) * (count), false)
 
 /**! Helper for performing calloc for a single object. */
-#define VN_CALLOC_T(memory, type) (type*)memoryAllocate(memory, sizeof(type), true, __FILE__, __LINE__)
+#define VN_CALLOC_T(memory, type) (type*)memoryAllocate(memory, sizeof(type), true)
 
 /**! Helper for performing calloc for an array of objects. */
-#define VN_CALLOC_T_ARR(memory, type, count) (type*)memoryAllocate(memory, sizeof(type) * (count), true, __FILE__, __LINE__)
+#define VN_CALLOC_T_ARR(memory, type, count) (type*)memoryAllocate(memory, sizeof(type) * (count), true)
 
 /**! Helper for performing realloc for a single object. */
-#define VN_REALLOC_T(memory, ptr, type) (type*)memoryReallocate(memory, (void*)(ptr), sizeof(type), __FILE__, __LINE__)
+#define VN_REALLOC_T(memory, ptr, type) (type*)memoryReallocate(memory, (void*)(ptr), sizeof(type))
 
 /**! Helper for performing realloc for an array of objects. */
-#define VN_REALLOC_T_ARR(memory, ptr, type, count) (type*)memoryReallocate(memory, (void*)(ptr), sizeof(type) * (count), __FILE__, __LINE__)
+#define VN_REALLOC_T_ARR(memory, ptr, type, count) (type*)memoryReallocate(memory, (void*)(ptr), sizeof(type) * (count))
 
 /**! Helper for freeing an allocation performed with one of the above macros. */
 #define VN_FREE(memory, ptr) do { memoryFree(memory, (void**)&(ptr)); } while(false)

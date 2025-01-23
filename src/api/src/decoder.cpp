@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decoder.h"
 
@@ -27,9 +30,12 @@
 #include <LCEVC/PerseusDecoder.h>
 
 #include <algorithm>
+#include <cinttypes>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <type_traits>
+#include <utility>
 
 // ------------------------------------------------------------------------------------------------
 
@@ -260,7 +266,7 @@ void Decoder::flushInputs()
     // Bases
     const bool basesFull = isBaseQueueFull();
     while (!m_baseContainer.empty()) {
-        Handle<Picture> finishedBase = m_baseContainer.front().nonNullHandle;
+        const Handle<Picture> finishedBase = m_baseContainer.front().nonNullHandle;
         m_baseContainer.pop_front();
         triggerEvent(Event(LCEVC_BasePictureDone, finishedBase));
     }
@@ -447,8 +453,8 @@ bool Decoder::getNextDecodeData(BaseData& nextBase,
     if (m_baseContainer.empty()) {
         return false;
     }
-    Handle<Picture> nonNullBaseHandle = m_baseContainer.front().nonNullHandle;
-    Picture& base = *(getPicture(nonNullBaseHandle));
+    const Handle<Picture> nonNullBaseHandle = m_baseContainer.front().nonNullHandle;
+    const Picture& base = *(getPicture(nonNullBaseHandle));
     const uint64_t timehandle = base.getTimehandle();
     if (timehandle == kInvalidTimehandle) {
         return false;
@@ -549,7 +555,7 @@ bool Decoder::lockPicture(Picture& picture, Access lockAccess, LCEVC_PictureLock
         return false;
     }
     std::unique_ptr<PictureLock> newPicLock = std::make_unique<PictureLock>(picture, lockAccess);
-    Handle<PictureLock> picLockHandle = m_pictureLockPool.allocate(std::move(newPicLock));
+    const Handle<PictureLock> picLockHandle = m_pictureLockPool.allocate(std::move(newPicLock));
     lockHandleOut.hdl = picLockHandle.handle;
     if (!picture.lock(lockAccess, picLockHandle)) {
         m_pictureLockPool.release(picLockHandle);
@@ -663,7 +669,7 @@ LCEVC_ReturnCode Decoder::doDecode(const BaseData& baseData, const perseus_decod
                                       shouldPassthrough, timeout);
 
     // NOW fail, if necessary
-    Picture& base = *(getPicture(baseData.nonNullHandle));
+    const Picture& base = *(getPicture(baseData.nonNullHandle));
     const uint64_t timehandle = base.getTimehandle();
     if (shouldFail) {
         VNLogError("CC %u, PTS %" PRId64
@@ -704,8 +710,8 @@ LCEVC_ReturnCode Decoder::decodeEnhance(const BaseData& baseData,
 {
     // Get a base (either a non-deleting pointer to the base, or a deleting pointer to a copy).
     Picture& base = *(getPicture(baseData.nonNullHandle));
-    std::shared_ptr<Picture> baseToUse = decodeEnhanceGetBase(base, processedLcevcData);
-    std::shared_ptr<Picture> intermediatePicture =
+    const std::shared_ptr<Picture> baseToUse = decodeEnhanceGetBase(base, processedLcevcData);
+    const std::shared_ptr<Picture> intermediatePicture =
         decodeEnhanceGetIntermediate(baseToUse, processedLcevcData);
     const uint64_t timehandle = baseToUse->getTimehandle();
 
@@ -760,7 +766,7 @@ std::shared_ptr<Picture> Decoder::decodeEnhanceGetBase(Picture& originalBase,
                                      processedLcevcData.loq_enabled[PSS_LOQ_1]);
 
     if (originalBase.canModify() || !coreWillModifyBase) {
-        return std::shared_ptr<Picture>(&originalBase, [](auto p) {});
+        return {&originalBase, [](auto ptr) { VN_UNUSED(ptr); }};
     }
 
     std::shared_ptr<Picture> newPic = std::make_shared<PictureManaged>(m_bufferManager);
@@ -768,24 +774,26 @@ std::shared_ptr<Picture> Decoder::decodeEnhanceGetBase(Picture& originalBase,
     return newPic;
 }
 
-std::shared_ptr<Picture> Decoder::decodeEnhanceGetIntermediate(std::shared_ptr<Picture> basePicture,
+std::shared_ptr<Picture> Decoder::decodeEnhanceGetIntermediate(const std::shared_ptr<Picture>& basePicture,
                                                                const perseus_decoder_stream& processedLcevcData)
 {
-    perseus_scaling_mode level1Scale = processedLcevcData.global_config.scaling_modes[PSS_LOQ_1];
-    if (level1Scale != PSS_SCALE_0D) {
-        LCEVC_PictureDesc intermediateDesc = {};
-        basePicture->getDesc(intermediateDesc);
-        intermediateDesc.height =
-            (level1Scale == PSS_SCALE_2D) ? intermediateDesc.height * 2 : intermediateDesc.height;
-        intermediateDesc.width *= 2;
-        std::shared_ptr<Picture> newPic = std::make_shared<PictureManaged>(m_bufferManager);
-        newPic->setDesc(intermediateDesc);
-        return newPic;
+    const perseus_scaling_mode level1Scale = processedLcevcData.global_config.scaling_modes[PSS_LOQ_1];
+    if (level1Scale == PSS_SCALE_0D) {
+        return nullptr;
     }
-    return nullptr;
+
+    LCEVC_PictureDesc intermediateDesc = {};
+    basePicture->getDesc(intermediateDesc);
+    intermediateDesc.height =
+        (level1Scale == PSS_SCALE_2D) ? intermediateDesc.height * 2 : intermediateDesc.height;
+    intermediateDesc.width *= 2;
+    std::shared_ptr<Picture> newPic = std::make_shared<PictureManaged>(m_bufferManager);
+    newPic->setDesc(intermediateDesc);
+    return newPic;
 }
 
-bool Decoder::decodeEnhanceSetupCoreImages(Picture& basePic, std::shared_ptr<Picture> intermediatePicture,
+bool Decoder::decodeEnhanceSetupCoreImages(Picture& basePic,
+                                           const std::shared_ptr<Picture>& intermediatePicture,
                                            Picture& enhancedPic, perseus_image& baseOut,
                                            perseus_image& intermediateOut, perseus_image& enhancedOut)
 {

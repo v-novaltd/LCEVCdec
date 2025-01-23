@@ -1,13 +1,16 @@
-# Copyright (c) V-Nova International Limited 2024. All rights reserved.
-# This software is licensed under the BSD-3-Clause-Clear License.
+# Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+# This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
 # The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
 # If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
 # AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
-# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
-# DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
-# EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
+# SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+# software may be incorporated into a project under a compatible license provided the requirements
+# of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+# licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+# ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+# THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
 import os
 import glob
@@ -17,27 +20,33 @@ import platform
 import subprocess
 
 COPYRIGHT_MSG = '''Copyright (c) V-Nova International Limited {years}. All rights reserved.
-This software is licensed under the BSD-3-Clause-Clear License.
+This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 No patent licenses are granted under this license. For enquiries about patent licenses,
 please contact legal@v-nova.com.
 The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
 If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
 AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
-SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
-DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
-EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.'''
+SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+software may be incorporated into a project under a compatible license provided the requirements
+of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.'''
 THIS_YEAR = str(datetime.datetime.now().year)
 COPYRIGHT_TYPES = ('*.cpp', '*.c', '*.h', '*.py', '*.js',
-                   '*.cmake', 'CMakeLists.txt', 'lcevc_config.h.in')
+                   '*.cmake', 'CMakeLists.txt', 'lcevc_config.h.in', '*.yml')
 CLANG_FORMAT_TYPES = ('*.cpp', '*.c', '*.h')
 CMAKE_TYPES = ('*.cmake', 'CMakeLists.txt')
 PYTHON_TYPES = ('*.py',)
-GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/**/', 'include/**/', 'docs/sphinx/**', '')
+GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/**/',
+             'include/**/', 'docs/sphinx/**', '.github/**/', '')
 WIN_CLANG_FORMAT_ENV_VAR = 'CLANG_FORMAT_PATH'
 WIN_DEFAULT_CLANG_FORMAT_PATH = r'C:\Program Files\LLVM\bin\clang-format.exe'
 # These files are copied from other sources and have their own copyrights,
 # find associated licenses in the licenses folder
 EXCLUDED_GLOBS = ('cmake/toolchains/ios.toolchain.cmake', 'cmake/toolchains/Emscripten.*')
+TRAILING_SPACE_GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/**/', 'include/**/',
+                            'docs/', 'docs/sphinx/**', '.github/**/', 'licenses/**/', '')
 
 
 def run_cmd(cmd):
@@ -50,7 +59,7 @@ def get_changed_files(diff_master=False):
             current_branch = os.environ.get('SOURCE_BRANCH')
         else:
             process = run_cmd(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
-            current_branch = process.stdout.decode('utf-8')
+            current_branch = process.stdout.decode('utf-8').strip()
         target_branch = os.environ.get('TARGET_BRANCH', 'master')
         print(f'Getting file diff from "{current_branch}" to "{target_branch}"')
         process = run_cmd(['git', 'diff', '--name-only', '--diff-filter=ACMRTUX',
@@ -66,19 +75,19 @@ def get_changed_files(diff_master=False):
     return changed_files
 
 
-def get_excluded_files():
+def get_excluded_files(exclude_dirs):
     excluded = list()
-    for exclude_glob in EXCLUDED_GLOBS:
+    for exclude_glob in exclude_dirs:
         excluded.extend(glob.glob(exclude_glob, recursive=True))
     return excluded
 
 
-def get_paths(glob_types, changed_files):
+def get_paths(glob_types, changed_files, global_dirs=GLOB_DIRS, excluded_dirs=EXCLUDED_GLOBS):
     paths = list()
-    for glob_dir in GLOB_DIRS:
+    for glob_dir in global_dirs:
         for glob_type in glob_types:
             paths.extend(glob.glob(glob_dir + glob_type, recursive=True))
-    to_exclude = [path for path in paths for exclude in get_excluded_files()
+    to_exclude = [path for path in paths for exclude in get_excluded_files(excluded_dirs)
                   if os.path.samefile(path, exclude)]
     for exclude in to_exclude:
         paths.remove(exclude)
@@ -114,7 +123,7 @@ def format_comment(path):
     ret = list()
     if file_extension in ('cpp', 'c', 'h', 'in', 'js'):
         ret = format_cpp_comment(COPYRIGHT_MSG).splitlines(keepends=True)
-    elif file_extension in ('py', 'cmake') or filename == 'CMakeLists.txt':
+    elif file_extension in ('py', 'cmake', 'yml') or filename == 'CMakeLists.txt':
         for line in COPYRIGHT_MSG.splitlines():
             ret.append('# ' + line + '\n')
 
@@ -216,6 +225,38 @@ def find_formatter(exe, version):
     return exe
 
 
+def is_binary_file(file_path):
+    result = run_cmd(["git", "grep", "-qIl", ".", file_path])
+    if result.returncode != 0:
+        return True
+    return False
+
+
+def remove_tailing_space(file, check_only=False):
+    if not is_binary_file(file) and os.path.isfile(file):
+        try:
+            with open(file, 'r') as f:
+                original_content = f.read()
+            stripped_content = '\n'.join([line.rstrip() for line in original_content.splitlines()])
+
+            if original_content != stripped_content:
+                if check_only:
+                    diff = []
+                    for i, (original, stripped) in enumerate(zip(original_content.splitlines(), stripped_content.splitlines()), start=1):
+                        if original != stripped:
+                            diff.append(f"Line {i}: '{repr(original)}'")
+                    if diff:
+                        print(f'\033[0;33m!>>\033[0m Tailing spaces in {file}:\n' + '\n'.join(diff))
+                        return False
+                else:
+                    with open(file, 'w') as f:
+                        f.write(stripped_content + '\n')
+            return True
+        except Exception as e:
+            print(f"Failed to remove tailing spaces on {file}: {e}")
+            return False
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Lint all file types in the repo")
     parser.add_argument("--check-only", action="store_true",
@@ -277,6 +318,10 @@ def main():
 
     for path in get_paths(COPYRIGHT_TYPES, changed_files):
         if not copyright_file(path, args.check_only):
+            errors += 1
+
+    for path in get_paths('*.*', changed_files, TRAILING_SPACE_GLOB_DIRS, ()):
+        if not remove_tailing_space(path, args.check_only):
             errors += 1
 
     if errors == 0:

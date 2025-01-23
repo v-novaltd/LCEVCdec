@@ -1,5 +1,7 @@
 format:
   line_width: 100
   tab_size: 4
+  separate_ctrl_name_with_space: True
+  
 markup:
   first_comment_is_literal: true

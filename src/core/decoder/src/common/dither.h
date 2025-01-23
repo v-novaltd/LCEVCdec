@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef VN_DEC_CORE_DITHERING_H_
 #define VN_DEC_CORE_DITHERING_H_
@@ -100,10 +103,13 @@ void ditherRelease(Dither_t dither);
  * \param dither The dither module.
  * \param strength The signaled dither strength, must be in the range 0 to 128.
  * \param type The signaled dither type
+ * \param pipelineMode The pipeline mode
+ * \param bitDepth The input bit depth
  *
  * \return true on success, otherwise false
  */
-bool ditherRegenerate(Dither_t dither, uint8_t strength, DitherType_t type);
+bool ditherRegenerate(Dither_t dither, uint8_t strength, DitherType_t type,
+                      perseus_pipeline_mode pipelineMode, BitDepth_t bitDepth);
 
 /*! Determines if dithering is enabled
  *
@@ -113,6 +119,8 @@ bool ditherRegenerate(Dither_t dither, uint8_t strength, DitherType_t type);
  *       stream configuration.
  *    2. Stream signaled dithering type, whereby None disables dithering.
  *    3. Stream signaled strength, whereby a value of 0 disables dithering.
+ *
+ * \param dither  The dither module.
  *
  * \return true if dithering is enabled, otherwise false
  */
@@ -138,6 +146,17 @@ bool ditherIsEnabled(Dither_t dither);
  *         is greater than 16384 the function will return NULL.
  */
 const int8_t* ditherGetBuffer(Dither_t dither, size_t length);
+
+/*! Returns a shift value based on bit depth.
+ *
+ * For precision mode, when there is no s-filter enabled the dither
+ * values need to be shifted based on the bit depth of the input.
+ *
+ * \param dither  The dither module.
+ *
+ * \return A number of places for the bits to be shifted to the left
+ */
+int8_t ditherGetShiftS16(Dither_t dither);
 
 /*------------------------------------------------------------------------------*/
 

@@ -1,40 +1,43 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decode/decode_parallel.h"
 
 #include "common/cmdbuffer.h"
 #include "common/memory.h"
-#include "common/neon.h"
-#include "common/sse.h"
-#include "common/stats.h"
+#include "common/platform.h"
 #include "common/threading.h"
+#include "common/tile.h"
+#include "common/types.h"
 #include "context.h"
 #include "decode/apply_cmdbuffer.h"
 #include "decode/apply_convert.h"
 #include "decode/deserialiser.h"
-#include "decode/entropy.h"
 #include "decode/generate_cmdbuffer.h"
-#include "decode/transform.h"
+#include "decode/transform_coeffs.h"
 #include "decode/transform_unit.h"
 #include "surface/blit.h"
 
-#include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /*------------------------------------------------------------------------------*/
 /* Apply Command Buffers */
 /*------------------------------------------------------------------------------*/
 
 static int32_t applyCommandBuffers(Logger_t log, ThreadManager_t threadManager, TileState_t tile,
-                                   const FrameStats_t frameStats,
                                    CPUAccelerationFeatures_t cpuFeatures, const Surface_t* dst,
                                    const Highlight_t* highlight, bool surfaceRasterOrder)
 {
@@ -43,9 +46,7 @@ static int32_t applyCommandBuffers(Logger_t log, ThreadManager_t threadManager, 
     }
     int32_t res = 0;
 
-    VN_FRAMESTATS_RECORD_START(frameStats, STApplyInterLOQ1Start);
     VN_CHECK(applyCmdBuffer(log, threadManager, &tile, dst, surfaceRasterOrder, cpuFeatures, highlight));
-    VN_FRAMESTATS_RECORD_STOP(frameStats, STApplyInterLOQ1Start);
 
     return res;
 }
@@ -63,8 +64,6 @@ static void applyCommandBuffersWithConversion(Logger_t log, ThreadManager_t thre
         return;
     }
 
-    // @todo: Add stats.
-
     applyCmdBuffer(log, threadManager, &tile, hpSrc, surfaceRasterOrder, cpuFeatures, highlight);
     applyConvert(&tile, hpSrc, dst, !surfaceRasterOrder);
 }
@@ -75,11 +74,10 @@ static void applyCommandBuffersWithConversion(Logger_t log, ThreadManager_t thre
 
 int32_t decodeTile(const DeserialisedData_t* data, Logger_t log, ThreadManager_t threadManager,
                    DecodeParallel_t decode, const DecodeParallelArgs_t* args, TileState_t* tile,
-                   CmdBuffer_t* cmdbuffer, int32_t planeIndex, bool useOldCodeLengths)
+                   CmdBuffer_t* cmdbuffer, int32_t planeIndex, uint8_t bitstreamVersion)
 {
     const int32_t numLayers = data->numLayers;
     const uint8_t tuWidthShift = (numLayers == RCLayerCountDDS) ? 2 : 1;
-    FrameStats_t frameStats = args->stats;
 
     TUState_t tuState = {0};
     tuStateInitialise(&tuState, tile->width, tile->height, tile->x, tile->y, tuWidthShift);
@@ -95,19 +93,15 @@ int32_t decodeTile(const DeserialisedData_t* data, Logger_t log, ThreadManager_t
     decodeCoeffsArgs.chunkCount = numLayers;
     decodeCoeffsArgs.coeffs = decode->coeffs;
     decodeCoeffsArgs.temporalCoeffs = decode->temporalCoeffs;
-    decodeCoeffsArgs.useOldCodeLengths = useOldCodeLengths;
+    decodeCoeffsArgs.bitstreamVersion = bitstreamVersion;
     decodeCoeffsArgs.temporalUseReducedSignalling = data->temporalUseReducedSignalling;
     decodeCoeffsArgs.tuState = &tuState;
     decodeCoeffsArgs.blockClears = &blockClears;
-    VN_FRAMESTATS_RECORD_START(frameStats, STEntropyDecodeStart);
     transformCoeffsDecode(&decodeCoeffsArgs);
-    VN_FRAMESTATS_RECORD_STOP(frameStats, STEntropyDecodeStop);
     /* Generate command buffers (i.e. dequant + inverse transform combined). */
-    VN_FRAMESTATS_RECORD_START(frameStats, STGenerateCommandBuffersStart);
     generateCommandBuffers(data, args, cmdbuffer, planeIndex, decode->coeffs,
                            decode->temporalCoeffs, blockClears, &tuState);
     blockClearJumpsRelease(blockClears);
-    VN_FRAMESTATS_RECORD_STOP(frameStats, STGenerateCommandBuffersStop);
 
     return 0;
 }
@@ -154,6 +148,7 @@ void decodeParallelRelease(DecodeParallel_t decode)
             for (uint32_t tileIndex = 0; tileIndex < decode->tileCache[planeIndex].tileCount; ++tileIndex) {
                 cmdBufferFree(decode->tileCache[planeIndex].tiles[tileIndex].cmdBuffer);
             }
+            VN_FREE(decode->memory, decode->tileCache);
         }
 
         VN_FREE(decode->memory, decode);
@@ -179,7 +174,6 @@ int32_t decodeParallel(Context_t* ctx, DecodeParallel_t decode, const DecodePara
 {
     DeserialisedData_t* data = args->deserialised;
     const int32_t planeCount = data->numPlanes;
-    const int32_t layerCount = data->numLayers;
     const LOQIndex_t loq = args->loq;
     int32_t res = 0;
 
@@ -187,10 +181,8 @@ int32_t decodeParallel(Context_t* ctx, DecodeParallel_t decode, const DecodePara
         return -1;
     }
 
-    VN_FRAMESTATS_RECORD_START(args->stats, STDecodeStart);
     for (int32_t planeIndex = 0; planeIndex < minS32(planeCount, RCMaxPlanes); ++planeIndex) {
         const int32_t tileCount = data->tileCount[planeIndex][loq];
-        const StatType_t baseStat = (args->loq == LOQ0) ? STLOQ0_LayerByteSize0 : STLOQ1_LayerByteSize0;
 
         if (tileDataInitialize(&decode->tileCache[planeIndex], decode->memory, data, planeIndex, loq) != 0) {
             return -1;
@@ -204,22 +196,8 @@ int32_t decodeParallel(Context_t* ctx, DecodeParallel_t decode, const DecodePara
             }
             cmdBufferReset(tile->cmdBuffer, ctx->deserialised.numLayers);
 
-            if (args->stats) {
-                if (tile->chunks) {
-                    for (int32_t layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
-                        VN_FRAMESTATS_RECORD_VALUE(args->stats, (StatType_t)(baseStat + layerIndex),
-                                                   tile->chunks[layerIndex].size);
-                    }
-                }
-
-                if (args->loq == LOQ0 && tile->temporalChunk) {
-                    VN_FRAMESTATS_RECORD_VALUE(args->stats, STLOQ0_TemporalByteSize,
-                                               tile->temporalChunk->size);
-                }
-            }
-
             decodeTile(data, args->log, *(args->threadManager), decode, args, tile, tile->cmdBuffer,
-                       planeIndex, args->useOldCodeLengths);
+                       planeIndex, args->bitstreamVersion);
             cmdBufferSplit(tile->cmdBuffer);
 
             /* Apply command buffers.  */
@@ -256,13 +234,11 @@ int32_t decodeParallel(Context_t* ctx, DecodeParallel_t decode, const DecodePara
                                                   cmdBufferDst, ctx->cpuFeatures, convertDst,
                                                   args->highlight, surfaceRasterOrder);
             } else {
-                VN_CHECK(applyCommandBuffers(args->log, *(args->threadManager), *tile, args->stats,
-                                             ctx->cpuFeatures, cmdBufferDst, args->highlight,
-                                             surfaceRasterOrder));
+                VN_CHECK(applyCommandBuffers(args->log, *(args->threadManager), *tile, ctx->cpuFeatures,
+                                             cmdBufferDst, args->highlight, surfaceRasterOrder));
             }
         }
     }
-    VN_FRAMESTATS_RECORD_STOP(args->stats, STDecodeStop);
 
     return res;
 }

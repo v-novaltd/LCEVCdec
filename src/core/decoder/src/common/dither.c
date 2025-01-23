@@ -1,21 +1,28 @@
 /* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "common/dither.h"
 
 #include "common/memory.h"
 #include "common/random.h"
+#include "common/types.h"
 #include "context.h"
 
 #include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 /*------------------------------------------------------------------------------*/
 
@@ -31,6 +38,8 @@ typedef struct Dither
     uint8_t strength;
     bool strengthIsOverridden;
     DitherType_t type;
+    perseus_pipeline_mode pipelineMode;
+    BitDepth_t bitDepth;
 } * Dither_t;
 
 /*------------------------------------------------------------------------------*/
@@ -78,11 +87,15 @@ void ditherRelease(Dither_t dither)
     }
 }
 
-bool ditherRegenerate(Dither_t dither, uint8_t strength, DitherType_t type)
+bool ditherRegenerate(Dither_t dither, uint8_t strength, DitherType_t type,
+                      perseus_pipeline_mode pipelineMode, BitDepth_t bitDepth)
 {
     if (!dither) {
         return true;
     }
+
+    dither->pipelineMode = pipelineMode;
+    dither->bitDepth = bitDepth;
 
     if (!dither->strengthIsOverridden) {
         dither->strength = strength;
@@ -132,6 +145,20 @@ const int8_t* ditherGetBuffer(Dither_t dither, size_t length)
 
     const size_t position = randomValue(dither->random) % (kDitherBufferSize - length);
     return &dither->buffer[position];
+}
+
+int8_t ditherGetShiftS16(Dither_t dither)
+{
+    if (dither->pipelineMode == PPM_PRECISION) {
+        switch (dither->bitDepth) {
+            case Depth8: return 7;
+            case Depth10: return 5;
+            case Depth12: return 3;
+            case Depth14: return 1;
+            default: return 0;
+        }
+    }
+    return 0;
 }
 
 /*------------------------------------------------------------------------------*/

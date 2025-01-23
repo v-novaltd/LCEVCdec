@@ -1,20 +1,25 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "common/cmdbuffer.h"
 #include "common/sse.h"
+#include "common/types.h"
 #include "decode/apply_cmdbuffer_common.h"
 #include "surface/surface.h"
 
 #include <assert.h>
+#include <stdint.h>
 
 #if VN_CORE_FEATURE(SSE)
 
@@ -49,7 +54,7 @@ static void addDD_U8(const ApplyCmdBufferArgs_t* args)
     const __m128i fractOffset = _mm_set1_epi16(0x40);
     const __m128i signOffset = _mm_set1_epi16(0x80);
 
-    uint8_t* pixels = (uint8_t*)args->surfaceData + (args->y * args->surfaceStride) + args->x;
+    uint8_t* pixels = (uint8_t*)args->surfaceData + (args->y * (size_t)args->surfaceStride) + args->x;
     __m128i residuals[2];
     loadResidualsDD(args->residuals, residuals);
 
@@ -96,7 +101,7 @@ static inline void addDD_UBase(const ApplyCmdBufferArgs_t* args, int32_t shift,
 
     VN_ADD_CONSTANTS_U16()
 
-    int16_t* pixels = args->surfaceData + (args->y * args->surfaceStride) + args->x;
+    int16_t* pixels = args->surfaceData + (args->y * (size_t)args->surfaceStride) + args->x;
     __m128i residuals[2];
     loadResidualsDD(args->residuals, residuals);
 
@@ -142,7 +147,7 @@ static void addDD_S16(const ApplyCmdBufferArgs_t* args)
     assert(args->surface->interleaving == ILNone);
     assert(fixedPointIsSigned(args->surface->type));
 
-    int16_t* pixels = args->surfaceData + (args->y * args->surfaceStride) + args->x;
+    int16_t* pixels = args->surfaceData + (args->y * (size_t)args->surfaceStride) + args->x;
     __m128i residuals[2];
     loadResidualsDD(args->residuals, residuals);
 
@@ -163,7 +168,7 @@ static void addDDS_U8(const ApplyCmdBufferArgs_t* args)
     const __m128i fractOffset = _mm_set1_epi16(0x40);
     const __m128i signOffset = _mm_set1_epi16(0x80);
 
-    uint8_t* pixels = (uint8_t*)args->surfaceData + (args->y * args->surfaceStride) + args->x;
+    uint8_t* pixels = (uint8_t*)args->surfaceData + (args->y * (size_t)args->surfaceStride) + args->x;
     __m128i residuals[4];
     loadResidualsDDS(args->residuals, residuals);
 
@@ -203,7 +208,7 @@ static inline void addDDS_UBase(const ApplyCmdBufferArgs_t* args, int32_t shift,
 
     VN_ADD_CONSTANTS_U16()
 
-    int16_t* pixels = args->surfaceData + (args->y * args->surfaceStride) + args->x;
+    int16_t* pixels = args->surfaceData + (args->y * (size_t)args->surfaceStride) + args->x;
     __m128i residuals[4];
     loadResidualsDDS(args->residuals, residuals);
 
@@ -246,7 +251,7 @@ static void addDDS_U14(const ApplyCmdBufferArgs_t* args) { addDDS_UBase(args, 1,
 
 static inline void addDDS_S16(const ApplyCmdBufferArgs_t* args)
 {
-    int16_t* pixels = args->surfaceData + (args->y * args->surfaceStride) + args->x;
+    int16_t* pixels = args->surfaceData + (args->y * (size_t)args->surfaceStride) + args->x;
     __m128i residuals[4];
     loadResidualsDDS(args->residuals, residuals);
 
@@ -266,7 +271,7 @@ static inline void setDD(const ApplyCmdBufferArgs_t* args)
     assert(args->surface->interleaving == ILNone);
     assert(fixedPointIsSigned(args->surface->type));
 
-    int16_t* pixels = args->surfaceData + (args->y * args->surfaceStride) + args->x;
+    int16_t* pixels = args->surfaceData + (args->y * (size_t)args->surfaceStride) + args->x;
 
     __m128i residuals[2];
     loadResidualsDD(args->residuals, residuals);
@@ -280,7 +285,7 @@ static inline void setDDS(const ApplyCmdBufferArgs_t* args)
     assert(args->surface->interleaving == ILNone);
     assert(fixedPointIsSigned(args->surface->type));
 
-    int16_t* pixels = args->surfaceData + (args->y * args->surfaceStride) + args->x;
+    int16_t* pixels = args->surfaceData + (args->y * (size_t)args->surfaceStride) + args->x;
 
     __m128i residuals[4];
     loadResidualsDDS(args->residuals, residuals);
@@ -296,7 +301,7 @@ static inline void setZeroDD(const ApplyCmdBufferArgs_t* args)
     assert(args->surface->interleaving == ILNone);
     assert(fixedPointIsSigned(args->surface->type));
 
-    int16_t* pixels = args->surfaceData + (args->y * args->surfaceStride) + args->x;
+    int16_t* pixels = args->surfaceData + (args->y * (size_t)args->surfaceStride) + args->x;
 
     __m128i sseZeros[2] = {0};
 
@@ -309,7 +314,7 @@ static inline void setZeroDDS(const ApplyCmdBufferArgs_t* args)
     assert(args->surface->interleaving == ILNone);
     assert(fixedPointIsSigned(args->surface->type));
 
-    int16_t* pixels = args->surfaceData + (args->y * args->surfaceStride) + args->x;
+    int16_t* pixels = args->surfaceData + (args->y * (size_t)args->surfaceStride) + args->x;
     __m128i sseZeros[4] = {0};
 
     for (int32_t row = 0; row < CBKTUSizeDDS; ++row) {
@@ -331,7 +336,7 @@ static inline void clear(const ApplyCmdBufferArgs_t* args)
     const uint16_t clearWidth = minU16(BSTemporal, (uint16_t)(args->surface->height - y));
     const uint16_t clearHeight = minU16(BSTemporal, (uint16_t)(args->surface->width - x));
 
-    int16_t* pixels = args->surfaceData + (y * args->surfaceStride) + x;
+    int16_t* pixels = args->surfaceData + (y * (size_t)args->surfaceStride) + x;
 
     if (clearHeight == BSTemporal && clearWidth == BSTemporal) {
         for (int32_t yPos = 0; yPos < BSTemporal; ++yPos) {

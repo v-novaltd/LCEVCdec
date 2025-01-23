@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include <chrono>
 #include <cstdlib>
@@ -18,7 +21,7 @@
 // This is from a real .ts stream. The timestamps generally seem to come in groups of 5, which is
 // comfortably below the maxNumReorderFrames of 16 that we're using. The exact pattern also does
 // vary: some groups go 5,2,1,3,4 while others go 4,2,1,3,5 (see 2580000000 - 2980000000).
-static const std::vector<uint64_t> kTimehandles = {
+static const std::vector<uint64_t> kTimehandles1 = {
     780000000,   980000000,   860000000,   820000000,   900000000,   940000000,   1180000000,
     1060000000,  1020000000,  1100000000,  1140000000,  1380000000,  1260000000,  1220000000,
     1300000000,  1340000000,  1580000000,  1460000000,  1420000000,  1500000000,  1540000000,
@@ -91,6 +94,24 @@ static const std::vector<uint64_t> kTimehandles = {
     20020000000, 20100000000, 20140000000, 20380000000, 20260000000, 20220000000, 20300000000,
     20340000000, 20580000000, 20460000000, 20420000000, 20500000000, 20540000000, 20740000000,
     20660000000, 20620000000, 20700000000, 20780000000, 20900000000, 20820000000, 20860000000};
+
+// values from a real world Live stream that had problems with the timehandlePredictor
+// use 290317 as the first value to see that it works correctly
+static const std::vector<uint64_t> kTimehandles2 = {
+    0,       423783,  357050,  323683,  307000,  340366,  390416,  373733,  407100,  557250,
+    490516,  457150,  440466,  473833,  523883,  507200,  540566,  690716,  623983,  590616,
+    573933,  607300,  657350,  640666,  674033,  824183,  757450,  724083,  707400,  740766,
+    790816,  774133,  807500,  957650,  890916,  857550,  840866,  874233,  924283,  907600,
+    940966,  1091116, 1024383, 991016,  974333,  1007700, 1057750, 1041066, 1074433, 1224583,
+    1157850, 1124483, 1107800, 1141166, 1191216, 1174533, 1207900, 1358050, 1291316, 1257950,
+    1241266, 1274633, 1324683, 1308000, 1341366, 1491516, 1424783, 1391416, 1374733, 1408100,
+    1458150, 1441466, 1474833, 1624983, 1558250, 1524883, 1508200, 1541566, 1591616, 1574933,
+    1608300, 1758450, 1691716, 1658350, 1641666, 1675033, 1725083, 1708400, 1741766, 1891916,
+    1825183, 1791816, 1775133, 1808500, 1858550, 1841866, 1875233, 1925283, 1908600, 1941966,
+    2075433, 2008700, 1975333, 1958650, 1992016, 2042066, 2025383, 2058750, 2208900, 2142166,
+    2108800, 2092116, 2125483, 2175533, 2158850, 2192216, 2342366, 2275633, 2242266, 2225583,
+    2258950, 2309000, 2292316, 2325683, 2475833, 2409100, 2375733, 2359050, 2392416, 2442466,
+    2425783, 2459150, 2609300, 2542566, 2509200};
 
 static const std::vector<uint64_t> kSortedTimehandles = {
     780000000,   820000000,   860000000,   900000000,   940000000,   980000000,   1020000000,

@@ -39,7 +39,7 @@ The `pip install` step will also get other required python modules, as a happy l
 
 ## Visual Studio
 
-You will need to install Visual Studio to build the software on windows. Currently we are building with Visual Studio 2019, you will need at least version 16.9.
+You will need to install Visual Studio to build the software on windows. Currently we are building with Visual Studio 2022..
 
 Ensure that **Desktop development with C++** is selected to install. Check for updates after installing. Be prepared for a few reboots :(
 
@@ -69,7 +69,7 @@ To format all code and copyright headers use
 python cmake/tools/lint.py --all-files
 ```
 
-It is highly recommended to copy the `pre-commit` script from `cmake/tools` to the repo's `.git/hooks` folder to enable automatic linting before each commit. Ensure Git Bash is running within the venv or install the `lint_requirements.txt` globally. 
+It is highly recommended to copy the `pre-commit` script from `cmake/tools` to the repo's `.git/hooks` folder to enable automatic linting before each commit. Ensure Git Bash is running within the venv or install the `lint_requirements.txt` globally.
 
 ## Ninja (optional)
 
@@ -93,8 +93,8 @@ Now, the most important part: download the Android NDK. Return to the `SDK Manag
 
 Finally, set the following environment variables:
 
-`ANDROID_HOME` = whatever you used as the SDK location earlier.  
-`ANDROID_NDK_PATH` = `%ANDROID_HOME%\ndk\25.2.9519653`  
+`ANDROID_HOME` = whatever you used as the SDK location earlier.
+`ANDROID_NDK_PATH` = `%ANDROID_HOME%\ndk\25.2.9519653`
 `ANDROID_NDK` = `%ANDROID_NDK%`
 
 `ANDROID_HOME` is used by Android Studio, `ANDROID_NDK_PATH` is used by our conan-related files (`create_all_android_conan_profiles.py`), and `ANDROID_NDK` is used by our cmake-related files (`android_ndk.toolchain.cmake`).
@@ -107,7 +107,7 @@ If you plan to integrate the Decoder into web applications, then you'll need Ems
 
 The following environment variables are optional for the cmake generation step, but required for the ninja build step:
 
-`EMSCRIPTEN_ROOT_PATH` = the location of `emsdk\upstream\emscripten` (a folder in the emsdk repo).  
+`EMSCRIPTEN_ROOT_PATH` = the location of `emsdk\upstream\emscripten` (a folder in the emsdk repo).
 `EMSCRIPTEN` = `%EMSCRIPTEN_ROOT_PATH`
 
 Now, add this newly-set variable to your Path environment variable. You can simply add `%EMSCRIPTEN%`.

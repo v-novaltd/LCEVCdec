@@ -1,3 +1,5 @@
 #!/bin/sh
 
+echo "Running pre-commit linter..."
+
 python 2> /dev/null && python cmake/tools/lint.py || python3 cmake/tools/lint.py

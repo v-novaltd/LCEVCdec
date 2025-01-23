@@ -1,21 +1,25 @@
 /* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "common/threading.h"
 
+#include "common/log.h"
 #include "common/memory.h"
-#include "common/profiler.h"
-#include "context.h"
+#include "lcevc_config.h"
 
 #include <assert.h>
+#include <stdint.h>
 #include <time.h>
 
 /*------------------------------------------------------------------------------*/
@@ -77,6 +81,7 @@ static void platformMutexCVWaitTimed(ThreadPlatform_t* platform, uint32_t millis
 
 #elif VN_CORE_FEATURE(WINTHREADS)
 
+#include <stdbool.h>
 #include <Windows.h>
 
 #define VN_THREADLOOP_SIGNATURE() static DWORD WINAPI threadLoop(LPVOID data)
@@ -152,8 +157,6 @@ typedef struct ThreadJob
 
 typedef struct Thread
 {
-    ProfilerState_t* profiler;
-
     bool busy;
     bool wait;
     bool dead;
@@ -190,8 +193,6 @@ VN_THREADLOOP_SIGNATURE()
 {
     Thread_t* thread = (Thread_t*)data;
     ThreadPlatform_t* platform = &thread->platform;
-
-    profilerRegisterThread(thread->profiler, "worker_thread");
 
     while (!thread->dead) {
         platformMutexLock(platform);
@@ -263,8 +264,7 @@ static inline void threadStop(Thread_t* thrd)
 
 /*------------------------------------------------------------------------------*/
 
-int32_t threadingInitialise(Memory_t memory, Logger_t log, ProfilerState_t* profiler,
-                            ThreadManager_t* mgr, uint32_t numThreads)
+int32_t threadingInitialise(Memory_t memory, Logger_t log, ThreadManager_t* mgr, uint32_t numThreads)
 {
     if (mgr == NULL) {
         return -1;
@@ -285,7 +285,6 @@ int32_t threadingInitialise(Memory_t memory, Logger_t log, ProfilerState_t* prof
 
     for (int32_t i = 0; i < (int32_t)numThreads; i++) {
         Thread_t* thrd = &mgr->threads[i];
-        thrd->profiler = profiler;
         thrd->idx = i;
         threadLaunch(thrd);
     }
@@ -438,8 +437,7 @@ uint32_t threadingGetNumThreads(ThreadManager_t* mgr) { return mgr ? mgr->numThr
 
 #else
 
-int32_t threadingInitialise(Memory_t memory, Logger_t log, Context_t* ctx, ThreadManager_t* mgr,
-                            uint32_t numThreads)
+int32_t threadingInitialise(Memory_t memory, Logger_t log, ThreadManager_t* mgr, uint32_t numThreads)
 {
     return 0;
 }

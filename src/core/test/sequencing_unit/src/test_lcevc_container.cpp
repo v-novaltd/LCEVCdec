@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "constants.h"
 
@@ -15,9 +18,22 @@
 #include <lcevc_container.h>
 
 #include <algorithm>
+#include <chrono>
 #include <unordered_set>
 
+using MilliSecond = std::chrono::duration<int64_t, std::milli>;
+using TimePoint = std::chrono::high_resolution_clock::time_point;
+
 // - Helper functions -----------------------------------------------------------------------------
+TimePoint GetTimePoint() { return std::chrono::high_resolution_clock::now(); }
+
+template <typename DurationType>
+typename DurationType::rep GetTime()
+{
+    TimePoint now = GetTimePoint();
+    DurationType ticks = std::chrono::duration_cast<DurationType>(now.time_since_epoch());
+    return ticks.count();
+}
 
 bool isEvenNumberedFrame(uint64_t th)
 {
@@ -159,11 +175,14 @@ protected:
     const uint32_t m_deltaRepeatCount = m_maxNumReorderFrames / 2;
 };
 
-// LCEVCContainer which takes the first kContainerDefaultCapacity elements from a given
-// parameterised timehandle list.
-class LCEVCContainerTestFixturePreFillSome
+class LCEVCContainerFixtureWithParam
     : public LCEVCContainerTestFixture
     , public testing::WithParamInterface<std::vector<uint64_t>>
+{};
+
+// LCEVCContainer which takes the first kContainerDefaultCapacity elements from a given
+// parameterised timehandle list.
+class LCEVCContainerTestFixturePreFillSome : public LCEVCContainerFixtureWithParam
 {
     using PARENT = LCEVCContainerTestFixture;
 
@@ -172,9 +191,7 @@ protected:
 };
 
 // LCEVCContainer which takes all of the elements from the given timehandle list.
-class LCEVCContainerTestFixturePreFillAll
-    : public LCEVCContainerTestFixture
-    , public testing::WithParamInterface<std::vector<uint64_t>>
+class LCEVCContainerTestFixturePreFillAll : public LCEVCContainerFixtureWithParam
 {
     using PARENT = LCEVCContainerTestFixture;
 
@@ -183,9 +200,7 @@ protected:
 };
 
 // The next 3 fixtures test behaviour for various capacities.
-class LCEVCContainerTestFixture0Capacity
-    : public LCEVCContainerTestFixture
-    , public testing::WithParamInterface<std::vector<uint64_t>>
+class LCEVCContainerTestFixture0Capacity : public LCEVCContainerFixtureWithParam
 {
     using PARENT = LCEVCContainerTestFixture;
 
@@ -193,9 +208,7 @@ protected:
     void SetUp() override { PARENT::SetUp(0, kEmptyArray); }
 };
 
-class LCEVCContainerTestFixtureUIntMaxCapacity
-    : public LCEVCContainerTestFixture
-    , public testing::WithParamInterface<std::vector<uint64_t>>
+class LCEVCContainerTestFixtureUIntMaxCapacity : public LCEVCContainerFixtureWithParam
 {
     using PARENT = LCEVCContainerTestFixture;
 
@@ -203,9 +216,7 @@ protected:
     void SetUp() override { PARENT::SetUp(std::numeric_limits<size_t>::max(), kEmptyArray); }
 };
 
-class LCEVCContainerTestFixtureMediumCapacity
-    : public LCEVCContainerTestFixture
-    , public testing::WithParamInterface<std::vector<uint64_t>>
+class LCEVCContainerTestFixtureMediumCapacity : public LCEVCContainerFixtureWithParam
 {
     using PARENT = LCEVCContainerTestFixture;
 
@@ -214,9 +225,7 @@ protected:
 };
 
 // Combines the "preFillAll" fixture with the "no-capacity" behaviour.
-class LCEVCContainerTestFixturePreFillAllNoCap
-    : public LCEVCContainerTestFixture
-    , public testing::WithParamInterface<std::vector<uint64_t>>
+class LCEVCContainerTestFixturePreFillAllNoCap : public LCEVCContainerFixtureWithParam
 {
     using PARENT = LCEVCContainerTestFixture;
 
@@ -254,7 +263,7 @@ TEST(SequencerTestLCEVCContainer, validDestroyLCEVCContainer)
 TEST_F(LCEVCContainerTestFixture, insertAddsTimehandleProvided)
 {
     // size from 0 to kMaxBufSize, inclusive
-    const uint64_t timehandle = kTimehandles[0];
+    const uint64_t timehandle = kTimehandles1[0];
     const size_t bufSize = kRandLengths[0];
     uint8_t* randomData = kRandData[0];
     lcevcContainerInsert(m_lcevcContainer, randomData, bufSize, timehandle, getTimeSinceStart());
@@ -268,7 +277,7 @@ TEST_F(LCEVCContainerTestFixture, insertAddsTimehandleProvided)
 TEST_F(LCEVCContainerTestFixture, removeSubtractsWhatWasAdded)
 {
     // size from 0 to kMaxBufSize, inclusive
-    const uint64_t timehandle = kTimehandles[1];
+    const uint64_t timehandle = kTimehandles1[1];
     const size_t bufSize = kRandLengths[1];
     uint8_t* randomData = kRandData[1];
     const uint64_t inputTime = getTimeSinceStart();
@@ -293,10 +302,51 @@ TEST_F(LCEVCContainerTestFixture, removeSubtractsWhatWasAdded)
     stampedBufferRelease(&releaseThis);
 }
 
+// LCEVCContainerFixtureWithParam
+// Main test to ensure that it can do the processing correctly
+
+INSTANTIATE_TEST_SUITE_P(timehandleLists, LCEVCContainerFixtureWithParam,
+                         testing::Values(kTimehandles2, kTimehandles1, kSortedTimehandles));
+
+TEST_P(LCEVCContainerFixtureWithParam, processRealWorldProcessing)
+{
+    const std::vector<uint64_t>& thList = GetParam();
+
+    std::set<uint64_t> timehandlesToFind;
+    size_t addIdx = 0;
+    int64_t lastAdd = 0;
+    int64_t lastExtract = 0;
+
+    // Need to find all the timehandles we added to the container
+    while (timehandlesToFind.size() < thList.size()) {
+        if (addIdx < thList.size()) {
+            addArbitraryData(thList[addIdx], addIdx);
+            lastAdd = GetTime<MilliSecond>();
+            addIdx++;
+        }
+
+        uint64_t th = 0;
+        size_t queueLen = 0;
+        StampedBuffer_t* nextBufferInOrder =
+            lcevcContainerExtractNextInOrder(m_lcevcContainer, false, &th, &queueLen);
+        if (nextBufferInOrder != NULL) {
+            lastExtract = GetTime<MilliSecond>();
+            timehandlesToFind.insert(th);
+        }
+        // check to see if we should timeout, or we have collected everything
+        int64_t tnow = GetTime<MilliSecond>();
+        if (((tnow - lastAdd) > 2000) && ((tnow - lastExtract) > 2000)) {
+            ADD_FAILURE() << "Timeout, it's been more than 2s since the last add extract";
+            return;
+        }
+    }
+    EXPECT_EQ(timehandlesToFind.size(), thList.size());
+}
+
 // LCEVCContainerTestFixturePreFillSome
 
 INSTANTIATE_TEST_SUITE_P(timehandleLists, LCEVCContainerTestFixturePreFillSome,
-                         testing::Values(kTimehandles, kSortedTimehandles));
+                         testing::Values(kTimehandles1, kSortedTimehandles));
 
 TEST_P(LCEVCContainerTestFixturePreFillSome, validateTestingData)
 {
@@ -369,7 +419,7 @@ TEST_P(LCEVCContainerTestFixturePreFillSome, extractReturnsNullAndDeletesAllIfEn
 // LCEVCContainerTestFixturePreFillAll
 
 INSTANTIATE_TEST_SUITE_P(timehandleLists, LCEVCContainerTestFixturePreFillAll,
-                         testing::Values(kTimehandles, kSortedTimehandles));
+                         testing::Values(kTimehandles1, kSortedTimehandles));
 
 TEST_P(LCEVCContainerTestFixturePreFillAll, extractFromMiddleRemovesAllLower)
 {
@@ -465,10 +515,10 @@ TEST_P(LCEVCContainerTestFixturePreFillAll, extractFromMiddleRemovesAllLower)
 
 TEST_F(LCEVCContainerTestFixtureMediumCapacity, insertSucceedsUntilCapacity)
 {
-    ASSERT_LT(m_capacity, kTimehandles.size()) << "Capacity of fixture was set too low";
+    ASSERT_LT(m_capacity, kTimehandles1.size()) << "Capacity of fixture was set too low";
 
-    for (size_t i = 0; i < kTimehandles.size(); i++) {
-        const bool insertionSucceeded = addArbitraryData(kTimehandles[i], i);
+    for (size_t i = 0; i < kTimehandles1.size(); i++) {
+        const bool insertionSucceeded = addArbitraryData(kTimehandles1[i], i);
         EXPECT_EQ(insertionSucceeded, i < m_capacity);
     }
 }
@@ -477,7 +527,7 @@ TEST_F(LCEVCContainerTestFixture0Capacity, insertAlwaysSucceeds)
 {
     // Assume that the whole vector is large enough to count as "always".
     size_t index = 0;
-    for (uint64_t th : kTimehandles) {
+    for (uint64_t th : kTimehandles1) {
         const bool insertionSucceeded = addArbitraryData(th, index);
         EXPECT_TRUE(insertionSucceeded);
         index++;
@@ -488,7 +538,7 @@ TEST_F(LCEVCContainerTestFixtureUIntMaxCapacity, insertAlwaysFails)
 {
     // Assume that the whole vector is large enough to count as "always".
     size_t index = 0;
-    for (uint64_t th : kTimehandles) {
+    for (uint64_t th : kTimehandles1) {
         const bool insertionSucceeded = addArbitraryData(th, index);
         EXPECT_FALSE(insertionSucceeded);
         index++;
@@ -499,7 +549,7 @@ TEST_F(LCEVCContainerTestFixtureUIntMaxCapacity, insertAlwaysFails)
 // behaviour for no-capacity containers.
 
 INSTANTIATE_TEST_SUITE_P(timehandleLists, LCEVCContainerTestFixturePreFillAllNoCap,
-                         testing::Values(kTimehandles, kSortedTimehandles));
+                         testing::Values(kTimehandles1, kSortedTimehandles));
 
 TEST_P(LCEVCContainerTestFixturePreFillAllNoCap, insertDuplicateNoEffect)
 {
@@ -535,10 +585,10 @@ TEST_F(LCEVCContainerTestFixture, extractFailsOnlyAfterDeltaRepeatCountEntries)
 {
     std::set<uint64_t> emptySet;
     std::set<uint64_t> timehandlesNotYetFound;
-    for (uint64_t th : kTimehandles) {
+    for (uint64_t th : kTimehandles1) {
         timehandlesNotYetFound.insert(th);
     }
-    testOnEasyData(0, kTimehandles.size(), true, kTimehandles, timehandlesNotYetFound);
+    testOnEasyData(0, kTimehandles1.size(), true, kTimehandles1, timehandlesNotYetFound);
     EXPECT_EQ(timehandlesNotYetFound, emptySet);
 }
 
@@ -574,8 +624,8 @@ TEST_F(LCEVCContainerTestFixture, extractAlwaysFailsIfTimehandlesStrictlyDecreas
 
 TEST_F(LCEVCContainerTestFixture, extractAlwaysFailsIfTimehandlesApproximatelyDecrease)
 {
-    for (int64_t i = static_cast<int64_t>(kTimehandles.size() - 1); i >= 0; i--) {
-        addArbitraryData(kTimehandles[i], i);
+    for (int64_t i = static_cast<int64_t>(kTimehandles1.size() - 1); i >= 0; i--) {
+        addArbitraryData(kTimehandles1[i], i);
 
         uint64_t dummyTh = 0;
         size_t dummyQueueLen = 0;
@@ -589,7 +639,7 @@ TEST_F(LCEVCContainerTestFixture, extractAlwaysFailsIfTimehandlesApproximatelyDe
 TEST_F(LCEVCContainerTestFixture, extractRecoversAfterEarlyDroppedFrame)
 {
     std::set<uint64_t> timehandlesToFind;
-    for (uint64_t th : kTimehandles) {
+    for (uint64_t th : kTimehandles1) {
         timehandlesToFind.insert(th);
     }
 
@@ -598,7 +648,7 @@ TEST_F(LCEVCContainerTestFixture, extractRecoversAfterEarlyDroppedFrame)
     // "skipFrame" range, because it's too early.
     const size_t skipFrame = m_deltaRepeatCount / 2;
     for (size_t i = 0; i < skipFrame; i++) {
-        addArbitraryData(kTimehandles[i], i);
+        addArbitraryData(kTimehandles1[i], i);
 
         uint64_t dummyTh = 0;
         size_t dummyQueueLen = 0;
@@ -607,9 +657,9 @@ TEST_F(LCEVCContainerTestFixture, extractRecoversAfterEarlyDroppedFrame)
         EXPECT_EQ(nextBufferInOrder, nullptr);
     }
 
-    recoverFromBadPatch(skipFrame + 1, kTimehandles.size(), true, true, kTimehandles, timehandlesToFind);
+    recoverFromBadPatch(skipFrame + 1, kTimehandles1.size(), true, true, kTimehandles1, timehandlesToFind);
 
-    const size_t expectedMissingTimehandle = kTimehandles[skipFrame];
+    const size_t expectedMissingTimehandle = kTimehandles1[skipFrame];
     EXPECT_EQ(timehandlesToFind.size(), 1);
     EXPECT_NE(timehandlesToFind.find(expectedMissingTimehandle), timehandlesToFind.end());
 }
@@ -621,7 +671,7 @@ TEST_F(LCEVCContainerTestFixture, extractRecoversAfterRepeatedLateDroppedFrames)
     // K > m_deltaRepeatCount.
 
     std::set<uint64_t> timehandlesNotYetFound;
-    for (uint64_t th : kTimehandles) {
+    for (uint64_t th : kTimehandles1) {
         timehandlesNotYetFound.insert(th);
     }
 
@@ -630,12 +680,12 @@ TEST_F(LCEVCContainerTestFixture, extractRecoversAfterRepeatedLateDroppedFrames)
     size_t numForced = 0;
     size_t numAdded = 0;
     uint64_t lastFoundTH = 0;
-    for (size_t i = 0; i < kTimehandles.size(); i++) {
+    for (size_t i = 0; i < kTimehandles1.size(); i++) {
         if ((i % skipPeriod) == (skipPeriod - 1)) { // i.e. skip number 10,21,32,etc
-            timehandlesNotExpectedToBeFound.insert(kTimehandles[i]);
+            timehandlesNotExpectedToBeFound.insert(kTimehandles1[i]);
             continue;
         }
-        addArbitraryData(kTimehandles[i], i);
+        addArbitraryData(kTimehandles1[i], i);
         numAdded++;
 
         uint64_t dummyTh = 0;
@@ -676,23 +726,23 @@ TEST_F(LCEVCContainerTestFixture, extractRecoversAfterTimehandleJump)
     // the source data is out of order, so some data in the middle 2 quarters might belong in the
     // final quarter. Therefore, we merely test that the timehandles come out in increasing order.
 
-    const size_t firstZoneEnd = kTimehandles.size() / 4;
-    const size_t secondZoneStart = 3 * kTimehandles.size() / 4;
+    const size_t firstZoneEnd = kTimehandles1.size() / 4;
+    const size_t secondZoneStart = 3 * kTimehandles1.size() / 4;
 
     std::set<uint64_t> timehandlesNotYetFound;
     std::set<uint64_t> timehandlesNotExpectedToBeFound;
-    for (size_t idx = 0; idx < kTimehandles.size(); idx++) {
-        timehandlesNotYetFound.insert(kTimehandles[idx]);
+    for (size_t idx = 0; idx < kTimehandles1.size(); idx++) {
+        timehandlesNotYetFound.insert(kTimehandles1[idx]);
         if (idx >= firstZoneEnd && idx < secondZoneStart) {
-            timehandlesNotExpectedToBeFound.insert(kTimehandles[idx]);
+            timehandlesNotExpectedToBeFound.insert(kTimehandles1[idx]);
         }
     }
 
     // Go from 0% to 25%
-    testOnEasyData(0, firstZoneEnd, false, kTimehandles, timehandlesNotYetFound);
+    testOnEasyData(0, firstZoneEnd, false, kTimehandles1, timehandlesNotYetFound);
 
     // Now jump to 75% and go to the end.
-    recoverFromBadPatch(secondZoneStart, kTimehandles.size(), true, true, kTimehandles,
+    recoverFromBadPatch(secondZoneStart, kTimehandles1.size(), true, true, kTimehandles1,
                         timehandlesNotYetFound);
 
     EXPECT_EQ(timehandlesNotExpectedToBeFound, timehandlesNotYetFound);
@@ -700,27 +750,27 @@ TEST_F(LCEVCContainerTestFixture, extractRecoversAfterTimehandleJump)
 
 TEST_F(LCEVCContainerTestFixture, extractRecoversAfterFPSChange)
 {
-    std::vector<uint64_t> halfFrameRate(kTimehandles.size() / 2);
-    for (size_t idx = 0; idx < kTimehandles.size(); idx += 2) {
-        halfFrameRate[idx / 2] = kTimehandles[idx];
+    std::vector<uint64_t> halfFrameRate(kTimehandles1.size() / 2);
+    for (size_t idx = 0; idx < kTimehandles1.size(); idx += 2) {
+        halfFrameRate[idx / 2] = kTimehandles1[idx];
     }
 
     std::set<uint64_t> timehandlesNotYetFound;
-    for (uint64_t th : kTimehandles) {
+    for (uint64_t th : kTimehandles1) {
         timehandlesNotYetFound.insert(th);
     }
 
-    const size_t transition1 = kTimehandles.size() / 4;
-    const size_t transition2 = 3 * kTimehandles.size() / 4;
+    const size_t transition1 = kTimehandles1.size() / 4;
+    const size_t transition2 = 3 * kTimehandles1.size() / 4;
     std::set<uint64_t> timehandlesNotExpectedToBeFound;
-    for (size_t idx = 0; idx < kTimehandles.size(); idx++) {
+    for (size_t idx = 0; idx < kTimehandles1.size(); idx++) {
         if ((idx > transition1) && (idx <= transition2) && (idx % 2 == 1)) {
-            timehandlesNotExpectedToBeFound.insert(kTimehandles[idx]);
+            timehandlesNotExpectedToBeFound.insert(kTimehandles1[idx]);
         }
     }
 
     // Start off with normal data (i.e. "high" fps).
-    testOnEasyData(0, transition1, false, kTimehandles, timehandlesNotYetFound);
+    testOnEasyData(0, transition1, false, kTimehandles1, timehandlesNotYetFound);
 
     // now try the half-frame-rate (it's half size so all indices are halved). Note that
     // realistically, this would come with an inputCC change, which would force the timehandle
@@ -731,7 +781,7 @@ TEST_F(LCEVCContainerTestFixture, extractRecoversAfterFPSChange)
                         timehandlesNotYetFound);
 
     // now back to normal (still need to use the "recovery" behaviour though).
-    recoverFromBadPatch(transition2, kTimehandles.size(), true, true, kTimehandles, timehandlesNotYetFound);
+    recoverFromBadPatch(transition2, kTimehandles1.size(), true, true, kTimehandles1, timehandlesNotYetFound);
 
     EXPECT_EQ(timehandlesNotExpectedToBeFound, timehandlesNotYetFound);
 }
@@ -761,41 +811,41 @@ TEST_F(LCEVCContainerTestFixture, minExtractsAtHead)
 
 TEST_F(LCEVCContainerTestFixture, flushRemovesIfTimehandleIsPresent)
 {
-    populate(kTimehandles);
+    populate(kTimehandles1);
     bool dummyIsAtHead = false;
-    ASSERT_TRUE(lcevcContainerExists(m_lcevcContainer, kTimehandles[0], &dummyIsAtHead))
+    ASSERT_TRUE(lcevcContainerExists(m_lcevcContainer, kTimehandles1[0], &dummyIsAtHead))
         << "lcevcContainer is missing a timehandle that should have been added to it: "
-        << kTimehandles[0];
+        << kTimehandles1[0];
     ASSERT_EQ(lcevcContainerSize(m_lcevcContainer), m_capacity)
         << "Please use a fixture whose capacity is less than the size of the sample timehandle "
            "list";
 
-    lcevcContainerFlush(m_lcevcContainer, kTimehandles[0]);
+    lcevcContainerFlush(m_lcevcContainer, kTimehandles1[0]);
 
-    EXPECT_FALSE(lcevcContainerExists(m_lcevcContainer, kTimehandles[0], &dummyIsAtHead));
+    EXPECT_FALSE(lcevcContainerExists(m_lcevcContainer, kTimehandles1[0], &dummyIsAtHead));
     EXPECT_EQ(lcevcContainerSize(m_lcevcContainer), m_capacity - 1);
 }
 
 TEST_F(LCEVCContainerTestFixture, flushDoesNothingIfTimehandleAbsent)
 {
-    populate(kTimehandles);
+    populate(kTimehandles1);
     bool dummyIsAtHead = false;
-    ASSERT_FALSE(lcevcContainerExists(m_lcevcContainer, kTimehandles[m_capacity], &dummyIsAtHead))
+    ASSERT_FALSE(lcevcContainerExists(m_lcevcContainer, kTimehandles1[m_capacity], &dummyIsAtHead))
         << "lcevcContainer contains a timehandle that shouldn't have been added to it: "
-        << kTimehandles[m_capacity];
+        << kTimehandles1[m_capacity];
     ASSERT_EQ(lcevcContainerSize(m_lcevcContainer), m_capacity)
         << "Please use a fixture whose capacity is less than the size of the sample timehandle "
            "list";
 
-    lcevcContainerFlush(m_lcevcContainer, kTimehandles[m_capacity]);
+    lcevcContainerFlush(m_lcevcContainer, kTimehandles1[m_capacity]);
 
-    EXPECT_FALSE(lcevcContainerExists(m_lcevcContainer, kTimehandles[m_capacity], &dummyIsAtHead));
+    EXPECT_FALSE(lcevcContainerExists(m_lcevcContainer, kTimehandles1[m_capacity], &dummyIsAtHead));
     EXPECT_EQ(lcevcContainerSize(m_lcevcContainer), m_capacity);
 }
 
 TEST_F(LCEVCContainerTestFixture, clearRemovesAll)
 {
-    populate(kTimehandles);
+    populate(kTimehandles1);
     bool dummyIsAtHead = false;
     ASSERT_EQ(lcevcContainerSize(m_lcevcContainer), m_capacity)
         << "Please use a fixture whose capacity is less than the size of the sample timehandle "
@@ -804,7 +854,7 @@ TEST_F(LCEVCContainerTestFixture, clearRemovesAll)
     lcevcContainerClear(m_lcevcContainer);
 
     EXPECT_EQ(lcevcContainerSize(m_lcevcContainer), 0);
-    for (uint64_t th : kTimehandles) {
+    for (uint64_t th : kTimehandles1) {
         EXPECT_FALSE(lcevcContainerExists(m_lcevcContainer, th, &dummyIsAtHead));
     }
 }

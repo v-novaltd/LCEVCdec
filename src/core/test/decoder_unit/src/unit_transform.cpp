@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "unit_fixture.h"
 #include "unit_rng.h"
@@ -76,9 +79,9 @@ static std::vector<int16_t> getCoefficientValues(CoefficientValuesType coeffsTyp
 
     if (coeffsType == CoefficientValuesType::Incrementing) {
         // clang-format off
-        return rv::iota(1) | 
+        return rv::iota(1) |
                rv::take(layerCount) |
-               rv::transform([](auto value) { return static_cast<int16_t>(value); }) | 
+               rv::transform([](auto value) { return static_cast<int16_t>(value); }) |
                rg::to_vector;
         // clang-format on
     }
@@ -97,11 +100,11 @@ static std::vector<int16_t> getCoefficientValues(CoefficientValuesType coeffsTyp
         static const auto offset = 32768;
 
         // clang-format off
-        return rv::generate([&rng]() 
+        return rv::generate([&rng]()
                     {
                         return static_cast<int16_t>(static_cast<int32_t>(rng()) - offset);
                     }) |
-               rv::take(layerCount) | 
+               rv::take(layerCount) |
                rg::to_vector;
         // clang-format on
     }
@@ -383,13 +386,13 @@ const std::vector<DequantValuesType> kDequantValuesAll = {
     DequantValuesType::Basic, DequantValuesType::Overflow, DequantValuesType::Underflow};
 
 // clang-format off
-const auto kTransformTestParams =   rv::cartesian_product(kCoeffValuesAll, kTransformAll, kScaling1D) | 
+const auto kTransformTestParams =   rv::cartesian_product(kCoeffValuesAll, kTransformAll, kScaling1D) |
                                     rv::transform([](auto value) {
                                         return TransformTestParams{std::get<0>(value), std::get<1>(value), std::get<2>(value)};
                                     }) |
                                     rg::to_vector;
 
-// Dequant tests don't stress 
+// Dequant tests don't stress
 const auto kDequantTransformTestParams =    rv::cartesian_product(kDequantValuesAll, kDequantCoeffsLimited, kTransformAll, kScaling1D, kTemporalSignalAll) |
                                             rv::transform([](auto value) {
                                                 return DequantTransformTestParams{std::get<0>(value), std::get<1>(value), std::get<2>(value), std::get<3>(value), std::get<4>(value)};

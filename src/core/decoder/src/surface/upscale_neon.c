@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "surface/upscale_neon.h"
 
@@ -286,6 +289,9 @@ static inline void horizontalConvolveN16(int16x8x2_t pels, int16x8x2_t* result, 
     int32x4_t values[4];
     int16x4x2_t combine[2];
 
+    const int16x8_t minV = vdupq_n_s16(-16384); /* see saturateS15 for explanation */
+    const int16x8_t maxV = vdupq_n_s16(16383);
+
     /* Reverse */
     values[0] = vmull_n_s16(vget_low_s16(pels.val[0]), kernelRev[0]);
     values[2] = vmull_n_s16(vget_high_s16(pels.val[0]), kernelRev[0]);
@@ -325,6 +331,10 @@ static inline void horizontalConvolveN16(int16x8x2_t pels, int16x8x2_t* result, 
     /* Output */
     result->val[0] = vcombine_s16(combine[0].val[0], combine[0].val[1]);
     result->val[1] = vcombine_s16(combine[1].val[0], combine[1].val[1]);
+
+    /* Saturate (clamp) to +/- 2^14 */
+    result->val[0] = vmaxq_s16(vminq_s16(result->val[0], maxV), minV);
+    result->val[1] = vmaxq_s16(vminq_s16(result->val[1], maxV), minV);
 }
 
 /*!
@@ -446,6 +456,29 @@ static inline void applyDither(int16x8x2_t* values, const int8_t** buffer)
     values->val[1] = vqaddq_s16(values->val[1], vmovl_s8(vget_high_s8(ditherLoad)));
 }
 
+/*!
+ * Apply dithering to values using supplied host buffer pointer containing pre-randomised
+ * values.
+ *
+ * This function loads in values from the dither buffer, when adding the dither values,
+ * it makes the bit shifting to match the input bit depth, then moves the buffer pointer
+ * forward for the next invocation of this function.
+ *
+ * \param values   The values to apply dithering to.
+ * \param buffer   A double pointer to the dither buffer pointer.
+ * \param shift    Places to be bit shifted to the left.
+ */
+static inline void applyDitherS16(int16x8x2_t* values, const int8_t** buffer, int8_t shift)
+{
+    const int8x16_t ditherLoad = vld1q_s8(*buffer);
+    *buffer += 16;
+
+    values->val[0] =
+        vqaddq_s16(values->val[0], vshlq_s16(vmovl_s8(vget_low_s8(ditherLoad)), vdupq_n_s16(shift)));
+    values->val[1] =
+        vqaddq_s16(values->val[1], vshlq_s16(vmovl_s8(vget_high_s8(ditherLoad)), vdupq_n_s16(shift)));
+}
+
 /*! \brief Planar horizontal upscaling of 2 rows. */
 void horizontalU8PlanarNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                             const uint8_t* base[2], uint32_t width, uint32_t xStart, uint32_t xEnd,
@@ -535,6 +568,7 @@ void horizontalS16PlanarNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out
     const bool paEnabled = (base[0] != NULL);
     const bool paEnabled1D = paEnabled && (base[1] != NULL);
     const int8_t* ditherBuffer = NULL;
+    int8_t shift = 0;
     int16_t* out16[2] = {(int16_t*)out[0], (int16_t*)out[1]};
     const int16_t* base16[2] = {(const int16_t*)base[0], (const int16_t*)base[1]};
 
@@ -561,6 +595,7 @@ void horizontalS16PlanarNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
     if (dither != NULL) {
         ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
+        shift = ditherGetShiftS16(dither);
     }
 
     /* Run middle SIMD loop */
@@ -583,10 +618,11 @@ void horizontalS16PlanarNEON(Dither_t dither, const uint8_t* in[2], uint8_t* out
         }
 
         if (ditherBuffer) {
-            applyDither(&values[0], &ditherBuffer);
-            applyDither(&values[1], &ditherBuffer);
+            applyDitherS16(&values[0], &ditherBuffer, shift);
+            applyDitherS16(&values[1], &ditherBuffer, shift);
         }
 
+        /* Write out. */
         vst1q_s16(&out16[0][storeOffset], values[0].val[0]);
         vst1q_s16(&out16[0][storeOffset + 8], values[0].val[1]);
 
@@ -1151,6 +1187,8 @@ static inline void verticalConvolveS16(int16x8x2_t pels[UCMaxKernelSize], const 
                                        int32_t kernelLength, int16x8x2_t* result)
 {
     int32x4_t values[4];
+    const int16x8_t minV = vdupq_n_s16(-16384); /* see saturateS15 for explanation */
+    const int16x8_t maxV = vdupq_n_s16(16383);
 
     /* Prime with initial multiply */
     values[0] = vmull_n_s16(vget_low_s16(pels[0].val[0]), kernel[0]);
@@ -1166,12 +1204,16 @@ static inline void verticalConvolveS16(int16x8x2_t pels[UCMaxKernelSize], const 
         values[3] = vmlal_n_s16(values[3], vget_high_s16(pels[i].val[1]), kernel[i]);
     }
 
-    /* Scale back & combine with a saturating shift from int32_t to unsigned N-bits. */
+    /* Scale back & combine with a shift from int32_t to unsigned N-bits. */
     result->val[0] = vcombine_s16(vqrshrn_n_s32(values[0], UCInverseShift),
-                                  vqrshrn_n_s32(values[1], UCInverseShift));
+                                  vrshrn_n_s32(values[1], UCInverseShift));
 
     result->val[1] = vcombine_s16(vqrshrn_n_s32(values[2], UCInverseShift),
-                                  vqrshrn_n_s32(values[3], UCInverseShift));
+                                  vrshrn_n_s32(values[3], UCInverseShift));
+
+    /* Saturate (clamp) to +/- 2^14 */
+    result->val[0] = vmaxq_s16(vminq_s16(result->val[0], maxV), minV);
+    result->val[1] = vmaxq_s16(vminq_s16(result->val[1], maxV), minV);
 }
 
 /*!
@@ -1187,7 +1229,7 @@ static inline void verticalConvolveS16(int16x8x2_t pels[UCMaxKernelSize], const 
  * \param result          Place to store the resultant 16-pixels.
  */
 static inline void verticalConvolveU16(int16x8x2_t pels[UCMaxKernelSize], const int16_t* kernel,
-                                       int32_t kernelLength, uint16x8_t maxValue, uint16x8x2_t* result)
+                                       int32_t kernelLength, uint16x8_t maxV, uint16x8x2_t* result)
 {
     int32x4_t values[4];
 
@@ -1208,11 +1250,11 @@ static inline void verticalConvolveU16(int16x8x2_t pels[UCMaxKernelSize], const 
     /* Scale back & combine with a saturating shift from int32_t to unsigned N-bits. */
     result->val[0] = vcombine_u16(vqrshrun_n_s32(values[0], UCInverseShift),
                                   vqrshrun_n_s32(values[1], UCInverseShift));
-    result->val[0] = vminq_u16(result->val[0], maxValue);
+    result->val[0] = vminq_u16(result->val[0], maxV);
 
     result->val[1] = vcombine_u16(vqrshrun_n_s32(values[2], UCInverseShift),
                                   vqrshrun_n_s32(values[3], UCInverseShift));
-    result->val[1] = vminq_u16(result->val[1], maxValue);
+    result->val[1] = vminq_u16(result->val[1], maxV);
 }
 
 /*! \brief Vertical upscaling of 16 columns. */

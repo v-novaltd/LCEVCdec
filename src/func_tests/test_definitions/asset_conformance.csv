@@ -1,0 +1,15 @@
+Test Function,Group,Name,Enabled-cpu,Enabled-Qualcomm_devkit,Enabled-VIM4,Enabled-VIM4_1,Enabled-VIM3L_0,Enabled-PIXEL5_0,Enabled-PIXEL5_1,Enabled-Qualcomm_RB5_0,Enabled-Qualcomm_RB5_1,Enabled-External,Notes,meta:asset_path,meta:hash_hash,meta:filepath_hash,meta:executable
+asset_hash,concatenation,concatenation_RES-1,BROKEN,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,BROKEN,DEC-532,concatenations/RES-1.ts,,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_RES-2,BROKEN,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,BROKEN,DEC-532,concatenations/RES-2.ts,816bb87e3b949933,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_RES-3,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,Harness doesn't support AV1 webm,concatenations/RES-3.webm,,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_RES-4,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,Harness doesn't support AV1 webm,concatenations/RES-4.webm,,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_ENHAN-1,BROKEN,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,BROKEN,DEC-532,concatenations/ENHAN-1.ts,f59abee31a6589de,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_ENHAN-2,MR,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,DEC-532,concatenations/ENHAN-2.ts,f5664573f1ccb8b7,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_ENHAN-3,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,Harness doesn't support AV1 webm,concatenations/ENHAN-3.webm,,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_ENHAN-4,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,Harness doesn't support AV1 webm,concatenations/ENHAN-4.webm,,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_TRANF-1,MR,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,,concatenations/TRANF-1.ts,b132efbf8be29542,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_TRANF-2,MR,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,,concatenations/TRANF-2.ts,327f0752dc0dc4bf,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_SCM-1,MR,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,,concatenations/SCM-1.ts,eac4fe870aaa0be1,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_SCM-2,MR,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,,concatenations/SCM-2.ts,c37bd22d7e87391e,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_BITD-1,MR,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,DEC-532,concatenations/BITD-1.ts,dfdc942020168ecb,output-hash,lcevc_dec_test_harness
+asset_hash,concatenation,concatenation_BITD-2,BROKEN,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,BROKEN,DEC-532,concatenations/BITD-2.ts,,output-hash,lcevc_dec_test_harness

@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef VN_DEC_CORE_TYPES_H_
 #define VN_DEC_CORE_TYPES_H_
@@ -17,6 +20,7 @@
 #include <assert.h>
 #include <LCEVC/PerseusDecoder.h>
 #include <math.h>
+#include <stdint.h>
 
 /*------------------------------------------------------------------------------*/
 
@@ -27,9 +31,8 @@ typedef struct Memory* Memory_t;
 /*! \brief Various constants used by the quantizer. */
 enum QuantConstants
 {
-    QMinStepWidth = 4,
-    QMaxStepWidth = 32767,
-    QDefaultChromaSWMultiplier = 64
+    QMinStepWidth = 1,
+    QMaxStepWidth = 32767
 };
 
 /*! \brief Chroma subsampling the LCEVC stream signals.
@@ -173,8 +176,8 @@ typedef enum QuantMatrixMode
     QMMUsePrevious = 0,
     QMMUseDefault,
     QMMCustomBoth,
-    QMMCustomLOQ0,
-    QMMCustomLOQ1,
+    QMMCustomLOQ0, /* LOQ1 uses previous in this case */
+    QMMCustomLOQ1, /* LOQ0 uses previous in this case */
     QMMCustomBothUnique
 } QuantMatrixMode_t;
 
@@ -424,12 +427,22 @@ static inline uint32_t alignU32(uint32_t value, uint32_t alignment)
     return (value + (alignment - 1)) & ~(alignment - 1);
 }
 
-static inline int32_t clampS32(int32_t value, int32_t minValue, int32_t maxValue)
+static inline uint16_t clampU16(uint16_t value, uint16_t minValue, uint16_t maxValue)
 {
     return (value < minValue) ? minValue : (value > maxValue) ? maxValue : value;
 }
 
 static inline uint32_t clampU32(uint32_t value, uint32_t minValue, uint32_t maxValue)
+{
+    return (value < minValue) ? minValue : (value > maxValue) ? maxValue : value;
+}
+
+static inline int32_t clampS32(int32_t value, int32_t minValue, int32_t maxValue)
+{
+    return (value < minValue) ? minValue : (value > maxValue) ? maxValue : value;
+}
+
+static inline int64_t clampS64(int64_t value, int64_t minValue, int64_t maxValue)
 {
     return (value < minValue) ? minValue : (value > maxValue) ? maxValue : value;
 }
@@ -455,7 +468,7 @@ static inline uint64_t minU64(uint64_t x, uint64_t y) { return x < y ? x : y; }
 
 static inline int32_t maxS32(int32_t x, int32_t y) { return x > y ? x : y; }
 
-static inline int32_t maxU32(uint32_t x, uint32_t y) { return x > y ? x : y; }
+static inline uint32_t maxU32(uint32_t x, uint32_t y) { return x > y ? x : y; }
 
 static inline uint64_t maxU64(uint64_t x, uint64_t y) { return x > y ? x : y; }
 
@@ -465,13 +478,22 @@ static inline size_t maxSize(size_t x, size_t y) { return x > y ? x : y; }
 
 static inline uint8_t saturateU8(int32_t value)
 {
-    const int32_t result = (value < 0) ? 0 : (value > 255) ? 255 : value;
+    const int32_t result = clampS32(value, 0, 255);
     return (uint8_t)result;
 }
 
+/* S15 saturation is for the END of upscaling (this is the thing that you apply residuals to, so
+ * the maximum and minimum values must be one maximum-residual apart). */
+static inline int16_t saturateS15(int32_t value)
+{
+    const int32_t result = minS32(maxS32(value, -16384), 16383);
+    return (int16_t)result;
+}
+
+/* S16 saturation is for RESIDUALS (and general use demoting int32_ts to int16_ts). */
 static inline int16_t saturateS16(int32_t value)
 {
-    const int32_t result = (value < -32768) ? -32768 : (value > 32767) ? 32767 : value;
+    const int32_t result = clampS32(value, -32768, 32767);
     return (int16_t)result;
 }
 

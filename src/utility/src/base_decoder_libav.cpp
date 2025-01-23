@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 // Implementation of base::Decoder that uses libavcodec and libavfilter
 //
@@ -81,6 +84,8 @@ public:
     const PictureLayout& layout() const override { return m_pictureLayout; }
 
     int maxReorder() const override;
+
+    Type getType() const override { return Type::LibAV; }
 
     bool hasImage() const override;
     bool getImage(Data& data) const override;
@@ -169,8 +174,8 @@ private:
 
     // Holding buffers for output packets - the pointers passed back out
     // are valid until next update
-    Data m_imageData = {nullptr};
-    Data m_enhancementData = {nullptr};
+    Data m_imageData;
+    Data m_enhancementData;
 
     std::vector<uint8_t> m_image;
     std::vector<uint8_t> m_enhancement;
@@ -194,7 +199,7 @@ int BaseDecoderLibAV::openInput(std::string_view input, std::string_view inputFo
         std::string errorBuffer(errorBufferSize, '\0');
 
         if (int status = av_strerror(r, &errorBuffer[0], errorBufferSize); status == 0) {
-            std::cout << "Error: " << errorBuffer << std::endl;
+            std::cout << "libav error: " << errorBuffer << std::endl;
         } else {
             std::cout << "av_strerror failed with error code " << status << std::endl;
         }
@@ -252,7 +257,7 @@ int BaseDecoderLibAV::openStream(AVMediaType type)
     // Create the parser
     m_parserCtx = av_parser_init(codecParameters->codec_id);
 
-#if LIBAVCODEC_VERSION_MAJOR < 59
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 10, 100)
     m_videoDecCtx->reordered_opaque = 0;
 #endif
 
@@ -274,7 +279,7 @@ int BaseDecoderLibAV::addFilter(std::string_view filter)
 
     const std::string args =
         fmt::format("width={}:height={}:pix_fmt={}:time_base=1/1:sar={}/{}", m_videoDecCtx->width,
-                    m_videoDecCtx->height, (int) m_videoDecCtx->pix_fmt,
+                    m_videoDecCtx->height, (int)m_videoDecCtx->pix_fmt,
                     m_videoDecCtx->time_base.num ? m_videoDecCtx->time_base.num : 1,
                     m_videoDecCtx->time_base.den, m_videoDecCtx->sample_aspect_ratio.num,
                     m_videoDecCtx->sample_aspect_ratio.den);
@@ -613,7 +618,7 @@ std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view input, std:
     auto decoder = std::make_unique<BaseDecoderLibAV>();
 
     if (static bool registered = false; !registered) {
-#if LIBAVCODEC_VERSION_MAJOR < 59
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 10, 100)
         avcodec_register_all();
         av_register_all();
 #endif
@@ -679,21 +684,21 @@ namespace {
             case AV_PIX_FMT_YUVJ420P:
             case AV_PIX_FMT_YUV420P: return LCEVC_I420_8;
             case AV_PIX_FMT_YUV420P10LE: return LCEVC_I420_10_LE;
-#if LIBAVCODEC_VERSION_MAJOR >= 59
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(58, 10, 100)
             case AV_PIX_FMT_YUV420P12LE: return LCEVC_I420_12_LE;
             case AV_PIX_FMT_YUV420P14LE: return LCEVC_I420_14_LE;
             case AV_PIX_FMT_YUV420P16LE: return LCEVC_I420_16_LE;
 #endif
             case AV_PIX_FMT_YUV422P: return LCEVC_I422_8;
             case AV_PIX_FMT_YUV422P10LE: return LCEVC_I422_10_LE;
-#if LIBAVCODEC_VERSION_MAJOR >= 59
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(58, 10, 100)
             case AV_PIX_FMT_YUV422P12LE: return LCEVC_I422_12_LE;
             case AV_PIX_FMT_YUV422P14LE: return LCEVC_I422_14_LE;
             case AV_PIX_FMT_YUV422P16LE: return LCEVC_I422_16_LE;
 #endif
             case AV_PIX_FMT_YUV444P: return LCEVC_I444_8;
             case AV_PIX_FMT_YUV444P10LE: return LCEVC_I444_10_LE;
-#if LIBAVCODEC_VERSION_MAJOR >= 59
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(58, 10, 100)
             case AV_PIX_FMT_YUV444P12LE: return LCEVC_I444_12_LE;
             case AV_PIX_FMT_YUV444P14LE: return LCEVC_I444_14_LE;
             case AV_PIX_FMT_YUV444P16LE: return LCEVC_I444_16_LE;
@@ -707,14 +712,15 @@ namespace {
             case AV_PIX_FMT_ARGB: return LCEVC_ARGB_8;
             case AV_PIX_FMT_ABGR: return LCEVC_ABGR_8;
             case AV_PIX_FMT_GRAY8: return LCEVC_GRAY_8;
-#if LIBAVCODEC_VERSION_MAJOR >= 59
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(58, 10, 100)
             case AV_PIX_FMT_GRAY10LE: return LCEVC_GRAY_10_LE;
             case AV_PIX_FMT_GRAY12LE: return LCEVC_GRAY_12_LE;
             case AV_PIX_FMT_GRAY14LE: return LCEVC_GRAY_14_LE;
 #endif
             case AV_PIX_FMT_GRAY16LE: return LCEVC_GRAY_16_LE;
             default: {
-                fmt::print("base_decoder_libav: Couldn't deduce format from AVPixelFormat ({}).\n", (int) fmt);
+                fmt::print("base_decoder_libav: Couldn't deduce format from AVPixelFormat ({}).\n",
+                           (int)fmt);
                 return LCEVC_ColorFormat_Unknown;
             }
         }
@@ -787,7 +793,7 @@ namespace {
         switch (avCodecID) {
             case AV_CODEC_ID_H264: return LCEVC_CodecType_H264;
             case AV_CODEC_ID_HEVC: return LCEVC_CodecType_H265;
-#if LIBAVCODEC_VERSION_MAJOR >= 59
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(58, 10, 100)
             case AV_CODEC_ID_H266: return LCEVC_CodecType_H266;
 #endif
             default: return LCEVC_CodecType_Unknown;

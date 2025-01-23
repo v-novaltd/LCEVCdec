@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 /** \file PerseusDecoder.h
  * C API for Perseus Decoder
@@ -53,7 +56,7 @@ extern "C"
  *
  * The number of planes that a perseus_image can have. This does not include alpha, since none of
  * the formats in perseus_colourspace have an alpha plane.
- */	
+ */
 #define VN_IMAGE_NUM_PLANES 3
 
 /*!
@@ -300,7 +303,7 @@ extern "C"
     } lcevc_tonemapper_config;
 
     /*!
-     * \brief LCEVC HDR info. This contains additional info regarding HDR configuration that may be 
+     * \brief LCEVC HDR info. This contains additional info regarding HDR configuration that may be
      *        signaled in the LCEVC bitstream.
      */
     typedef struct lcevc_hdr_info
@@ -382,7 +385,7 @@ extern "C"
     /*!
      * \brief LCEVC conformance window. This contains the conformance window scaled
      *        accordingly for each plane based upon the `colourspace` setting in
-     *        perseus_decoder_stream. More information on what these parameters 
+     *        perseus_decoder_stream. More information on what these parameters
      *        mean can be found in the LCEVC standard documentation.
      */
     typedef struct lcevc_conformance_window
@@ -457,9 +460,10 @@ extern "C"
     typedef enum perseus_decoder_log_type
     {
         PSS_LT_ERROR,
-        PSS_LT_INFO,
         PSS_LT_WARNING,
+        PSS_LT_INFO,
         PSS_LT_DEBUG,
+        PSS_LT_VERBOSE,
         PSS_LT_UNKNOWN
     } perseus_decoder_log_type;
 
@@ -490,11 +494,10 @@ extern "C"
         uint16_t              logo_overlay_delay;         /**< Specify number of frames before displaying overlay>**/
         const char*           dump_path;                  /**< Optional folder path where debug data can be written to. */
         uint8_t               dump_surfaces;              /**< If non-zero then surfaces at key points will be dumped to file. */
-        uint8_t               use_old_code_lengths;       /**< If non-zero then the compressed coefficients are processed using the "old" code-lengths logic (do not use unless you know exactly what this means). */
+        uint8_t               force_bitstream_version;    /**< Set the bitstream version. If unset, version will be read from stream (if present), or default to the current version. */
         perseus_decoder_log_callback log_callback;        /**< Optional pointer to receive codec generated log messages */
         void*                        log_userdata;        /**< Pointer to user data that will be pass into the first argument of `log_callback` */
         uint8_t                      use_parallel_decode; /**< If non-zero then `decode_base` and `decode_high` will perform decoding in parallel. */
-        const char*                  debug_internal_stats_path; /**< Path to file to write internal stats to. */
     } perseus_decoder_config;
 
 #define LOGO_OVERLAY_POSITION_X_DEFAULT 50
@@ -611,7 +614,7 @@ extern "C"
  * \returns 0 on success, error number otherwise */
     VN_DEC_CORE_API int perseus_decoder_close(perseus_decoder p);
 
-/*! \brief Deserialises the current frame of perseus data's global 
+/*! \brief Deserialises the current frame of perseus data's global
  * config block and write the data to config if a global config block is present this frame
  *
  * \param[in] p the decoder
@@ -653,7 +656,7 @@ extern "C"
  * \param[in] p the decoder
  * \param[in] full_image pointer to output buffer (colour space must match base_image)
  * \param[out] base_image pointer to base image (colour space must match full_image)
- * \param[in] base_loq index of the base image, this is used for determining the scaling behaviour 
+ * \param[in] base_loq index of the base image, this is used for determining the scaling behaviour
  *            based upon the streaming containing a level1 scaling mode.
  * \returns 0 on success, error number otherwise */
     VN_DEC_CORE_API int perseus_decoder_upscale(perseus_decoder const p, const perseus_image* full_image,
@@ -776,33 +779,33 @@ extern "C"
  * \returns 0 on success, error number otherwise */
     VN_DEC_CORE_API int perseus_decoder_apply_ext_residuals(perseus_decoder const p, const perseus_image* input,
                                                             perseus_image* residuals, int plane_idx,
-                                                            perseus_loq_index loq_idx);    
+                                                            perseus_loq_index loq_idx);
 
 /*! \brief Return the number of planes for which there are residuals.
- * 
+ *
  *  Generally, there are residuals in the luma plane. However, it is also possible to have chroma
  *  residuals, in which case there will be 3 planes of residuals, rather than just 1. This is
  *  needed if you plan to apply residuals yourself.
- * 
+ *
  * \param[in] decoder  The decoder
  * \return             The number of planes for which the current stream has residuals. */
     VN_DEC_CORE_API int perseus_decoder_get_num_residual_planes(perseus_decoder const decoder);
 
 /*! \brief Return the number of tiles into which the current stream is split.
- * 
+ *
  *  Tiles are independent units of encoding and decoding within the image. Different planes and
  *  LOQs may have different numbers of tiles. They are normally not exposed in the API. However,
  *  if you're applying command buffers yourself, you'll need to apply command buffers on a per-
  *  tile basis.
- * 
+ *
  * \param[in] decoder    The decoder
  * \param[in] plane_idx  The plane whose tile count you want.
  * \param[in] loq_idx    The LOQ for which you want the tile count.
  * \return               The number of tiles that the current stream is split into. */
     VN_DEC_CORE_API int perseus_decoder_get_num_tiles(perseus_decoder const decoder, int plane_idx,
                                                       perseus_loq_index loq_idx);
-    
-    
+
+
 /*! \brief Return the number of threads used to apply command buffers (and therefore the maximum
  *         number of entry points).
  * \param[in]     decoder        the decoder
@@ -810,17 +813,17 @@ extern "C"
     VN_DEC_CORE_API int perseus_decoder_get_apply_cmd_buffer_threads(perseus_decoder decoder);
 
 /*! \brief Retrieve the command buffer for a given id and LOQ.
- * 
+ *
  * This function can be called immediately after perseus_decoder_decode_base()
  * (for LOQ-1) or perseus_decoder_decode_high() (for LOQ-0) to retrieve the
  * relevant command buffers for that LOQ.
- * 
- * \note It is only valid to call this function on a decoder that has been 
+ *
+ * \note It is only valid to call this function on a decoder that has been
  *       configured with `generate_cmdbuffers`.
- * 
- * \note The lifetime of the buffer returned is only guaranteed until the 
+ *
+ * \note The lifetime of the buffer returned is only guaranteed until the
  *       next call either perseus_decoder_decode_base() or perseus_decoder_decode_high().
- * 
+ *
  * \param[in]     decoder        the decoder
  * \param[in]     loq_idx        the LOQ for the commands to retrieve.
  * \param[in]     plane_idx      the plane to retrieve commands for.
@@ -829,7 +832,7 @@ extern "C"
  * \param[in/out] entrypoints    a pointer to the start of an array of perseus_cmdbuffer_entrypoints
  * \param[in]     numEntrypoints the size of the passed `entrypoints` array */
     VN_DEC_CORE_API int perseus_decoder_get_cmd_buffer(perseus_decoder decoder,
-        perseus_loq_index loq_idx, int plane_idx, int tile_idx, perseus_cmdbuffer* buffer, 
+        perseus_loq_index loq_idx, int plane_idx, int tile_idx, perseus_cmdbuffer* buffer,
         perseus_cmdbuffer_entrypoint* entrypoints, int numEntrypoints);
 
     VN_DEC_CORE_API uint8_t perseus_get_bitdepth(perseus_bitdepth depth);

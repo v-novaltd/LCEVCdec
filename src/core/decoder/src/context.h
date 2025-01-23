@@ -1,26 +1,29 @@
 /* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef VN_DEC_CORE_CONTEXT_H_
 #define VN_DEC_CORE_CONTEXT_H_
 
-#include "common/cmdbuffer.h"
-#include "common/log.h"
-#include "common/profiler.h"
 #include "common/threading.h"
 #include "common/types.h"
 #include "decode/dequant.h"
 #include "decode/deserialiser.h"
 #include "LCEVC/PerseusDecoder.h"
 #include "surface/surface.h"
+#include "surface/upscale.h"
+
+#include <stdint.h>
 
 /*------------------------------------------------------------------------------*/
 
@@ -30,7 +33,6 @@ typedef struct Sharpen* Sharpen_t;
 typedef struct Time* Time_t;
 typedef struct DecodeSerial* DecodeSerial_t;
 typedef struct DecodeParallel* DecodeParallel_t;
-typedef struct Stats* Stats_t;
 
 /*------------------------------------------------------------------------------*/
 
@@ -57,6 +59,16 @@ typedef struct PlaneSurfaces
     Surface_t loq2UpsampleTarget; /**< Internal target to upscale from LOQ-2 to LOQ-1. */
 } PlaneSurfaces_t;
 
+typedef struct LogoOverlay
+{
+    uint32_t count;
+    uint16_t positionX;
+    uint16_t positionY;
+    uint16_t delay;
+    bool enabled;
+
+} LogoOverlay_t;
+
 /*! \brief Primary decoder "object", contains all decoding state - responsible for many sins. */
 typedef struct Context
 {
@@ -65,9 +77,7 @@ typedef struct Context
     ThreadManager_t threadManager;
     Memory_t memory;
     Logger_t log;
-    ProfilerState_t* profiler;
     Time_t time;
-    Stats_t stats;
 
     /* The following members should be hidden from modules, only accessible in
      * the API layer - modules should take a handle as input if they're dependent
@@ -98,13 +108,9 @@ typedef struct Context
     bool convertS8;
     bool disableTemporalApply;
     bool useApproximatePA;
-    bool useLogoOverlay;
-    bool useOldCodeLengths;
+    uint8_t forceBitstreamVersion;
 
-    uint16_t logoOverlayPositionX;
-    uint16_t logoOverlayPositionY;
-    uint16_t logoOverlayDelay;
-    uint32_t logoOverlayCount;
+    LogoOverlay_t logoOverlay;
 
     perseus_pipeline_mode pipelineMode;
 

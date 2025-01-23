@@ -9,7 +9,7 @@ Builds are expected to be 'out of source' — an empty build directory is create
 For these instructions, this 'out of source' build directory is specified as `_build` in the example scripts below. The exact name or location is not important, and can be chosen as appropriate. Note, however, that you may want to use different names for different targets (e.g. `build_windows`, `build_android`).
 
 Command line examples are given assuming that from the sample code directory, where this `README.md` file lives.
- 
+
 # Dependencies
 
 ## Tools
@@ -116,7 +116,7 @@ Identical to the above, but with `-G Ninja`.
 ```shell
     mkdir _build
     cd _build
-    conan install -s build_type=Release .. 
+    conan install -s build_type=Release ..
     cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ..
     cmake --build .
 ```

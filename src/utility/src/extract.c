@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 /* This is deliberately written as a C module to allow use by various C-only integrations - it
  * is logic that we really don't want being reimplemented with subtle bugs.
@@ -21,6 +24,11 @@
 /* Number of different NAL types to search for in a block of ES data
  */
 #define kNumNalTypes 3
+
+/* Number of bytes of the length prefix, as in ISO/IEC 14496-15
+ * lengthSizeMinusOne (+1) from the track sample entry DecoderConfigurationRecord
+ */
+#define kLengthPrefixSize 4
 
 /* nalu types for SEI
  */
@@ -146,7 +154,7 @@ static uint32_t unencapsulate(uint32_t zeros, uint8_t* dst, const uint8_t* src, 
     return (uint32_t)(dstPtr - dst);
 }
 
-static uint32_t getNalUnitType(ExtractState* state, const uint8_t* nalUnitHeader)
+static uint8_t getNalUnitType(const ExtractState* state, const uint8_t* nalUnitHeader)
 {
     switch (state->codecType) {
         case LCEVC_CodecType_H264:
@@ -159,7 +167,7 @@ static uint32_t getNalUnitType(ExtractState* state, const uint8_t* nalUnitHeader
     }
 }
 
-static uint8_t getNalUnitHeaderSize(ExtractState* state, uint8_t nalType)
+static uint8_t getNalUnitHeaderSize(const ExtractState* state, uint8_t nalType)
 {
     return (state->codecType == LCEVC_CodecType_H266 || state->codecType == LCEVC_CodecType_H265 ||
             (state->codecType == LCEVC_CodecType_H264 &&
@@ -213,28 +221,26 @@ static bool findNextNalUnitAnnexB(ExtractState* state, NalUnitSpan* nalSpan)
  */
 static bool findNextNalUnitLengthPrefix(ExtractState* state, NalUnitSpan* nalSpan)
 {
-    const uint8_t kStartPrefixLen = 4;
-
     /* Initialise un-found state.
      */
     nalSpan->data = NULL;
 
     while (state->offset < state->size && (nalSpan->data == NULL)) {
-        nalSpan->size = kStartPrefixLen + (((uint32_t)state->data[state->offset] << 24) |
-                                           ((uint32_t)state->data[state->offset + 1] << 16) |
-                                           ((uint32_t)state->data[state->offset + 2] << 8) |
-                                           state->data[state->offset + 3]);
+        nalSpan->size = kLengthPrefixSize + (((uint32_t)state->data[state->offset] << 24) |
+                                             ((uint32_t)state->data[state->offset + 1] << 16) |
+                                             ((uint32_t)state->data[state->offset + 2] << 8) |
+                                             state->data[state->offset + 3]);
 
-        uint8_t nalType = getNalUnitType(state, &state->data[state->offset + kStartPrefixLen]);
+        uint8_t nalType = getNalUnitType(state, state->data + state->offset + kLengthPrefixSize);
         if (memchr(state->nalTypes, nalType, kNumNalTypes)) {
             nalSpan->type = nalType;
             nalSpan->data = state->data + state->offset;
-            nalSpan->payload = nalSpan->data + kStartPrefixLen + getNalUnitHeaderSize(state, nalType);
+            nalSpan->payload = nalSpan->data + kLengthPrefixSize + getNalUnitHeaderSize(state, nalType);
         }
         state->offset += nalSpan->size;
     }
 
-    return (state->offset < state->size);
+    return (nalSpan->data != NULL);
 }
 
 /* Look for the next NAL unit in data
@@ -267,6 +273,18 @@ static bool removeNalUnit(ExtractState* state, NalUnitSpan* nalSpan)
     state->offset -= nalSpan->size;
     state->size -= nalSpan->size;
     return true;
+}
+
+/* Should the format be Length Prefix change the prefix bytes to 4 byte Start Code Prefix
+ */
+static void maybeConvertLengthPrefixToAnnexB(uint8_t* data, uint32_t dataSize, LCEVC_NALFormat nalFormat)
+{
+    if (nalFormat == LCEVC_NALFormat_LengthPrefix && data != NULL && dataSize >= kLengthPrefixSize) {
+        data[0] = 0;
+        data[1] = 0;
+        data[2] = 0;
+        data[3] = 1;
+    }
 }
 
 /* Common work for both exported 'extract' functions
@@ -352,6 +370,7 @@ static int32_t extractEnhancementFromNAL(uint8_t* data, uint32_t dataSize,
                 return -1;
             }
 
+            maybeConvertLengthPrefixToAnnexB(nalSpan.data, nalSpan.size, nalFormat);
             memcpy(outputData + outputOffset, nalSpan.data, nalSpan.size);
             outputOffset += nalSpan.size;
         }

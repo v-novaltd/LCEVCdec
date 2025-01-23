@@ -1,23 +1,30 @@
 /* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "event_manager.h"
 
 #include "handle.h"
-#include "log.h"
-#include "threading.h"
+#include "interface.h"
 
 #include <LCEVC/lcevc_dec.h>
+#include <LCEVC/utility/threading.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <exception>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -46,29 +53,33 @@ void EventManager::initialise(const std::vector<int32_t>& enabledEvents)
 {
     // No failure case, because we've already validated the events in DecoderConfig::validate. To
     // reiterate, that validation is: eventTypes are POSITIVE & SMALL. Internally, they are uint8_t
-    for (int32_t eventType : enabledEvents) {
+    for (const int32_t eventType : enabledEvents) {
         m_eventMask = m_eventMask | (1 << eventType);
     }
 
+    m_threadExists = true;
     m_eventThread = std::thread(&EventManager::eventLoop, this);
 }
 
 void EventManager::release()
 {
+    // Prevent double-release
+    if (!m_threadExists) {
+        return;
+    }
+
     // Send ourselves a flushing event, to force any prior events out of the queue and break out
     // of our loop. Note that catchExceptions is true, because this is called in a destructor.
     triggerEvent(kFlushEvent, true);
 
-    // Prevent double-release:
-    if (m_eventThread.joinable()) {
-        m_eventThread.join();
-        m_eventThread = std::thread();
-    }
+    m_eventThread.join();
+    m_eventThread = std::thread();
+    m_threadExists = false;
 }
 
 void EventManager::triggerEvent(Event event, bool catchExceptions)
 {
-    std::lock_guard<std::mutex> lock(m_eventQueueMutex);
+    const std::lock_guard<std::mutex> lock(m_eventQueueMutex);
 
     if (isEventEnabled(event.eventType) || event.isFlush()) {
         try {

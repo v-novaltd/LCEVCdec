@@ -1,13 +1,16 @@
 /* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef VN_DEC_CORE_LOG_H_
 #define VN_DEC_CORE_LOG_H_
@@ -27,9 +30,10 @@ typedef struct Logger* Logger_t;
 typedef enum LogType
 {
     LTError,
-    LTInfo,
     LTWarning,
+    LTInfo,
     LTDebug,
+    LTVerbose,
     LTUnknown
 } LogType_t;
 
@@ -58,6 +62,7 @@ void logPrint(Logger_t logger, LogType_t type, const char* fn, uint32_t line, co
     logPrint(logger, type, __FILE__, __LINE__, msg, ##__VA_ARGS__)
 
 #define VN_LOG(logger, type, msg, ...) VN_LOG_OUTPUT(logger, type, msg, ##__VA_ARGS__)
+#define VN_VERBOSE(logger, msg, ...) VN_LOG_OUTPUT(logger, LTVerbose, msg, ##__VA_ARGS__)
 #define VN_DEBUG(logger, msg, ...) VN_LOG_OUTPUT(logger, LTDebug, msg, ##__VA_ARGS__)
 #define VN_INFO(logger, msg, ...) VN_LOG_OUTPUT(logger, LTInfo, msg, ##__VA_ARGS__)
 #define VN_WARNING(logger, msg, ...) VN_LOG_OUTPUT(logger, LTWarning, msg, ##__VA_ARGS__)

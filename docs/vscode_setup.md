@@ -22,10 +22,10 @@ Possibly see: [here](language_server.md) (first instruction, ignore the clangd o
 
 Clang Tidy will only run if there are no errors present in the file you're editing. To get this to work, have to configure cmake with -DCMAKE_EXPORT_COMPILE_COMMANDS=1, which will cause a compilation database to be created when building. This is easier building using Ninja on Windows than MSVC build tools; just add the flag to the `cmake -G Ninja ..` commandline, and build the project once with `cmake --build .` (For more information, see [Windows](building_windows.md) or [Linux](building_linux.md)).
 
-Once you've built the project, you should find a `compile_commands.json` in the root of the build directory. Point this at VSCode in your `c_cpp_properties.json`, by adding a line like the following to your C++ configuration. For example: 
- `"compileCommands": "C:\\Users\\lucy.firman\\build\\lcevc_dec\\build_windows\\compile_commands.json"`. An excerpt of my c_cpp_properties.json is attached below; containing a new Configuration for "lcevc_dec". To add a new Configuration, you can open either "C/C++: Edit Configurations (JSON)", or - if you're not down to clown in JSON town - "C/C++: Edit Configurations (UI)". In the UI, Compile Commands is under 'Advanced' at the bottom. Once you've created a new Configuration, you can select this by opening the Command Palette (With a project file open) and heading to "C/C++: Select a Configuration..." and hitting Enter and selecting the new Configuration you just added. 
+Once you've built the project, you should find a `compile_commands.json` in the root of the build directory. Point this at VSCode in your `c_cpp_properties.json`, by adding a line like the following to your C++ configuration. For example:
+ `"compileCommands": "C:\\Users\\lucy.firman\\build\\lcevc_dec\\build_windows\\compile_commands.json"`. An excerpt of my c_cpp_properties.json is attached below; containing a new Configuration for "lcevc_dec". To add a new Configuration, you can open either "C/C++: Edit Configurations (JSON)", or - if you're not down to clown in JSON town - "C/C++: Edit Configurations (UI)". In the UI, Compile Commands is under 'Advanced' at the bottom. Once you've created a new Configuration, you can select this by opening the Command Palette (With a project file open) and heading to "C/C++: Select a Configuration..." and hitting Enter and selecting the new Configuration you just added.
 
-This should make VSCode pick up all required dependencies and defines, which will allow clang-tidy to run. 
+This should make VSCode pick up all required dependencies and defines, which will allow clang-tidy to run.
 
 
 ### Running
@@ -96,8 +96,8 @@ It's possible to configure Tasks in VSCode to run arbitrary commandline tasks. W
             },
             "args": ["C:\\Program^ Files^ ^(x86^)\\Microsoft^ Visual^ Studio\\2019\\Professional\\VC\\Auxiliary\\Build\\vcvars64.bat && cmake --install . --prefix=_install"],
         }
-    
+
     ]
   }
   ```
-  replacing paths where appropriate. This will add two Tasks named "Build All" and "Install" to your task list, that you can execute from Command Palette > Tasks: Run Task. These will just build for the current platform. This could possibly use some refinement as the build process evolves. 
+  replacing paths where appropriate. This will add two Tasks named "Build All" and "Install" to your task list, that you can execute from Command Palette > Tasks: Run Task. These will just build for the current platform. This could possibly use some refinement as the build process evolves.

@@ -1,18 +1,24 @@
 /* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include "common/cmdbuffer.h"
 #include "common/dither.h"
+#include "common/log.h"
 #include "common/memory.h"
+#include "common/platform.h"
 #include "common/simd.h"
-#include "common/stats.h"
+#include "common/threading.h"
 #include "common/time.h"
 #include "common/types.h"
 #include "context.h"
@@ -21,8 +27,10 @@
 #include "decode/decode_serial.h"
 #include "decode/deserialiser.h"
 #include "LCEVC/PerseusDecoder.h"
+#include "lcevc_config.h"
 #include "surface/blit.h"
 #include "surface/sharpen.h"
+#include "surface/surface.h"
 #include "surface/upscale.h"
 
 #if VN_CORE_FEATURE(OVERLAY_IMAGE)
@@ -30,6 +38,9 @@
 #endif
 
 #include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #if VN_CORE_FEATURE(EMSCRIPTEN_TRACING)
 #include <emscripten/trace.h>
@@ -39,7 +50,7 @@
 
 typedef struct perseus_decoder_impl
 {
-    Context_t* m_context;
+    Context_t* context;
 } perseus_decoder_impl;
 
 /*-----------------------------------------------------------------------------*/
@@ -68,17 +79,17 @@ static inline void surfacesFromImage(Context_t* ctx, LOQIndex_t loq, const perse
 
     for (uint32_t planeIndex = 0; planeIndex < planeCount && planeIndex < RCMaxPlanes; ++planeIndex) {
         /* Plane 0 NV12 from external image is not really interleaved. */
-        const Interleaving_t plane_ilv = ((ilv == ILNV12) && (planeIndex == 0)) ? ILNone : ilv;
+        const Interleaving_t planeIlv = ((ilv == ILNV12) && (planeIndex == 0)) ? ILNone : ilv;
 
         surfaceIdle(&surfaces[planeIndex]);
 
         /* Set-up, even if there is no destination surface (that will be handled later) */
-        uint32_t width;
-        uint32_t height;
+        uint32_t width = 0;
+        uint32_t height = 0;
 
         deserialiseCalculateSurfaceProperties(&ctx->deserialised, loq, planeIndex, &width, &height);
         surfaceInitialiseExt(&surfaces[planeIndex], image->plane[planeIndex], fpType, width, height,
-                             image->stride[planeIndex], plane_ilv);
+                             image->stride[planeIndex], planeIlv);
     }
 }
 
@@ -158,6 +169,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_config_init(perseus_decoder_conf
     cfg->generate_cmdbuffers = 0;
     cfg->apply_cmdbuffers_internal = false;
     cfg->apply_cmdbuffers_threads = 1;
+    cfg->force_bitstream_version = BitstreamVersionInvalid;
 #if VN_CORE_FEATURE(OVERLAY_IMAGE)
     cfg->logo_overlay_position_x = LOGO_OVERLAY_POSITION_X_DEFAULT;
     cfg->logo_overlay_position_y = LOGO_OVERLAY_POSITION_Y_DEFAULT;
@@ -229,7 +241,10 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_open(perseus_decoder* pp,
     ctx->disableTemporalApply = false;
     VN_CHECK(strcpyDeep(memory, cfg->debug_config_path, &ctx->debugConfigPath));
     ctx->useApproximatePA = cfg->use_approximate_pa;
-    ctx->useOldCodeLengths = cfg->use_old_code_lengths;
+    ctx->forceBitstreamVersion = cfg->force_bitstream_version;
+    // Can be "invalid" to indicate unset, but must be an actual enum value.
+    assert(ctx->forceBitstreamVersion >= BitstreamVersionInitial &&
+           ctx->forceBitstreamVersion <= BitstreamVersionInvalid);
 
 #if VN_CORE_FEATURE(OVERLAY_IMAGE)
     if (cfg->logo_overlay_delay > VN_OVERLAY_MAX_DELAY()) {
@@ -245,15 +260,15 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_open(perseus_decoder* pp,
     if (!cfg->logo_overlay_enable) {
         VN_INFO(log, "Disabling the overlay is not supported on this version", VN_OVERLAY_MAX_DELAY());
     }
-    ctx->useLogoOverlay = true;
+    ctx->logoOverlay.enabled = true;
 #else
-    ctx->useLogoOverlay = cfg->logo_overlay_enable;
+    ctx->logoOverlay.enabled = cfg->logo_overlay_enable;
 #endif
 
-    ctx->logoOverlayPositionX = cfg->logo_overlay_position_x;
-    ctx->logoOverlayPositionY = cfg->logo_overlay_position_y;
-    ctx->logoOverlayDelay = cfg->logo_overlay_delay;
-    ctx->logoOverlayCount = 0;
+    ctx->logoOverlay.positionX = cfg->logo_overlay_position_x;
+    ctx->logoOverlay.positionY = cfg->logo_overlay_position_y;
+    ctx->logoOverlay.delay = cfg->logo_overlay_delay;
+    ctx->logoOverlay.count = 0;
 #endif
 
     VN_CHECK(strcpyDeep(memory, cfg->dump_path, &ctx->dumpPath));
@@ -267,25 +282,23 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_open(perseus_decoder* pp,
 
     contextPlaneSurfacesInitialise(ctx);
 
+    ctx->cpuFeatures = CAFNone;
     if (cfg->simd_type == PSS_SIMD_AUTO) {
         ctx->cpuFeatures = detectSupportedSIMDFeatures();
-    } else {
-        ctx->cpuFeatures = CAFNone;
     }
-
-    profilerInitialise(&ctx->profiler, memory, log);
 
     uint32_t threadCount =
         (cfg->num_worker_threads == -1) ? threadingGetNumCores() : cfg->num_worker_threads;
 
-    VN_CHECK(threadingInitialise(memory, log, ctx->profiler, &ctx->threadManager, threadCount));
+    VN_CHECK(threadingInitialise(memory, log, &ctx->threadManager, threadCount));
     if (ctx->dumpSurfaces) {
         VN_CHECK(surfaceDumpCacheInitialise(memory, log, &ctx->surfaceDumpCache));
     }
 
-    deserialiseInitialise(memory, &ctx->deserialised);
+    deserialiseInitialise(memory, &ctx->deserialised, ctx->forceBitstreamVersion);
     ctx->deserialised.globalConfigSet = false;
 
+    ctx->applyCmdBufferThreads = 1;
     ctx->generateCmdBuffers = cfg->generate_cmdbuffers;
     ctx->applyCmdBuffers = ctx->generateCmdBuffers && cfg->apply_cmdbuffers_internal;
     if (ctx->generateCmdBuffers) {
@@ -293,48 +306,31 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_open(perseus_decoder* pp,
             (cfg->apply_cmdbuffers_threads < 0)
                 ? (uint16_t)clampS32(threadingGetNumCores(), 1, MaxCmdBufferEntryPoints)
                 : (uint16_t)cfg->apply_cmdbuffers_threads;
-        if (ctx->applyCmdBufferThreads > MaxCmdBufferEntryPoints) {
-            VN_ERROR(log, "invalid configuration: requested cmdBufferThreads %d is too high, max 16\n",
-                     ctx->applyCmdBufferThreads);
-            return -1;
-        }
+    }
+    if (ctx->applyCmdBufferThreads > MaxCmdBufferEntryPoints) {
+        VN_ERROR(log, "invalid configuration: requested cmdBufferThreads %d is too high, max 16\n",
+                 ctx->applyCmdBufferThreads);
+        return -1;
+    }
+
+    bool valid = ditherInitialize(memory, &ctx->dither, cfg->dither_seed, !cfg->disable_dithering,
+                                  cfg->dither_override_strength) &&
+                 sharpenInitialize(&ctx->threadManager, memory, log, &ctx->sharpen, cfg->s_strength) &&
+                 timeInitialize(memory, &ctx->time);
+    if (!valid) {
+        return -1;
+    }
+
+    ctx->useParallelDecode = (bool)(cfg->use_parallel_decode);
+    if (ctx->useParallelDecode) {
+        valid = decodeParallelInitialize(memory, ctx->decodeParallel);
     } else {
-        ctx->applyCmdBufferThreads = 1;
+        valid = decodeSerialInitialize(memory, ctx->decodeSerial);
     }
 
-    /* @todo: Proper clean-up. */
-
-    if (!ditherInitialize(memory, &ctx->dither, cfg->dither_seed, !cfg->disable_dithering,
-                          cfg->dither_override_strength)) {
+    if (!valid) {
         return -1;
     }
-
-    if (!sharpenInitialize(&ctx->threadManager, memory, log, &ctx->sharpen, cfg->s_strength)) {
-        return -1;
-    }
-
-    if (!timeInitialize(memory, &ctx->time)) {
-        return -1;
-    }
-
-    ctx->useParallelDecode = (cfg->use_parallel_decode == 0) ? false : true;
-
-    if (!ctx->useParallelDecode && !decodeSerialInitialize(memory, ctx->decodeSerial)) {
-        return -1;
-    }
-
-    if (ctx->useParallelDecode && !decodeParallelInitialize(memory, ctx->decodeParallel)) {
-        return -1;
-    }
-
-#if VN_CORE_FEATURE(STATS)
-    const StatsConfig_t statsConfig = {.enabled = (cfg->debug_internal_stats_path == NULL) ? false : true,
-                                       .outputPath = cfg->debug_internal_stats_path,
-                                       .time = ctx->time};
-    if (!statsInitialize(memory, &ctx->stats, &statsConfig)) {
-        return -1;
-    }
-#endif
 
     /* VUI non-zero defaults. */
     ctx->vuiInfo.video_format = PSS_VUI_VF_UNSPECIFIED;
@@ -344,7 +340,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_open(perseus_decoder* pp,
 
     ctx->memory = memory;
     ctx->log = log;
-    instance->m_context = ctx;
+    instance->context = ctx;
 
     *pp = instance;
 
@@ -353,7 +349,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_open(perseus_decoder* pp,
 
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_close(perseus_decoder p)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -375,10 +371,6 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_close(perseus_decoder p)
 
     contextPlaneSurfacesRelease(ctx, ctx->memory);
     threadingRelease(&ctx->threadManager);
-    profilerRelease(&ctx->profiler, ctx->memory);
-#if VN_CORE_FEATURE(STATS)
-    statsRelease(ctx->stats);
-#endif
 
     Memory_t memory = ctx->memory;
     Logger_t log = ctx->log;
@@ -388,7 +380,6 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_close(perseus_decoder p)
     VN_FREE(memory, ctx);
     VN_FREE(memory, p);
 
-    memoryReport(memory, log);
     logRelease(log);
     memoryRelease(memory);
 
@@ -399,7 +390,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_config_deserialise(perseus_decod
                                                                    const uint8_t* perseus, size_t perseusLen,
                                                                    perseus_global_config* config)
 {
-    Context_t* const ctx = p ? p->m_context : NULL;
+    Context_t* const ctx = p ? p->context : NULL;
     DeserialisedData_t deserialised = {0};
     int32_t res;
 
@@ -417,7 +408,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_config_deserialise(perseus_decod
         return -1;
     }
 
-    deserialiseInitialise(ctx->memory, &deserialised);
+    deserialiseInitialise(ctx->memory, &deserialised, ctx->forceBitstreamVersion);
 
     memset(config, 0, sizeof(perseus_global_config));
 
@@ -439,14 +430,14 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_config_deserialise(perseus_decod
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_parse(perseus_decoder const p, const uint8_t* perseus,
                                                       size_t perseusLen, perseus_decoder_stream* stm)
 {
-    Context_t* const ctx = p ? p->m_context : NULL;
+    Context_t* const ctx = p ? p->context : NULL;
     int32_t res = 0;
 
     if (!ctx) {
         return -1;
     }
 
-    VN_PROFILE_FUNCTION();
+    ctx->started = 1;
 
     if (stm != NULL) {
         memset(stm, 0, sizeof(perseus_decoder_stream));
@@ -496,55 +487,42 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_parse(perseus_decoder const p, c
         PlaneSurfaces_t* plane = &ctx->planes[planeIndex];
 
         if (ctx->generateSurfaces) {
-            VN_PROFILE_START("Reset base-pixels");
-
             if (!ctx->generateCmdBuffers || ctx->applyCmdBuffers) {
                 surfaceZero(ctx->memory, &plane->basePixels);
                 surfaceZero(ctx->memory, &plane->basePixelsU8);
             }
-
-            VN_PROFILE_STOP();
         }
 
         /* Clear temporal buffer (currently only LOQ0) if required. */
         if (clearTemporal) {
-            VN_PROFILE_START("Reset temporal buffer");
-
             if (!ctx->generateCmdBuffers || ctx->applyCmdBuffers) {
                 for (int32_t i = 0; i < 2; ++i) {
                     surfaceZero(ctx->memory, &plane->temporalBuffer[i]);
                 }
                 surfaceZero(ctx->memory, &plane->temporalBufferU8);
             }
-
-            VN_PROFILE_STOP();
         }
     }
-
-    ctx->started = 1;
 
     if (stm != NULL) {
         perseus_decoder_get_stream(p, stm);
     }
 
-    if (!ditherRegenerate(ctx->dither, data->ditherStrength, data->ditherType)) {
-        VN_PROFILE_STOP();
+    if (!ditherRegenerate(ctx->dither, data->ditherStrength, data->ditherType, ctx->pipelineMode,
+                          ctx->inputDepth[0])) {
         return -1;
     }
 
     if (!sharpenSet(ctx->sharpen, data->sharpenType, data->sharpenStrength)) {
-        VN_PROFILE_STOP();
         return -1;
     }
-
-    VN_PROFILE_STOP();
 
     return 0;
 }
 
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_get_stream(perseus_decoder p, perseus_decoder_stream* stm)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -587,7 +565,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_get_stream(perseus_decoder p, pe
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_base(perseus_decoder const p,
                                                             const perseus_image* base)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -624,8 +602,6 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_base(perseus_decoder cons
         return -1;
     }
 
-    VN_PROFILE_FUNCTION();
-
     /* Convert from external API to internal. */
     Surface_t baseSurfaces[3] = {{0}};
     surfacesFromImage(ctx, LOQ1, base, baseSurfaces, 3);
@@ -648,8 +624,6 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_base(perseus_decoder cons
                     planeIndex);
     }
 
-    FrameStats_t frameStats = statsNewFrame(ctx->stats);
-
     if (ctx->useParallelDecode) {
         DecodeParallelArgs_t params = {
             .deserialised = &ctx->deserialised,
@@ -659,10 +633,9 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_base(perseus_decoder cons
             .loq = LOQ1,
             .scalingMode = Scale2D,
             .dequant = contextGetDequant(ctx, 0, LOQ1),
-            .stats = frameStats,
             .deblock = &data->deblock,
             .highlight = &ctx->highlightState[LOQ1],
-            .useOldCodeLengths = ctx->useOldCodeLengths,
+            .bitstreamVersion = data->vnovaConfig.bitstreamVersion,
             .applyTemporal = false, /* Never apply temporal at LOQ1 */
         };
 
@@ -676,9 +649,9 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_base(perseus_decoder cons
             .loq = LOQ1,
             .memory = ctx->memory,
             .log = ctx->log,
-            .stats = frameStats,
             .tuCoordsAreInSurfaceRasterOrder =
                 (!ctx->deserialised.temporalEnabled && ctx->deserialised.tileDimensions == TDTNone),
+            .bitstreamVersion = data->vnovaConfig.bitstreamVersion,
             .applyTemporal = false, /* Never apply temporal at LOQ1 */
         };
 
@@ -693,8 +666,6 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_base(perseus_decoder cons
                     planeIndex);
     }
 
-    VN_PROFILE_STOP();
-
     return 0;
 }
 
@@ -702,7 +673,7 @@ VN_DEC_CORE_API int perseus_decoder_apply_ext_residuals(perseus_decoder const p,
                                                         perseus_image* residuals, int planeIndex,
                                                         perseus_loq_index loqIndex)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -753,7 +724,7 @@ VN_DEC_CORE_API int32_t VN_CALLCONV perseus_decoder_upscale(perseus_decoder cons
                                                             const perseus_image* base,
                                                             perseus_loq_index baseLOQ)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -816,8 +787,6 @@ VN_DEC_CORE_API int32_t VN_CALLCONV perseus_decoder_upscale(perseus_decoder cons
                  loqIndexToString(baseIndex), loqIndexToString(targetIndex));
         return -1;
     }
-
-    VN_PROFILE_FUNCTION();
 
     /* Convert from external API to internal. */
     Surface_t baseSurfaces[3] = {{0}};
@@ -916,8 +885,6 @@ VN_DEC_CORE_API int32_t VN_CALLCONV perseus_decoder_upscale(perseus_decoder cons
         }
     }
 
-    VN_PROFILE_STOP();
-
     return 0;
 }
 
@@ -949,7 +916,7 @@ static bool apply_temporal_buffer(Logger_t log, Context_t* ctx, Surface_t* dst[R
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_high(perseus_decoder const p,
                                                             const perseus_image* full)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -988,8 +955,6 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_high(perseus_decoder cons
         return -1;
     }
 
-    VN_PROFILE_FUNCTION();
-
     Surface_t fullSurfaces[RCMaxPlanes] = {{0}};
     surfacesFromImage(ctx, LOQ0, full, fullSurfaces, 3);
 
@@ -1001,8 +966,6 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_high(perseus_decoder cons
                                                         : &fullSurfaces[planeIndex];
     }
 
-    FrameStats_t frameStats = statsGetFrame(ctx->stats);
-
     if (ctx->useParallelDecode) {
         DecodeParallelArgs_t params = {
             .deserialised = &ctx->deserialised,
@@ -1013,11 +976,10 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_high(perseus_decoder cons
             .scalingMode = data->scalingModes[LOQ0],
             .dequant = contextGetDequant(ctx, 0, LOQ0),
             .preferredAccel = ctx->cpuFeatures,
-            .stats = frameStats,
             .deblock = NULL,
             .highlight = &ctx->highlightState[LOQ0],
-            .useOldCodeLengths = ctx->useOldCodeLengths,
-            .applyTemporal = ctx->deserialised.temporalEnabled,
+            .bitstreamVersion = data->vnovaConfig.bitstreamVersion,
+            .applyTemporal = data->temporalEnabled,
         };
 
         if (decodeParallel(ctx, ctx->decodeParallel[LOQ0], &params) != 0) {
@@ -1030,10 +992,9 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_high(perseus_decoder cons
             .loq = LOQ0,
             .memory = ctx->memory,
             .log = ctx->log,
-            .stats = frameStats,
-            .tuCoordsAreInSurfaceRasterOrder =
-                (!ctx->deserialised.temporalEnabled && ctx->deserialised.tileDimensions == TDTNone),
-            .applyTemporal = ctx->deserialised.temporalEnabled,
+            .bitstreamVersion = data->vnovaConfig.bitstreamVersion,
+            .tuCoordsAreInSurfaceRasterOrder = (!data->temporalEnabled && data->tileDimensions == TDTNone),
+            .applyTemporal = data->temporalEnabled,
         };
 
         if (decodeSerial(ctx, &params) != 0) {
@@ -1042,9 +1003,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_high(perseus_decoder cons
         }
     }
 
-    VN_FRAMESTATS_RECORD_START(frameStats, STApplyTemporalBufferStart);
     bool temporalRes = apply_temporal_buffer(ctx->log, ctx, decodeDstPlanes);
-    VN_FRAMESTATS_RECORD_STOP(frameStats, STApplyTemporalBufferStop);
 
     int32_t res = 0;
 
@@ -1052,8 +1011,6 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_high(perseus_decoder cons
         VN_ERROR(ctx->log, "Failed to apply temporal buffer to destination surface\n");
         res = -1;
     }
-
-    statsEndFrame(frameStats);
 
     for (int32_t planeIndex = 0; planeIndex < data->numPlanes && planeIndex < RCMaxPlanes; ++planeIndex) {
         PlaneSurfaces_t* internalPlane = &ctx->planes[planeIndex];
@@ -1076,15 +1033,13 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_high(perseus_decoder cons
         res = -1;
     }
 #endif
-    VN_PROFILE_STOP();
-
     return res;
 }
 
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_apply_s(perseus_decoder const p, const perseus_image* image)
 {
     int32_t res = 0;
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (ctx == NULL) {
         return -1;
@@ -1103,16 +1058,12 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_apply_s(perseus_decoder const p,
         return res;
     }
 
-    VN_PROFILE_FUNCTION();
-
     Surface_t imageSurface;
     surfacesFromImage(ctx, LOQ0, image, &imageSurface, 1);
 
     if (!surfaceSharpen(ctx->sharpen, &imageSurface, ctx->dither, ctx->cpuFeatures)) {
         res = -1;
     }
-
-    VN_PROFILE_STOP();
 
     return res;
 }
@@ -1122,7 +1073,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_apply_overlay(perseus_decoder co
 {
 #if VN_CORE_FEATURE(OVERLAY_IMAGE)
     int32_t res = 0;
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
     Surface_t image_surface;
 
     if (ctx == NULL) {
@@ -1146,12 +1097,10 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_apply_overlay(perseus_decoder co
 
     surfacesFromImage(ctx, LOQ0, image, &image_surface, 1);
 
-    const OverlayArgs_t params = {
-        &image_surface,
-    };
+    const OverlayArgs_t params = {&image_surface, &ctx->logoOverlay};
 
-    if (ctx->logoOverlayCount++ >= ctx->logoOverlayDelay) {
-        res = overlayApply(ctx->log, ctx, &params);
+    if (ctx->logoOverlay.count++ >= ctx->logoOverlay.delay) {
+        res = overlayApply(ctx->log, &params);
     }
     VN_PROFILE_STOP();
 
@@ -1195,7 +1144,7 @@ static void emccTraceFrameEnd(void)
 
 VN_DEC_CORE_API uint8_t VN_CALLCONV perseus_decoder_get_dither_strength(perseus_decoder const p)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -1206,7 +1155,7 @@ VN_DEC_CORE_API uint8_t VN_CALLCONV perseus_decoder_get_dither_strength(perseus_
 
 VN_DEC_CORE_API uint8_t VN_CALLCONV perseus_decoder_get_dither_type(perseus_decoder const p)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -1217,7 +1166,7 @@ VN_DEC_CORE_API uint8_t VN_CALLCONV perseus_decoder_get_dither_type(perseus_deco
 
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_clear_temporal(perseus_decoder const p, const int planeIndex)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -1261,7 +1210,7 @@ VN_DEC_CORE_API perseus_decoder VN_CALLCONV perseus_decoder_open_wrapper(int gen
         return NULL;
     }
 
-    Context_t* ctx = res->m_context;
+    Context_t* ctx = res->context;
     ctx->generateSurfaces = generateSurfaces;
     ctx->disableTemporalApply = generateSurfaces; /* Don't want to apply if we're generating. */
     ctx->convertS8 = generateSurfaces;
@@ -1275,7 +1224,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_wrapper(perseus_decoder c
                                                                void* pfullImage, uint32_t dst_width,
                                                                uint32_t lumaStride, uint32_t interleaved)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -1335,7 +1284,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_base_wrapper(perseus_deco
     }
 
     if (!image) {
-        VN_ERROR(p->m_context->log, "invalid param: image=%d invalid\n", image);
+        VN_ERROR(p->context->log, "invalid param: image=%d invalid\n", image);
         return -1;
     }
 
@@ -1363,7 +1312,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_decode_high_wrapper(perseus_deco
     }
 
     if (!image) {
-        VN_ERROR(p->m_context->log, "invalid param: image=%d invalid\n", image);
+        VN_ERROR(p->context->log, "invalid param: image=%d invalid\n", image);
         return -1;
     }
 
@@ -1388,7 +1337,7 @@ VN_DEC_CORE_API int perseus_decoder_upscale_wrapper(perseus_decoder const p, voi
                                                     uint32_t baseWidth, uint32_t baseHeight,
                                                     void* fullImage, uint32_t fullWidth, uint32_t fullHeight)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -1429,7 +1378,7 @@ VN_DEC_CORE_API int perseus_decoder_upscale_wrapper(perseus_decoder const p, voi
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_parse_wrapper(perseus_decoder const p, const uint8_t* perseus,
                                                               size_t perseusLen, int infoPtr[5])
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -1462,7 +1411,7 @@ VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_parse_wrapper(perseus_decoder co
 
 VN_DEC_CORE_API uint32_t VN_CALLCONV perseus_decoder_get_surface_size(perseus_decoder const p, int high)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -1479,7 +1428,7 @@ VN_DEC_CORE_API uint32_t VN_CALLCONV perseus_decoder_get_surface_size(perseus_de
 
 VN_DEC_CORE_API uint32_t VN_CALLCONV perseus_decoder_get_base_hash(perseus_decoder const p, void* out)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -1514,7 +1463,7 @@ VN_DEC_CORE_API void VN_CALLCONV perseus_end_tracing(void)
 
 VN_DEC_CORE_API uint32_t VN_CALLCONV perseus_decoder_get_last_error_wrapper(perseus_decoder const p)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return PSS_PERSEUS_API_CALL_ERROR;
@@ -1527,7 +1476,7 @@ VN_DEC_CORE_API uint32_t VN_CALLCONV perseus_decoder_get_last_error_wrapper(pers
 VN_DEC_CORE_API void perseus_decoder_get_surface_info(perseus_decoder const p, int planeIndex,
                                                       perseus_buffer_info* bufferInfo)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return;
@@ -1554,7 +1503,7 @@ VN_DEC_CORE_API void perseus_decoder_set_generate_surfaces(perseus_decoder const
                                                            perseus_surface_format format,
                                                            uint8_t useExternalBuffer)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return;
@@ -1575,7 +1524,7 @@ VN_DEC_CORE_API void perseus_decoder_set_generate_surfaces(perseus_decoder const
 VN_DEC_CORE_API void perseus_decoder_set_surface(perseus_decoder const p, int plane_idx,
                                                  perseus_loq_index loqIndex, void* buffer)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return;
@@ -1605,7 +1554,7 @@ VN_DEC_CORE_API void perseus_decoder_set_surface(perseus_decoder const p, int pl
 VN_DEC_CORE_API void* VN_CALLCONV perseus_decoder_get_surface(perseus_decoder const p, int plane_idx,
                                                               perseus_loq_index loqIndex)
 {
-    Context_t* ctx = p ? p->m_context : NULL;
+    Context_t* ctx = p ? p->context : NULL;
 
     if (!ctx) {
         return NULL;
@@ -1643,7 +1592,7 @@ VN_DEC_CORE_API void* VN_CALLCONV perseus_decoder_get_surface(perseus_decoder co
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_set_live_config(perseus_decoder const decoder,
                                                                 perseus_decoder_live_config cfg)
 {
-    Context_t* ctx = decoder ? decoder->m_context : NULL;
+    Context_t* ctx = decoder ? decoder->context : NULL;
 
     if (!ctx) {
         return -1;
@@ -1673,14 +1622,11 @@ VN_DEC_CORE_API int32_t VN_CALLCONV perseus_decoder_decode(perseus_decoder const
                                                            const perseus_image* baseImage)
 {
     int32_t ret = 0;
-    Context_t* ctx = decoder ? decoder->m_context : NULL;
+    Context_t* ctx = decoder ? decoder->context : NULL;
 
     if (!ctx) {
         return -1;
     }
-
-    profilerTickStart(ctx->profiler);
-    VN_PROFILE_FUNCTION();
 
     perseus_image loq2Target;
     const perseus_image* loq1BaseImage = NULL;
@@ -1738,9 +1684,6 @@ VN_DEC_CORE_API int32_t VN_CALLCONV perseus_decoder_decode(perseus_decoder const
 
     ctx->started = 0;
 
-    VN_PROFILE_STOP();
-    profilerTickStop(ctx->profiler);
-
     if (ret != 0) {
         return -1;
     }
@@ -1752,7 +1695,7 @@ VN_DEC_CORE_API int perseus_decoder_get_upsample_kernel(perseus_decoder const de
                                                         perseus_kernel* kernelOut,
                                                         perseus_upsample upsampleMethod)
 {
-    Context_t* ctx = decoder ? decoder->m_context : NULL;
+    Context_t* ctx = decoder ? decoder->context : NULL;
 
     if (!ctx || !kernelOut) {
         return -1;
@@ -1786,7 +1729,7 @@ VN_DEC_CORE_API void VN_CALLCONV perseus_decoder_get_last_error(perseus_decoder 
 
 VN_DEC_CORE_API void perseus_decoder_debug(perseus_decoder const decoder, perseus_debug_mode mode)
 {
-    Context_t* ctx = decoder ? decoder->m_context : NULL;
+    Context_t* ctx = decoder ? decoder->context : NULL;
 
     if (!ctx) {
         return;
@@ -1800,7 +1743,7 @@ VN_DEC_CORE_API void perseus_decoder_debug(perseus_decoder const decoder, perseu
 
 VN_DEC_CORE_API int perseus_decoder_get_num_residual_planes(perseus_decoder const decoder)
 {
-    Context_t* ctx = decoder ? decoder->m_context : NULL;
+    Context_t* ctx = decoder ? decoder->context : NULL;
     if (!ctx) {
         return -1;
     }
@@ -1810,7 +1753,7 @@ VN_DEC_CORE_API int perseus_decoder_get_num_residual_planes(perseus_decoder cons
 VN_DEC_CORE_API int perseus_decoder_get_num_tiles(perseus_decoder const decoder, int plane_idx,
                                                   perseus_loq_index loq_idx)
 {
-    const Context_t* ctx = decoder ? decoder->m_context : NULL;
+    const Context_t* ctx = decoder ? decoder->context : NULL;
     if (!ctx) {
         return -1;
     }
@@ -1820,7 +1763,7 @@ VN_DEC_CORE_API int perseus_decoder_get_num_tiles(perseus_decoder const decoder,
 
 VN_DEC_CORE_API int perseus_decoder_get_apply_cmd_buffer_threads(perseus_decoder decoder)
 {
-    const Context_t* ctx = decoder ? decoder->m_context : NULL;
+    const Context_t* ctx = decoder ? decoder->context : NULL;
     if (!ctx) {
         return -1;
     }
@@ -1832,7 +1775,7 @@ VN_DEC_CORE_API int perseus_decoder_get_cmd_buffer(perseus_decoder decoder, pers
                                                    perseus_cmdbuffer_entrypoint* entrypoints,
                                                    int numEntrypoints)
 {
-    Context_t* ctx = decoder ? decoder->m_context : NULL;
+    Context_t* ctx = decoder ? decoder->context : NULL;
 
     if (!ctx) {
         return -1;

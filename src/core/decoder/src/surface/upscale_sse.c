@@ -1,25 +1,37 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "surface/upscale_sse.h"
+
+#include "common/types.h"
+#include "lcevc_config.h"
+#include "surface/upscale_common.h"
+
+#include <stddef.h>
 
 #if VN_CORE_FEATURE(SSE)
 
 #include "common/dither.h"
-#include "common/simd.h"
+#include "common/platform.h"
+#include "common/sse.h"
 #include "context.h"
 #include "surface/upscale.h"
 #include "surface/upscale_scalar.h"
 
 #include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 /*
 @TODO(bob): Look at shuffles in PA, there may be "better" ways to do it, if not
@@ -236,6 +248,10 @@ static inline void horizontalConvolveN16(__m128i pels[2], __m128i result[2],
     const uint32_t loopCount = kernelLength >> 1;
     const uint32_t shiftLoop = 4 - loopCount;
 
+    /* see saturateS15 for choice of min/max */
+    const __m128i minV = _mm_set1_epi16(-16384);
+    const __m128i maxV = _mm_set1_epi16(16383);
+
     __m128i tap;
     __m128i values[4] = {_mm_setzero_si128(), _mm_setzero_si128(), _mm_setzero_si128(),
                          _mm_setzero_si128()};
@@ -277,9 +293,8 @@ static inline void horizontalConvolveN16(__m128i pels[2], __m128i result[2],
         pels[1] = _mm_srli_si128(pels[1], 4);
     }
 
-    /* Scale back to 16 bits */
+    /* Shift back to 16 bits */
     tap = _mm_set1_epi32(UCInverseShiftRounding);
-
     for (uint32_t i = 0; i < 4; i++) {
         values[i] = _mm_srai_epi32(_mm_add_epi32(values[i], tap), UCInverseShift);
     }
@@ -294,6 +309,10 @@ static inline void horizontalConvolveN16(__m128i pels[2], __m128i result[2],
 
     result[0] = _mm_unpacklo_epi32(values[2], values[3]); /* 0 0 1 1 2 2 3 3 */
     result[1] = _mm_unpackhi_epi32(values[2], values[3]); /* 4 4 5 5 6 6 7 7 */
+
+    /* Saturate to + / -2 ^ 14 */
+    result[0] = _mm_max_epi16(_mm_min_epi16(result[0], maxV), minV);
+    result[1] = _mm_max_epi16(_mm_min_epi16(result[1], maxV), minV);
 }
 
 /*!
@@ -453,6 +472,28 @@ static inline void applyDither(__m128i values[2], const int8_t** ditherBuffer)
     values[1] = _mm_adds_epi16(values[1], _mm_cvtepi8_epi16(_mm_srli_si128(dither, 8)));
 }
 
+/*!
+ * Apply dithering to values using supplied host buffer pointer containing randomized
+ * values for precision.
+ *
+ * This function loads in values from the dither buffer, when adding the dither values,
+ * it makes the bit shifting to match the input bit depth, then moves the buffer pointer
+ * forward for the next invocation of this function.
+ *
+ * \param values         The values to apply dithering to.
+ * \param ditherBuffer   A double pointer to the dither buffer pointer.
+ * \param shift          Places to be bit shifted to the left.
+ */
+static inline void applyDitherS16(__m128i values[2], const int8_t** ditherBuffer, int8_t shift)
+{
+    __m128i dither = _mm_loadu_si128((const __m128i*)*ditherBuffer);
+    *ditherBuffer += 16;
+
+    values[0] = _mm_adds_epi16(values[0], _mm_slli_epi16(_mm_cvtepi8_epi16(dither), shift));
+    values[1] =
+        _mm_adds_epi16(values[1], _mm_slli_epi16(_mm_cvtepi8_epi16(_mm_srli_si128(dither, 8)), shift));
+}
+
 /*! \brief U8 Planar horizontal upscaling of 2 rows. */
 static void horizontalU8PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                   const uint8_t* base[2], uint32_t width, uint32_t xStart,
@@ -569,9 +610,9 @@ static void horizontalS16PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_
     const bool paEnabled = (base[0] != NULL);
     const bool paEnabled1D = paEnabled && (base[1] != NULL);
     const int8_t* ditherBuffer = NULL;
+    int8_t shift = 0;
     int16_t* out16[2] = {(int16_t*)out[0], (int16_t*)out[1]};
     const int16_t* base16[2] = {(const int16_t*)base[0], (const int16_t*)base[1]};
-
     UpscaleHorizontalCoords_t coords = {0};
 
     /* This implementation assumes kernel is even in length. This is because the
@@ -613,6 +654,7 @@ static void horizontalS16PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_
     /* Prepare dither buffer containing enough values for 2 fully upscaled rows. */
     if (dither != NULL) {
         ditherBuffer = ditherGetBuffer(dither, alignU32(4 * (xEnd - xStart), 16));
+        shift = ditherGetShiftS16(dither);
     }
 
     /* Run middle SIMD loop */
@@ -638,14 +680,13 @@ static void horizontalS16PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_
         }
 
         if (ditherBuffer) {
-            applyDither(values[0], &ditherBuffer);
-            applyDither(values[1], &ditherBuffer);
+            applyDitherS16(values[0], &ditherBuffer, shift);
+            applyDitherS16(values[1], &ditherBuffer, shift);
         }
 
-        /* Saturate to unsigned N-bit and write out. */
+        /* Write out (note that dither and PA used saturating add, so we're safely within S16). */
         _mm_storeu_si128((__m128i*)&out16[0][storeOffset], values[0][0]);
         _mm_storeu_si128((__m128i*)&out16[0][storeOffset + 8], values[0][1]);
-
         _mm_storeu_si128((__m128i*)&out16[1][storeOffset], values[1][0]);
         _mm_storeu_si128((__m128i*)&out16[1][storeOffset + 8], values[1][1]);
 
@@ -662,7 +703,7 @@ static void horizontalS16PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_
 /*! \brief U16 Planar horizontal upscaling of 2 rows. */
 static inline void horizontalU16PlanarSSE(Dither_t dither, const uint8_t* in[2], uint8_t* out[2],
                                           const uint8_t* base[2], uint32_t width, uint32_t xStart,
-                                          uint32_t xEnd, const Kernel_t* kernel, uint16_t maxValue,
+                                          uint32_t xEnd, const Kernel_t* kernel, int16_t maxValue,
                                           bool is14Bit)
 {
     const int16_t* kernelCoeffs = kernel->coeffs[0];
@@ -672,7 +713,7 @@ static inline void horizontalU16PlanarSSE(Dither_t dither, const uint8_t* in[2],
     __m128i kernelFwd[UCInterleavedStore];
     __m128i kernelRev[UCInterleavedStore];
     const __m128i minV = _mm_set1_epi16(0);
-    const __m128i maxV = _mm_set1_epi16((int16_t)maxValue);
+    const __m128i maxV = _mm_set1_epi16(maxValue);
     const bool paEnabled = (base[0] != NULL);
     const bool paEnabled1D = paEnabled && (base[1] != NULL);
     const int8_t* ditherBuffer = NULL;
@@ -1134,6 +1175,10 @@ static inline void verticalConvolveS16(__m128i pels[UCInterleavedStore][UCVertGr
     __m128i values[4] = {_mm_setzero_si128(), _mm_setzero_si128(), _mm_setzero_si128(),
                          _mm_setzero_si128()};
 
+    /* see saturateS15 for choice of min/max */
+    const __m128i minV = _mm_set1_epi32(-16384);
+    const __m128i maxV = _mm_set1_epi32(16383);
+
     for (int32_t i = 0; i < loopCount; i++) {
         for (int32_t j = 0; j < UCVertGroupSize; j++) {
             tap = _mm_madd_epi16(pels[i][j], kernel[i]);
@@ -1141,11 +1186,11 @@ static inline void verticalConvolveS16(__m128i pels[UCInterleavedStore][UCVertGr
         }
     }
 
-    /* Scale back */
+    /* Shift back to 16 bits, and clamp to +/-2^14 */
     tap = _mm_set1_epi32(UCInverseShiftRounding);
-
     for (int32_t j = 0; j < UCVertGroupSize; j++) {
         values[j] = _mm_srai_epi32(_mm_add_epi32(values[j], tap), UCInverseShift);
+        values[j] = _mm_min_epi32(_mm_max_epi32(values[j], minV), maxV);
     }
 
     /* Pack back down to saturated int16_t */

@@ -11,7 +11,7 @@ test_outputs
 dec_test_results*.json
 env
 .idea
-
+venv
 *.sublime-project
 *.sublime-workspace
 .vscode
@@ -26,4 +26,5 @@ env
 
 /build/
 /build_*/
+/build-*/
 src/env/

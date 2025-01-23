@@ -1,19 +1,24 @@
 /* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decode/deserialiser.h"
 
 #include "common/bitstream.h"
 #include "common/bytestream.h"
+#include "common/log.h"
 #include "common/memory.h"
+#include "common/platform.h"
 #include "common/types.h"
 #include "context.h"
 #include "decode/dequant.h"
@@ -21,18 +26,19 @@
 #include "surface/sharpen.h"
 
 #include <assert.h>
+#include <LCEVC/PerseusDecoder.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
-
-#define VN_ENABLE_DEBUG_SYNTAX() 0
-#if VN_ENABLE_DEBUG_SYNTAX()
-#define VN_DEBUG_SYNTAX(...) VN_DEBUG(ctx->log, __VA_ARGS__)
-#else
-#define VN_DEBUG_SYNTAX(...)
-#endif
+#include <string.h>
 
 /*------------------------------------------------------------------------------
  Syntax functionality
  ------------------------------------------------------------------------------*/
+
+static const uint32_t kDefaultDeblockCoefficient = 16;        /* 8.9.2 */
+static const uint32_t kDefaultTemporalStepWidthModifier = 48; /* 7.4.3.3 */
+static const uint32_t kDefaultChromaStepWidthMultiplier = 64; /* 7.4.3.3 */
 
 typedef enum SignalledBlockSize
 {
@@ -96,7 +102,7 @@ static const Resolution_t kResolutions[] = {
     {1280, 800},  {1280, 1024}, {1360, 768},  {1366, 768},  {1400, 1050}, {1440, 900},
     {1600, 1200}, {1680, 1050}, {1920, 1080}, {1920, 1200}, {2048, 1080}, {2048, 1152},
     {2048, 1536}, {2160, 1440}, {2560, 1440}, {2560, 1600}, {2560, 2048}, {3200, 1800},
-    {3200, 2048}, {3200, 2400}, {3440, 1440}, {3840, 1600}, {3840, 2160}, {3840, 3072},
+    {3200, 2048}, {3200, 2400}, {3440, 1440}, {3840, 1600}, {3840, 2160}, {3840, 2400},
     {4096, 2160}, {4096, 3072}, {5120, 2880}, {5120, 3200}, {5120, 4096}, {6400, 4096},
     {6400, 4800}, {7680, 4320}, {7680, 4800},
 };
@@ -113,9 +119,14 @@ enum
 };
 static const uint8_t kVNovaITU[ITUC_Length] = {0xb4, 0x00, 0x50, 0x00};
 
-/*------------------------------------------------------------------------------*/
+enum
+{
+    StartCodePrefix3byteLen = 3,
+    LcevcNalUnitHeaderLen = 2,
+    MaxLcevcNalPayloadOffset = 6
+};
 
-#if VN_ENABLE_DEBUG_SYNTAX()
+/*------------------------------------------------------------------------------*/
 
 static inline const char* blockTypeToString(BlockType_t type)
 {
@@ -156,7 +167,17 @@ static inline const char* seiPayloadTypeToString(SEIPayloadType_t type)
     return "Unknown";
 }
 
-#endif
+static inline bool deserialiseIsTemporalChunkEnabled(const DeserialisedData_t* data)
+{
+    /* 8.3.5.2 */
+    if (data->enhancementEnabled) {
+        /* "if no_enhancement_bit_flag is set to 0", step 1 */
+        return data->temporalEnabled && !data->temporalRefresh;
+    }
+
+    /* "if no_enhancement_bit_flag is set to 1", step 1 */
+    return data->temporalEnabled && !data->temporalRefresh && data->temporalSignallingPresent;
+}
 
 /*------------------------------------------------------------------------------*/
 
@@ -164,14 +185,19 @@ static inline const char* seiPayloadTypeToString(SEIPayloadType_t type)
 static int32_t parseNALHeader(Logger_t log, DeserialisedData_t* data, ByteStream_t* stream)
 {
     int32_t res = 0;
-    uint8_t header[5] = {0};
+    uint8_t buffer[MaxLcevcNalPayloadOffset];
+    int32_t nalStartOffset = StartCodePrefix3byteLen;
 
-    VN_CHECK(bytestreamReadN8(stream, header, 5));
+    VN_CHECK(bytestreamReadN8(stream, buffer, StartCodePrefix3byteLen + LcevcNalUnitHeaderLen));
 
-    /* start-code (@todo: Proposal to remove this). */
-    if (header[0] != 0x0 || header[1] != 0x0 || header[2] != 0x1) {
-        VN_ERROR(log, "Malformed header, prefix bytes are not [0x0, 0x0, 0x1]\n");
-        return -1;
+    /* start-code prefix check */
+    if (buffer[0] != 0 || buffer[1] != 0 || buffer[2] != 1) {
+        if (buffer[0] != 0 || buffer[1] != 0 || buffer[2] != 0 || buffer[3] != 1) {
+            VN_ERROR(log, "Malformed prefix: start code [0, 0, 1] or [0, 0, 0, 1] not found\n");
+            return -1;
+        }
+        nalStartOffset = 4;
+        VN_CHECK(bytestreamReadU8(stream, &buffer[5]));
     }
 
     /*  forbidden_zero_bit   u(1)
@@ -180,12 +206,12 @@ static int32_t parseNALHeader(Logger_t log, DeserialisedData_t* data, ByteStream
         reserved_flag        u(9) */
 
     /* forbidden bits and reserved flag */
-    if ((header[3] & 0xC1) != 0x41 || header[4] != 0xFF) {
+    if ((buffer[nalStartOffset] & 0xC1) != 0x41 || buffer[nalStartOffset + 1] != 0xFF) {
         VN_ERROR(log, "Malformed header: forbidden bits or reserved flags not as expected\n");
         return -1;
     }
 
-    data->type = (NALType_t)((header[3] & 0x3E) >> 1);
+    data->type = (NALType_t)((buffer[nalStartOffset] & 0x3E) >> 1);
     if (data->type != NTNonIDR && data->type != NTIDR) {
         VN_ERROR(log, "Unrecognized LCEVC nal type, it should be IDR or NonIDR\n");
         return -1;
@@ -213,7 +239,6 @@ static int32_t unencapsulate(Memory_t memory, Logger_t log, DeserialisedData_t* 
     /* Cache the unencapsulation buffer. */
     if (stream->size > data->unencapsulatedCapacity) {
         uint8_t* newPtr = VN_REALLOC_T_ARR(memory, data->unencapsulatedData, uint8_t, stream->size);
-
         if (newPtr == NULL) {
             VN_ERROR(log, "unencapsulation buffer realloc returned NULL");
             VN_FREE(memory, data->unencapsulatedData);
@@ -254,6 +279,7 @@ static int32_t unencapsulate(Memory_t memory, Logger_t log, DeserialisedData_t* 
     }
 
     if (res < 0) {
+        VN_ERROR(log, "Failed to unencapsulate");
         data->unencapsulatedSize = 0;
     } else {
         data->unencapsulatedSize = (uint32_t)(head - data->unencapsulatedData);
@@ -327,7 +353,7 @@ typedef struct TiledSizeDecoder
 
 static int32_t tiledSizeDecoderInitialise(Memory_t memory, Logger_t log, TiledSizeDecoder_t* decoder,
                                           uint32_t numSizes, ByteStream_t* stream,
-                                          TileCompressionSizePerTile_t type, bool useOldCodeLengths)
+                                          TileCompressionSizePerTile_t type, uint8_t bitstreamVersion)
 {
     int32_t res = 0;
 
@@ -366,17 +392,17 @@ static int32_t tiledSizeDecoderInitialise(Memory_t memory, Logger_t log, TiledSi
     chunk.size = bytestreamRemaining(stream);
 
     EntropyDecoder_t layerDecoder = {0};
-    VN_CHECK(entropyInitialise(log, &layerDecoder, &chunk, decoderType, useOldCodeLengths));
+    VN_CHECK(entropyInitialise(log, &layerDecoder, &chunk, decoderType, bitstreamVersion));
 
-    VN_DEBUG_SYNTAX("Tiled size decoder\n");
+    VN_VERBOSE(log, "Tiled size decoder initialize\n");
 
     for (uint32_t i = 0; i < numSizes; ++i) {
         VN_CHECK(entropyDecodeSize(&layerDecoder, &decoder->sizes[i]));
-        VN_DEBUG_SYNTAX("Size: %d\n", decoder->sizes[i]);
+        VN_VERBOSE(log, "Size: %d\n", decoder->sizes[i]);
     }
 
     const uint32_t consumedBytes = entropyGetConsumedBytes(&layerDecoder);
-    VN_DEBUG_SYNTAX("Consumed bytes: %u\n", consumedBytes);
+    VN_VERBOSE(log, "Consumed bytes: %u\n", consumedBytes);
 
     VN_CHECK(bytestreamSeek(stream, consumedBytes));
 
@@ -421,34 +447,29 @@ static int32_t quantMatrixParseLOQ(ByteStream_t* stream, LOQIndex_t loq, Deseria
     return 0;
 }
 
-static void quantMatrixDebugLog(const DeserialisedData_t* deserialised, LOQIndex_t loq)
+static void quantMatrixDebugLog(Logger_t log, const DeserialisedData_t* deserialised, LOQIndex_t loq)
 {
-#if !VN_ENABLE_DEBUG_SYNTAX()
-    VN_UNUSED(deserialised);
-    VN_UNUSED(loq);
-#else
-    const uint8_t* values = quantMatrixGetValues(&deserialised->quantMatrix, loq);
+    const uint8_t* values = quantMatrixGetValuesConst(&deserialised->quantMatrix, loq);
+    VN_UNUSED(values);
 
-    if (deserialisedOut->transform == TransformDD) {
-        VN_DEBUG_SYNTAX("  Quant-matrix LOQ-%u: %u %u %u %u\n", loq, values[0], values[1],
-                        values[2], values[3]);
-    } else if (deserialisedOut->transform == TransformDDS) {
-        VN_DEBUG_SYNTAX("  Quant-matrix LOQ-%u: %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u\n",
-                        loq, values[0], values[1], values[2], values[3], values[4], values[5],
-                        values[6], values[7], values[8], values[9], values[10], values[11],
-                        values[12], values[13], values[14], values[15]);
+    if (deserialised->transform == TransformDD) {
+        VN_VERBOSE(log, "  Quant-matrix LOQ-%u: %u %u %u %u\n", loq, values[0], values[1],
+                   values[2], values[3]);
+    } else if (deserialised->transform == TransformDDS) {
+        VN_VERBOSE(log, "  Quant-matrix LOQ-%u: %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u\n",
+                   loq, values[0], values[1], values[2], values[3], values[4], values[5], values[6],
+                   values[7], values[8], values[9], values[10], values[11], values[12], values[13],
+                   values[14], values[15]);
     } else {
-        VN_DEBUG_SYNTAX("  Unknown layer count for quant-matrix\n");
+        VN_VERBOSE(log, "  Unknown layer count for quant-matrix\n");
     }
-#endif
 }
 
-static int32_t parseConformanceValue(ByteStream_t* stream, uint16_t* dst, const char* debugLabel)
+static int32_t parseConformanceValue(const Logger_t log, ByteStream_t* stream, uint16_t* dst,
+                                     const char* debugLabel)
 {
     uint64_t value;
     int32_t res = 0;
-
-    VN_UNUSED(debugLabel);
 
     VN_CHECK(bytestreamReadMultiByte(stream, &value));
 
@@ -458,7 +479,7 @@ static int32_t parseConformanceValue(ByteStream_t* stream, uint16_t* dst, const 
     }
 
     *dst = (uint16_t)value;
-    VN_DEBUG_SYNTAX("Conformance window %s: %u\n", debugLabel, *dst);
+    VN_VERBOSE(log, "Conformance window %s: %u\n", debugLabel, *dst);
     return res;
 }
 
@@ -532,8 +553,8 @@ static int32_t calculateTileCounts(Logger_t log, DeserialisedData_t* data)
 
             data->tileCount[plane][loq] = tilesAcross[loq] * tilesDown[loq];
 
-            VN_DEBUG_SYNTAX("  Tile count plane %u LOQ-%u: %dx%d (%d)\n", plane, loq,
-                            tilesAcross[loq], tilesDown[loq], data->tileCount[plane][loq]);
+            VN_VERBOSE(log, "  Tile count plane %u LOQ-%u: %dx%d (%d)\n", plane, loq,
+                       tilesAcross[loq], tilesDown[loq], data->tileCount[plane][loq]);
 
             /* As it is currently intended that all planes at a given LOQ have the
              * same number of tiles, ensure that is the case. */
@@ -568,7 +589,7 @@ static inline void calculateTileChunkIndices(DeserialisedData_t* data)
         }
 
         /* one chunk per plane-loq-tile */
-        if (data->temporalChunkEnabled) {
+        if (deserialiseIsTemporalChunkEnabled(data)) {
             const int32_t chunkCount = data->tilesAcross[plane][LOQ0] * data->tilesDown[plane][LOQ0];
 
             data->tileChunkTemporalIndex[plane] = offset;
@@ -615,7 +636,7 @@ static bool isDepthConfigSupported(Logger_t log, DeserialisedData_t* data)
     return true;
 }
 
-static bool validateResolution(Logger_t log, DeserialisedData_t* data)
+static bool validateResolution(Logger_t log, const DeserialisedData_t* data)
 {
     const ScalingMode_t scaling = data->scalingModes[LOQ0];
     const Chroma_t chroma = data->chroma;
@@ -646,14 +667,21 @@ static bool validateResolution(Logger_t log, DeserialisedData_t* data)
     return true;
 }
 
-/*------------------------------------------------------------------------------*/
+/*-----------------------------------------------------------------------------------------------*/
 
-static void vnovaConfigReset(VNConfig_t* cfg) { memset(cfg, 0, sizeof(VNConfig_t)); }
+static void vnovaConfigReset(VNConfig_t* cfg)
+{
+    cfg->bitstreamVersion = BitstreamVersionCurrent;
+    cfg->set = false; /* initialise to false, to let it be overwritten by stream, if present. */
+}
 
-/*------------------------------------------------------------------------------*/
+/*-----------------------------------------------------------------------------------------------*/
 
-/* 7.3.4 (Table-8) & 7.4.3.2 */
-static int32_t parseBlockSequenceConfig(ByteStream_t* stream, DeserialisedData_t* output)
+/* 7.3.4 (Table-8) & 7.4.3.2
+ * The profiles and levels tell us information about the expected bitrate of the stream, and impose
+ * limitations on the chroma subsampling, but we don't use this information (other than printing it
+ * out). Occurs with the first IDR (and possibly other IDRs) */
+static int32_t parseBlockSequenceConfig(const Logger_t log, ByteStream_t* stream, DeserialisedData_t* output)
 {
     int32_t res = 0;
 
@@ -662,51 +690,53 @@ static int32_t parseBlockSequenceConfig(ByteStream_t* stream, DeserialisedData_t
 
     /* Profile: 4 bits */
     uint8_t profile = (data >> 4) & 0x0F;
-    VN_UNUSED(profile);
-    VN_DEBUG_SYNTAX("  Profile: %u\n", profile);
+    VN_VERBOSE(log, "  Profile: %u\n", profile);
 
     /* Level: 4 bits */
     uint8_t level = (data >> 0) & 0x0F;
-    VN_UNUSED(level);
-    VN_DEBUG_SYNTAX("  Level: %u\n", level);
+    VN_VERBOSE(log, "  Level: %u\n", level);
 
     VN_CHECK(bytestreamReadU8(stream, &data));
 
     /* Sub-level: 2 bits */
-    uint8_t sublevel = (data >> 6) & 0x03;
-    VN_UNUSED(sublevel);
-    VN_DEBUG_SYNTAX("  Sub-level: %u\n", sublevel);
+    VN_VERBOSE(log, "  Sub-level: %u\n", (data >> 6) & 0x03);
 
     /* Conformance window flag: 1 bit */
     lcevc_conformance_window* conformanceWindow = &output->conformanceWindow;
-
     conformanceWindow->enabled = (data >> 5) & 0x01;
-    VN_DEBUG_SYNTAX("  Conformance window enabled: %u\n", conformanceWindow->enabled);
+    VN_VERBOSE(log, "  Conformance window enabled: %u\n", conformanceWindow->enabled);
+
+    /* Possible extended profile: 8 bits */
+    if (profile == 15 || level == 15) {
+        VN_CHECK(bytestreamReadU8(stream, &data));
+        VN_VERBOSE(log, "   Extended profile: %u\n", (data >> 5) & 0x07);
+        VN_VERBOSE(log, "   Extended level: %u\n", (data >> 1) & 0x7F);
+    }
 
     if (conformanceWindow->enabled) {
-        /* conf_win_left_offset: mb
-           conf_win_right_offset: mb
-           conf_win_top_offset: mb
-           conf_win_bottom_offset: mb */
-        VN_CHECK(parseConformanceValue(stream, &conformanceWindow->planes[0].left, "left"));
-        VN_CHECK(parseConformanceValue(stream, &conformanceWindow->planes[0].right, "right"));
-        VN_CHECK(parseConformanceValue(stream, &conformanceWindow->planes[0].top, "top"));
-        VN_CHECK(parseConformanceValue(stream, &conformanceWindow->planes[0].bottom, "bottom"));
+        /* conf_win_left_offset: multibyte
+           conf_win_right_offset: multibyte
+           conf_win_top_offset: multibyte
+           conf_win_bottom_offset: multibyte */
+        VN_CHECK(parseConformanceValue(log, stream, &conformanceWindow->planes[0].left, "left"));
+        VN_CHECK(parseConformanceValue(log, stream, &conformanceWindow->planes[0].right, "right"));
+        VN_CHECK(parseConformanceValue(log, stream, &conformanceWindow->planes[0].top, "top"));
+        VN_CHECK(parseConformanceValue(log, stream, &conformanceWindow->planes[0].bottom, "bottom"));
 
-        VN_DEBUG_SYNTAX("  Conformance window: %u %u %u %u\n", &conformanceWindow->planes[0].left,
-                        &conformanceWindow->planes[0].right, &conformanceWindow->planes[0].top,
-                        &conformanceWindow->planes[0].bottom);
+        VN_VERBOSE(log, "  Conformance window: %u %u %u %u\n", &conformanceWindow->planes[0].left,
+                   &conformanceWindow->planes[0].right, &conformanceWindow->planes[0].top,
+                   &conformanceWindow->planes[0].bottom);
     }
 
     return 0;
 }
 
-static void setUserDataConfig(DeserialisedData_t* output, UserDataMode_t mode)
+static void setUserDataConfig(const Logger_t log, DeserialisedData_t* output, UserDataMode_t mode)
 {
     UserDataConfig_t* userData = &output->userData;
     memorySet(userData, 0, sizeof(UserDataConfig_t));
 
-    VN_DEBUG_SYNTAX("  User data mode: %s\n", userDataModeToString(mode));
+    VN_VERBOSE(log, "  User data mode: %s\n", userDataModeToString(mode));
 
     if (mode != UDMNone) {
         userData->enabled = true;
@@ -714,21 +744,138 @@ static void setUserDataConfig(DeserialisedData_t* output, UserDataMode_t mode)
         userData->shift = (mode == UDMWith2Bits) ? UDCShift2 : UDCShift6;
     }
 
-    VN_DEBUG_SYNTAX("  User data mode: %s\n", userDataModeToString(mode));
-    VN_DEBUG_SYNTAX("  User data layer: %d\n", userData->layerIndex);
-    VN_DEBUG_SYNTAX("  User data shift: %d\n", userData->shift);
+    VN_VERBOSE(log, "  User data mode: %s\n", userDataModeToString(mode));
+    VN_VERBOSE(log, "  User data layer: %d\n", userData->layerIndex);
+    VN_VERBOSE(log, "  User data shift: %d\n", userData->shift);
 }
 
-/* 7.3.5 (Table-9) & 7.4.3.3 */
+static int32_t postParseInitBlockGlobalConfig(const Logger_t log, DeserialisedData_t* output)
+{
+    /* When tiling is disabled, there is a single tile that is the size of the surface for each
+     * plane. We cannot do this when parsing the tiling data, because the bitstream
+     * order is: normal resolution, then tiling data, finally custom resolution. */
+    if (output->tileDimensions == TDTNone) {
+        output->tileWidth[0] = output->width;
+        output->tileHeight[0] = output->height;
+    }
+
+    /* validate/update conformance window */
+    if (output->conformanceWindow.enabled) {
+        lcevc_conformance_window* window = &output->conformanceWindow;
+
+        const int32_t shiftw = chromaShiftWidth(output->chroma);
+        const int32_t shifth = chromaShiftHeight(output->chroma);
+
+        /* Mirror from luma entry to chroma entries */
+        window->planes[1] = window->planes[0];
+        window->planes[2] = window->planes[0];
+
+        /* The conformance window is signaled as the window to crop for the chroma
+         * planes - as a convenience the DPI outputs the crop windows for each plane
+         * in absolute pixels for that given plane based upon the chroma_t setting.
+         * Therefore scale the luma entry appropriately. */
+        window->planes[0].left <<= shiftw;
+        window->planes[0].right <<= shiftw;
+        window->planes[0].top <<= shifth;
+        window->planes[0].bottom <<= shifth;
+
+        for (int32_t i = 0; i < 3; ++i) {
+            VN_VERBOSE(log, "  Conformance window plane: %d - left: %u, right: %u, top: %u, bottom: %u\n",
+                       i, window->planes[i].left, window->planes[i].right, window->planes[i].top,
+                       window->planes[i].bottom);
+        }
+
+        if ((window->planes[0].left + window->planes[0].right) >= output->width) {
+            VN_ERROR(log, "stream: Conformance window values combined are greater than decode width [left: %u, right: %u, width: %u]\n",
+                     window->planes[0].left, window->planes[0].right, output->width);
+            return -1;
+        }
+
+        if ((window->planes[0].top + window->planes[0].bottom) >= output->height) {
+            VN_ERROR(log, "stream: Window values combined are greater than decode width [top: %u, bottom: %u, height: %u]\n",
+                     window->planes[0].top, window->planes[0].bottom, output->height);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static uint8_t parseGlobalConfigGetNumPlanes(Logger_t log, ByteStream_t* stream, const uint8_t planeModeFlag)
+{
+    /* plane_type: 4 bits
+       reserved: 4 bits */
+    if (!planeModeFlag) {
+        return 1;
+    }
+
+    uint8_t data = 0;
+    if (bytestreamReadU8(stream, &data) < 0) {
+        return 0;
+    }
+    PlanesType_t planeType = (PlanesType_t)((data >> 4) & 0x0f);
+    VN_VERBOSE(log, "  Plane type: %s\n", planesTypeToString(planeType));
+
+    switch (planeType) {
+        case PlanesY: return 1; break;
+        case PlanesYUV: return 3; break;
+        default: {
+            VN_ERROR(log, "Unrecognised plane type: %u\n", planeType);
+            break;
+        }
+    }
+    return 0;
+}
+
+/* 7.3.5 (Table-9), from row "if (tile_dimensions_type > 0) {" */
+static int32_t parseBlockGlobalConfigTiles(Logger_t log, ByteStream_t* stream, DeserialisedData_t* output)
+{
+    int32_t res = 0;
+
+    if (output->tileDimensions == TDTNone) {
+        /* This case is handled later, in postParseInitBlockGlobalConfig */
+        return res;
+    }
+
+    if (output->tileDimensions == TDTCustom) {
+        /* custom_tile_width: 16 bits */
+        VN_CHECK(bytestreamReadU16(stream, &output->tileWidth[0]));
+
+        /* custom_tile_height: 16 bits */
+        VN_CHECK(bytestreamReadU16(stream, &output->tileHeight[0]));
+    } else {
+        VN_CHECK(tileDimensionsFromType(output->tileDimensions, &output->tileWidth[0],
+                                        &output->tileHeight[0]));
+    }
+
+    uint8_t data = 0;
+    VN_CHECK(bytestreamReadU8(stream, &data));
+
+    /* reserved: 5 bits
+       compression_type_entropy_enabled_per_tile_flag: 1 bit */
+    output->tileEnabledPerTileCompressionFlag = (data >> 2) & 0x01;
+
+    /* compression_type_size_per_tile: 2 bits */
+    output->tileSizeCompression = (TileCompressionSizePerTile_t)((data >> 0) & 0x03);
+
+    VN_VERBOSE(log, "  Custom tile size: %ux%u\n", output->tileWidth[0], output->tileHeight[0]);
+    VN_VERBOSE(log, "  Per tile enabled compression: %d\n", output->tileEnabledPerTileCompressionFlag);
+    VN_VERBOSE(log, "  Tile size compression: %u\n", output->tileSizeCompression);
+
+    return res;
+}
+
+/* 7.3.5 (Table-9) & 7.4.3.3
+ * Occurs once per IDR frame */
 static int32_t parseBlockGlobalConfig(Logger_t log, ByteStream_t* stream, DeserialisedData_t* output)
 {
     int32_t res = 0;
 
-    if (!output->currentVnovaConfigSet) {
-        /* V-Nova config should always arrive before global config. If it has not
-         * been sent this frame and a global config is received, then V-Nova config
-         * is disabled. */
-        vnovaConfigReset(&output->vnova_config);
+    if (!output->vnovaConfig.set) {
+        /* V-Nova config should always arrive before global config. If it has not been sent this
+         * frame and a global config is received, then set the version permanently to the current
+         * version */
+        output->vnovaConfig.set = true;
+        output->vnovaConfig.bitstreamVersion = BitstreamVersionCurrent;
     }
 
     uint8_t data = 0;
@@ -736,17 +883,17 @@ static int32_t parseBlockGlobalConfig(Logger_t log, ByteStream_t* stream, Deseri
 
     /* plane_mode_flag: 1 bit */
     const uint8_t planeModeFlag = (data >> 7) & 0x01;
-    VN_DEBUG_SYNTAX("  Plane mode flag: %u\n", planeModeFlag);
+    VN_VERBOSE(log, "  Plane mode flag: %u\n", planeModeFlag);
 
     /* resolution_type: 6 bits */
     const uint8_t resType = (data >> 1) & 0x3F;
-    VN_DEBUG_SYNTAX("  Resolution type: %u\n", resType);
+    VN_VERBOSE(log, "  Resolution type: %u\n", resType);
 
     if (resType > 0 && resType < kResolutionCount) {
         output->width = kResolutions[resType].width;
         output->height = kResolutions[resType].height;
-        VN_DEBUG_SYNTAX("  Resolution width: %u\n", output->width);
-        VN_DEBUG_SYNTAX("  Resolution height: %u\n", output->height);
+        VN_VERBOSE(log, "  Resolution width: %u\n", output->width);
+        VN_VERBOSE(log, "  Resolution height: %u\n", output->height);
     } else if (resType != kResolutionCustom) {
         VN_ERROR(log, "Packet gave an unsupported resolution type %d\n", resType);
         return -1;
@@ -754,7 +901,7 @@ static int32_t parseBlockGlobalConfig(Logger_t log, ByteStream_t* stream, Deseri
 
     /* transform_type: 1 bit */
     output->transform = (TransformType_t)((data >> 0) & 0x01);
-    VN_DEBUG_SYNTAX("  Transform type: %s\n", transformTypeToString(output->transform));
+    VN_VERBOSE(log, "  Transform type: %s\n", transformTypeToString(output->transform));
 
     switch (output->transform) {
         case TransformDD: output->numLayers = RCLayerCountDD; break;
@@ -770,37 +917,37 @@ static int32_t parseBlockGlobalConfig(Logger_t log, ByteStream_t* stream, Deseri
 
     /* chroma_sampling_type: 2 bits */
     output->chroma = (Chroma_t)((data >> 6) & 0x03);
-    VN_DEBUG_SYNTAX("  Chroma sampling type: %s\n", chromaToString(output->chroma));
+    VN_VERBOSE(log, "  Chroma sampling type: %s\n", chromaToString(output->chroma));
 
     /* base_depth_type: 2 bits */
     output->baseDepth = (BitDepth_t)((data >> 4) & 0x03);
-    VN_DEBUG_SYNTAX("  Base depth: %s\n", bitdepthToString(output->baseDepth));
+    VN_VERBOSE(log, "  Base depth: %s\n", bitdepthToString(output->baseDepth));
 
     /* enhancement_depth_type: 2 bit */
     output->enhaDepth = (BitDepth_t)((data >> 2) & 0x03);
-    VN_DEBUG_SYNTAX("  Enhancement depth: %s\n", bitdepthToString(output->enhaDepth));
+    VN_VERBOSE(log, "  Enhancement depth: %s\n", bitdepthToString(output->enhaDepth));
 
-    /* temporal use step width modifier: 1 bit */
+    /* temporal_step_width_modifier_signalled_flag: 1 bit */
     const uint8_t useTemporalStepWidthModifier = (data >> 1) & 0x01;
-    VN_DEBUG_SYNTAX("  Use temporal step-width modifier: %u\n", useTemporalStepWidthModifier);
+    VN_VERBOSE(log, "  Use temporal step-width modifier: %u\n", useTemporalStepWidthModifier);
 
-    /* use predicted avg: 1 bit */
+    /* predicted_residual_mode_flag: 1 bit */
     output->usePredictedAverage = (data >> 0) & 0x01;
-    VN_DEBUG_SYNTAX("  Use predicted average: %u\n", output->usePredictedAverage);
+    VN_VERBOSE(log, "  Use predicted average: %u\n", output->usePredictedAverage);
 
     VN_CHECK(bytestreamReadU8(stream, &data));
 
-    /* temporal reduced signaling: 1 bit */
+    /* temporal_tile_intra_signalling_enabled_flag: 1 bit */
     output->temporalUseReducedSignalling = (data >> 7) & 0x01;
-    VN_DEBUG_SYNTAX("  Temporal use reduced signalling: %u\n", output->temporalUseReducedSignalling);
+    VN_VERBOSE(log, "  Temporal use reduced signalling: %u\n", output->temporalUseReducedSignalling);
 
-    /* temporal enabled: 1 bit */
+    /* temporal_enabled_flag: 1 bit */
     output->temporalEnabled = (data >> 6) & 0x01;
-    VN_DEBUG_SYNTAX("  Temporal enabled: %u\n", output->temporalEnabled);
+    VN_VERBOSE(log, "  Temporal enabled: %u\n", output->temporalEnabled);
 
-    /* upsample type: 3 bits */
+    /* upsample_type: 3 bits */
     const UpscaleType_t upsample = (UpscaleType_t)((data >> 3) & 0x07);
-    VN_DEBUG_SYNTAX("  Upsample type: %s\n", upscaleTypeToString(upsample));
+    VN_VERBOSE(log, "  Upsample type: %s\n", upscaleTypeToString(upsample));
 
     if (upsample != USNearest && upsample != USLinear && upsample != USCubic &&
         upsample != USModifiedCubic && upsample != USAdaptiveCubic) {
@@ -810,67 +957,51 @@ static int32_t parseBlockGlobalConfig(Logger_t log, ByteStream_t* stream, Deseri
 
     output->upscale = upsample;
 
-    /* level-1 filtering enabled: 1 bit */
-    output->deblock.enabled = (data >> 2) & 0x01;
-    VN_DEBUG_SYNTAX("  Use deblocking: %u\n", output->deblock.enabled);
+    /* level1_filtering_signalled_flag: 1 bit */
+    const uint8_t deblockingSignalled = (data >> 2) & 0x01;
+    VN_VERBOSE(log, "  Deblocking signalled: %u\n", deblockingSignalled);
 
-    /* scaling mode level-1: 2 bits */
+    /* scaling_mode_level1: 2 bits */
     output->scalingModes[LOQ1] = (ScalingMode_t)((data >> 0) & 0x03);
-    VN_DEBUG_SYNTAX("  Scaling mode LOQ-1: %s\n", scalingModeToString(output->scalingModes[LOQ1]));
+    VN_VERBOSE(log, "  Scaling mode LOQ-1: %s\n", scalingModeToString(output->scalingModes[LOQ1]));
 
     VN_CHECK(bytestreamReadU8(stream, &data));
 
-    /* scaling mode level-2: 2 bits*/
+    /* scaling_mode_level2: 2 bits*/
     output->scalingModes[LOQ0] = (ScalingMode_t)((data >> 6) & 0x03);
-    VN_DEBUG_SYNTAX("  Scaling mode LOQ-0: %s\n", scalingModeToString(output->scalingModes[LOQ0]));
+    VN_VERBOSE(log, "  Scaling mode LOQ-0: %s\n", scalingModeToString(output->scalingModes[LOQ0]));
 
-    /* tile dimensions type: 2 bits */
+    /* tile_dimensions_type: 2 bits */
     output->tileDimensions = (TileDimensions_t)((data >> 4) & 0x03);
-    VN_DEBUG_SYNTAX("  Tile dimensions: %s\n", tileDimensionsToString(output->tileDimensions));
+    VN_VERBOSE(log, "  Tile dimensions: %s\n", tileDimensionsToString(output->tileDimensions));
 
-    /* user data mode: 2 bits */
-    setUserDataConfig(output, (UserDataMode_t)((data >> 2) & 0x03));
+    /* user_data_enabled: 2 bits */
+    setUserDataConfig(log, output, (UserDataMode_t)((data >> 2) & 0x03));
 
-    /* level-1 depth flag: 1 bit
+    /* level1_depth_flag: 1 bit
        reserved: 1 bit */
     output->loq1UseEnhaDepth = ((data >> 1) & 0x01) ? true : false;
-    VN_DEBUG_SYNTAX("  LOQ-1 use enhancement depth: %u\n", output->loq1UseEnhaDepth);
+    VN_VERBOSE(log, "  LOQ-1 use enhancement depth: %u\n", output->loq1UseEnhaDepth);
 
-    /* chroma stepwidth flag: 1 bit*/
+    /* chroma_step_width_flag: 1 bit*/
     const uint8_t chromaStepWidthFlag = (data >> 0) & 0x01;
-    VN_DEBUG_SYNTAX("  Chroma step-width flag: %u\n", chromaStepWidthFlag);
+    VN_VERBOSE(log, "  Chroma step-width flag: %u\n", chromaStepWidthFlag);
 
     if (!isDepthConfigSupported(log, output)) {
         return -1;
     }
 
-    /* plane_type: 4 bits
-       reserved: 4 bits */
-    if (planeModeFlag) {
-        VN_CHECK(bytestreamReadU8(stream, &data));
-        PlanesType_t planeType = (PlanesType_t)((data >> 4) & 0x0f);
-        VN_DEBUG_SYNTAX("  Plane type: %s\n", planesTypeToString(planeType));
-
-        switch (planeType) {
-            case PlanesY: output->numPlanes = 1; break;
-            case PlanesYUV: output->numPlanes = 3; break;
-            default: {
-                VN_ERROR(log, "Unrecognised plane type: %u\n", planeType);
-                output->numPlanes = 0;
-                return -1;
-            }
-        }
-    } else {
-        output->numPlanes = 1;
+    output->numPlanes = parseGlobalConfigGetNumPlanes(log, stream, planeModeFlag);
+    if (output->numPlanes == 0) {
+        return -1;
     }
-    VN_DEBUG_SYNTAX("  Plane count: %u\n", output->numPlanes);
+    VN_VERBOSE(log, "  Plane count: %u\n", output->numPlanes);
 
+    /* temporal_step_width_modifier: 8 bits. (if absent, correct default is already set in deserialiseInitialise). */
     if (useTemporalStepWidthModifier != 0) {
         VN_CHECK(bytestreamReadU8(stream, &output->temporalStepWidthModifier));
-    } else {
-        output->temporalStepWidthModifier = 48;
     }
-    VN_DEBUG_SYNTAX("  Temporal step-width modifier: %u\n", output->temporalStepWidthModifier);
+    VN_VERBOSE(log, "  Temporal step-width modifier: %u\n", output->temporalStepWidthModifier);
 
     if (upsample == USAdaptiveCubic) {
         const int8_t kernelSize = 4;
@@ -890,130 +1021,53 @@ static int32_t parseBlockGlobalConfig(Logger_t log, ByteStream_t* stream, Deseri
                     (int16_t)(multiplier * coeff);
         }
 
-        VN_DEBUG_SYNTAX(
-            "  Adaptive upsampler kernel: %d %d %d %d\n",
+        VN_VERBOSE(
+            log, "  Adaptive upsampler kernel: %d %d %d %d\n",
             output->adaptiveUpscaleKernel.coeffs[0][0], output->adaptiveUpscaleKernel.coeffs[0][1],
             output->adaptiveUpscaleKernel.coeffs[0][2], output->adaptiveUpscaleKernel.coeffs[0][3]);
     }
 
-    if (output->deblock.enabled) {
+    /* Deblocking coefficients. */
+    if (deblockingSignalled) {
         VN_CHECK(bytestreamReadU8(stream, &data));
 
-        /* De-block corner: 4 bits */
+        /* level1_filtering_first_coefficient: 4 bits */
         output->deblock.corner = 16 - ((data >> 4) & 0x0F);
 
-        /* De-block side: 4 bits */
+        /* level1_filtering_second_coefficient: 4 bits */
         output->deblock.side = 16 - ((data >> 0) & 0x0F);
-
-        VN_DEBUG_SYNTAX("  Deblocking coeffs - 0: %u, 1: %u\n", output->deblock.corner,
-                        output->deblock.side);
+    } else {
+        output->deblock.corner = kDefaultDeblockCoefficient;
+        output->deblock.side = kDefaultDeblockCoefficient;
     }
+    VN_VERBOSE(log, "  Deblocking coeffs - 0: %u, 1: %u\n", output->deblock.corner, output->deblock.side);
 
-    if (output->tileDimensions != TDTNone) {
-        if (output->tileDimensions == TDTCustom) {
-            /* custom_tile_width: 16 bits */
-            VN_CHECK(bytestreamReadU16(stream, &output->tileWidth[0]));
-
-            /* custom_tile_height: 16 bits */
-            VN_CHECK(bytestreamReadU16(stream, &output->tileHeight[0]));
-        } else {
-            VN_CHECK(tileDimensionsFromType(output->tileDimensions, &output->tileWidth[0],
-                                            &output->tileHeight[0]));
-        }
-
-        VN_CHECK(bytestreamReadU8(stream, &data));
-
-        /* reserved: 5 bits
-           compression_type_entropy_enabled_per_tile_flag: 1 bit */
-        output->tileEnabledPerTileCompressionFlag = (data >> 2) & 0x01;
-
-        /* compression_type_size_per_tile: 2 bits */
-        output->tileSizeCompression = (TileCompressionSizePerTile_t)((data >> 0) & 0x03);
-
-        VN_DEBUG_SYNTAX("  Custom tile size: %ux%u\n", output->tileWidth[0], output->tileHeight[0]);
-        VN_DEBUG_SYNTAX("  Per tile enabled compression: %d\n", output->tileEnabledPerTileCompressionFlag);
-        VN_DEBUG_SYNTAX("  Tile size compression: %u\n", output->tileSizeCompression);
-    }
+    VN_CHECK(parseBlockGlobalConfigTiles(log, stream, output));
 
     /* custom resolution */
     if (resType == kResolutionCustom) {
         VN_CHECK(bytestreamReadU16(stream, &output->width));
         VN_CHECK(bytestreamReadU16(stream, &output->height));
 
-        VN_DEBUG_SYNTAX("  Custom resolution width: %u\n", output->width);
-        VN_DEBUG_SYNTAX("  Custom resolution height: %u\n", output->height);
+        VN_VERBOSE(log, "  Custom resolution width: %u\n", output->width);
+        VN_VERBOSE(log, "  Custom resolution height: %u\n", output->height);
     }
 
     output->globalHeight = output->height;
 
-    /* chroma step-width multiplier */
+    /* chroma_step_width_multiplier: 8 bits. If absent, correct default is already set in deserialiseInitialise. */
     if (chromaStepWidthFlag) {
         VN_CHECK(bytestreamReadU8(stream, &output->chromaStepWidthMultiplier));
-    } else {
-        output->chromaStepWidthMultiplier = QDefaultChromaSWMultiplier;
     }
 
-    VN_DEBUG_SYNTAX("  Chroma step-width multiplier: %u\n", output->chromaStepWidthMultiplier);
+    VN_VERBOSE(log, "  Chroma step-width multiplier: %u\n", output->chromaStepWidthMultiplier);
 
-    /* checks on viability of settings */
+    /* Validate settings, and use them to default initialise some data. */
     if (!validateResolution(log, output)) {
         return -1;
     }
 
-    /* initialise default quant matrix on first global config */
-    if (!output->globalConfigSet) {
-        quantMatrixSetDefault(&output->quantMatrix, output->scalingModes[LOQ0], output->transform);
-        VN_DEBUG_SYNTAX("  Defaulting quant-matrix\n");
-    }
-
-    /* prepare tile information */
-    if (output->tileDimensions == TDTNone) {
-        /* When tiling is disabled, there is a single tile that is the size of
-         * the surface for each plane. */
-        output->tileWidth[0] = output->width;
-        output->tileHeight[0] = output->height;
-    }
-
-    /* validate/update conformance window */
-    if (output->conformanceWindow.enabled) {
-        lcevc_conformance_window* window = &output->conformanceWindow;
-
-        const int32_t shiftw = chromaShiftWidth(output->chroma);
-        const int32_t shifth = chromaShiftHeight(output->chroma);
-
-        /* Mirror from luma entry to chroma entries */
-        memcpy(&window->planes[1], &window->planes[0], sizeof(lcevc_conformance_window_plane));
-        memcpy(&window->planes[2], &window->planes[0], sizeof(lcevc_conformance_window_plane));
-
-        /* The conformance window is signaled as the window to crop for the chroma
-         * planes - as a convenience the DPI outputs the crop windows for each plane
-         * in absolute pixels for that given plane based upon the chroma_t setting.
-         * Therefore scale the luma entry appropriately. */
-        window->planes[0].left <<= shiftw;
-        window->planes[0].right <<= shiftw;
-        window->planes[0].top <<= shifth;
-        window->planes[0].bottom <<= shifth;
-
-        for (int32_t i = 0; i < 3; ++i) {
-            VN_UNUSED(i);
-            VN_DEBUG_SYNTAX(
-                "  Conformance window plane: %d - left: %u, right: %u, top: %u, bottom: %u\n", i,
-                window->planes[i].left, window->planes[i].right, window->planes[i].top,
-                window->planes[i].bottom);
-        }
-
-        if ((window->planes[0].left + window->planes[0].right) >= output->width) {
-            VN_ERROR(log, "stream: Conformance window values combined are greater than decode width [left: %u, right: %u, width: %u]\n",
-                     window->planes[0].left, window->planes[0].right, output->width);
-            return -1;
-        }
-
-        if ((window->planes[0].top + window->planes[0].bottom) >= output->height) {
-            VN_ERROR(log, "stream: Window values combined are greater than decode width [top: %u, bottom: %u, height: %u]\n",
-                     window->planes[0].top, window->planes[0].bottom, output->height);
-            return -1;
-        }
-    }
+    VN_CHECK(postParseInitBlockGlobalConfig(log, output));
 
     output->globalConfigSet = true;
     output->currentGlobalConfigSet = true;
@@ -1021,165 +1075,261 @@ static int32_t parseBlockGlobalConfig(Logger_t log, ByteStream_t* stream, Deseri
     return 0;
 }
 
+static int32_t parseQuantMatrixLOQ0(const Logger_t log, ByteStream_t* stream,
+                                    QuantMatrixMode_t qmMode, DeserialisedData_t* output)
+{
+    switch (qmMode) {
+        case QMMCustomLOQ1:
+        case QMMUsePrevious: {
+            if (output->type == NTIDR || !output->quantMatrix.set) {
+                VN_VERBOSE(
+                    log,
+                    "  Defaulting loq0 quant-matrix (IDR frame or quant matrix not yet set)\n");
+                quantMatrixSetDefault(&output->quantMatrix, output->scalingModes[LOQ0],
+                                      output->transform, LOQ0);
+                return 0;
+            }
+            VN_VERBOSE(log, "  Leaving loq1 quant-matrix unchanged\n");
+            return 0;
+        }
+
+        case QMMUseDefault: {
+            VN_VERBOSE(log, "  Defaulting loq0 quant-matrix (signalled as default)\n");
+            quantMatrixSetDefault(&output->quantMatrix, output->scalingModes[LOQ0], output->transform, LOQ0);
+            return 0;
+        }
+
+        case QMMCustomLOQ0:
+        case QMMCustomBoth:
+        case QMMCustomBothUnique: {
+            VN_VERBOSE(log, "  Parsing custom loq0 quant-matrix\n");
+            return quantMatrixParseLOQ(stream, LOQ0, output);
+        }
+    }
+
+    /* qmMode not caught by switch/case, so error. */
+    return -1;
+}
+
+static int32_t parseQuantMatrixLOQ1(const Logger_t log, ByteStream_t* stream,
+                                    QuantMatrixMode_t qmMode, DeserialisedData_t* output)
+{
+    switch (qmMode) {
+        case QMMCustomLOQ0:
+        case QMMUsePrevious: {
+            if (output->type == NTIDR || !output->quantMatrix.set) {
+                VN_VERBOSE(
+                    log,
+                    "  Defaulting loq1 quant-matrix (IDR frame or quant matrix not yet set)\n");
+                quantMatrixSetDefault(&output->quantMatrix, output->scalingModes[LOQ0],
+                                      output->transform, LOQ1);
+                return 0;
+            }
+            VN_VERBOSE(log, "  Leaving loq1 quant-matrix unchanged\n");
+            return 0;
+        }
+
+        case QMMUseDefault: {
+            /* Note that the scaling mode for LOQ0 is still used for setting the default in LOQ1. */
+            VN_VERBOSE(log, "  Defaulting loq1 quant-matrix (signalled as default)\n");
+            quantMatrixSetDefault(&output->quantMatrix, output->scalingModes[LOQ0], output->transform, LOQ1);
+            return 0;
+        }
+
+        case QMMCustomLOQ1:
+        case QMMCustomBothUnique: {
+            VN_VERBOSE(log, "  Parsing custom loq1 quant-matrix\n");
+            return quantMatrixParseLOQ(stream, LOQ1, output);
+        }
+
+        case QMMCustomBoth: {
+            VN_VERBOSE(log, "  Copying custom loq0 quant-matrix into loq1 quant-matrix\n");
+            const uint8_t* loq0QM = quantMatrixGetValues(&output->quantMatrix, LOQ0);
+            uint8_t* loq1QM = quantMatrixGetValues(&output->quantMatrix, LOQ1);
+            const uint32_t copysize = output->numLayers * sizeof(uint8_t);
+
+            memcpy(loq1QM, loq0QM, copysize);
+            return 0;
+        }
+    }
+
+    /* qmMode not caught by switch/case, so error. */
+    return -1;
+}
+
+static int32_t parseBlockPictureConfigQuantMatrix(const Logger_t log, ByteStream_t* stream,
+                                                  QuantMatrixMode_t qmMode, DeserialisedData_t* output)
+{
+    int32_t res = 0;
+    VN_CHECK(parseQuantMatrixLOQ0(log, stream, qmMode, output));
+    VN_CHECK(parseQuantMatrixLOQ1(log, stream, qmMode, output));
+    output->quantMatrix.set = true;
+    return 0;
+}
+
+/* 7.3.6 (Table-10), everything outside the if(no_enhancement_bit_flag) test. */
+static int32_t parseBlockPictureConfigMisc(const Logger_t log, ByteStream_t* stream,
+                                           QuantMatrixMode_t qmMode, uint8_t stepWidthLOQ1Enabled,
+                                           uint8_t dequantOffsetEnabled, bool ditherControlPresent,
+                                           DeserialisedData_t* output)
+{
+    int32_t res;
+    uint8_t data;
+    uint16_t data16;
+
+    if (output->picType == PTField) {
+        VN_CHECK(bytestreamReadU8(stream, &data));
+
+        /* field_type: 1 bit
+         * reserved: 7 bits*/
+        output->fieldType = (FieldType_t)((data >> 7) & 0x01);
+        VN_VERBOSE(log, "  Field type: %s\n", fieldTypeToString(output->fieldType));
+    }
+
+    if (stepWidthLOQ1Enabled) {
+        VN_CHECK(bytestreamReadU16(stream, &data16));
+
+        /* step_width_sublayer1: 15 bits
+         * level1_filtering_enabled_flag: 1 bit */
+        output->stepWidths[LOQ1] = (data16 >> 1) & 0x7FFF;
+        output->deblock.enabled = data16 & 0x0001;
+    } else {
+        output->stepWidths[LOQ1] = QMaxStepWidth;
+    }
+    VN_VERBOSE(log, "  Step-width LOQ-1: %d\n", output->stepWidths[LOQ1]);
+
+    VN_CHECK(parseBlockPictureConfigQuantMatrix(log, stream, qmMode, output));
+    quantMatrixDebugLog(log, output, LOQ0);
+    quantMatrixDebugLog(log, output, LOQ1);
+
+    if (dequantOffsetEnabled) {
+        /* dequant_offset_mode_flag: 1 bit
+         * dequant_offset: 7 bits */
+        VN_CHECK(bytestreamReadU8(stream, &data));
+        output->dequantOffsetMode = (DequantOffsetMode_t)((data >> 7) & 0x01);
+        output->dequantOffset = (int32_t)(data & 0x7F);
+        VN_VERBOSE(log, "  Dequant offset mode: %s\n",
+                   dequantOffsetModeToString(output->dequantOffsetMode));
+        VN_VERBOSE(log, "  Dequant offset: %d\n", output->dequantOffset);
+    } else {
+        output->dequantOffset = -1;
+    }
+
+    bool ditheringEnabled = false;
+    if (output->vnovaConfig.bitstreamVersion >= BitstreamVersionAlignWithSpec) {
+        if (!ditherControlPresent && output->type == NTIDR) {
+            /* As per 7.4.3.4, if the flag is absent but it's an IDR frame, then the flag is 0.*/
+            output->ditherControlFlag = 0;
+        }
+        ditheringEnabled = output->ditherControlFlag;
+    } else {
+        /* Prior to BitstreamVersionAlignWithSpec, the dithering control flag was sent on EVERY
+         * frame with dithering enabled (and would come with strength). */
+        ditheringEnabled = ditherControlPresent && output->ditherControlFlag;
+    }
+
+    if (ditheringEnabled) {
+        /* Note: dithering is correctly defaulted to "disabled" in deserialiseInitialise. */
+        VN_CHECK(bytestreamReadU8(stream, &data));
+
+        /* dithering_type: 2 bits
+         * reserverd_zero: 1 bit */
+        output->ditherType = (DitherType_t)((data >> 6) & 0x03);
+
+        if (output->ditherType != 0) {
+            /* dithering_strength: 5 bits */
+            output->ditherStrength = (data >> 0) & 0x1F;
+        }
+    }
+
+    VN_VERBOSE(log, "  Dithering type: %s\n", ditherTypeToString(output->ditherType));
+    VN_VERBOSE(log, "  Dither strength: %u\n", output->ditherStrength);
+    return 0;
+}
+
 /* 7.3.6 (Table-10) & 7.4.3.4 */
-static int32_t parseBlockPictureConfig(ByteStream_t* stream, DeserialisedData_t* output)
+static int32_t parseBlockPictureConfig(const Logger_t log, ByteStream_t* stream, DeserialisedData_t* output)
 {
     int32_t res;
     uint8_t data;
 
-    /* Enhancement enabled check. (Signaled as disabled, so invert for better logic). */
+    /* no_enhancement_bit_flag: 1 bit. (it's a "no enhancement" bit, so invert for "enabled"). */
     VN_CHECK(bytestreamReadU8(stream, &data));
     output->enhancementEnabled = (data & 0x80) ? 0 : 1;
 
+    QuantMatrixMode_t qmMode = QMMUsePrevious; /* Default, as per 7.4.3.4 */
+    uint8_t stepWidthLOQ1Enabled = 0;
+    uint8_t dequantOffsetEnabled = 0;
+    bool ditherControlPresent = false;
     if (output->enhancementEnabled) {
-        QuantMatrixMode_t qmMode;
-        uint8_t dequantOffsetEnabled;
-        uint8_t stepWidthLOQ1Enabled;
-        uint8_t ditherControl;
+        VN_VERBOSE(log, "  Enhancement enabled\n");
 
-        VN_DEBUG_SYNTAX("  Enhancement enabled\n");
-
-        /* perseus disabled: 1 bit (already interpreted)
-         * quant-matrix mode: 3 bits */
+        /* no_enhancement_bit_flag: 1 bit (already interpreted)
+         * quant_matrix_mode: 3 bits */
         qmMode = (QuantMatrixMode_t)((data >> 4) & 0x07);
-        VN_DEBUG_SYNTAX("  Quant-matrix mode: %s\n", quantMatrixModeToString(qmMode));
+        VN_VERBOSE(log, "  Quant-matrix mode: %s\n", quantMatrixModeToString(qmMode));
 
-        /* dequant offset enabled: 1 bit */
+        /* dequant_offset_signalled_flag: 1 bit */
         dequantOffsetEnabled = (data >> 3) & 0x01;
-        VN_DEBUG_SYNTAX("  Dequant offset enabled: %u\n", dequantOffsetEnabled);
+        VN_VERBOSE(log, "  Dequant offset enabled: %u\n", dequantOffsetEnabled);
 
-        /* picture type: 1 bit */
+        /* picture_type_bit_flag: 1 bit */
         output->picType = (PictureType_t)((data >> 2) & 0x01);
-        VN_DEBUG_SYNTAX("  Picture type: %s\n", pictureTypeToString(output->picType));
+        VN_VERBOSE(log, "  Picture type: %s\n", pictureTypeToString(output->picType));
 
-        /* temporal refresh: 1 bit */
+        /* temporal_refresh: 1 bit */
         output->temporalRefresh = (data >> 1) & 0x01;
-        VN_DEBUG_SYNTAX("  Temporal refresh: %u\n", output->temporalRefresh);
+        VN_VERBOSE(log, "  Temporal refresh: %u\n", output->temporalRefresh);
 
-        /* step width LOQ 1 enabled: 1 bit */
+        /* temporal_signalling_present_bit is inferred, rather than read, if !enhancementEnabled */
+        output->temporalSignallingPresent = output->temporalEnabled && !output->temporalRefresh;
+        VN_VERBOSE(log, "  Temporal signalling present: %u\n", output->temporalSignallingPresent);
+
+        /* step_width_sublayer1_enabled_flag: 1 bit */
         stepWidthLOQ1Enabled = (data >> 0) & 0x01;
-        VN_DEBUG_SYNTAX("  Step-width LOQ-1 enabled: %u\n", stepWidthLOQ1Enabled);
+        VN_VERBOSE(log, "  Step-width LOQ-1 enabled: %u\n", stepWidthLOQ1Enabled);
 
         uint16_t data16;
         VN_CHECK(bytestreamReadU16(stream, &data16));
 
-        /* step width LOQ-0: 15 bits */
+        /* step_width_sublayer2: 15 bits */
         output->stepWidths[LOQ0] = (data16 >> 1) & 0x7FFF;
-        VN_DEBUG_SYNTAX("  Step-width LOQ-0: %u\n", output->stepWidths[LOQ0]);
+        VN_VERBOSE(log, "  Step-width LOQ-0: %u\n", output->stepWidths[LOQ0]);
 
-        /* dither control: 1 bit */
-        ditherControl = (data16 >> 0) & 0x01;
-        VN_DEBUG_SYNTAX("  Dither control: %u\n", ditherControl);
-
-        if (output->picType == PTField) {
-            VN_CHECK(bytestreamReadU8(stream, &data));
-
-            /* field type: 1 bit
-             * reserved: 7 bits*/
-            output->fieldType = (FieldType_t)((data >> 7) & 0x01);
-            VN_DEBUG_SYNTAX("  Field type: %s\n", fieldTypeToString(output->fieldType));
-        }
-
-        if (stepWidthLOQ1Enabled) {
-            VN_CHECK(bytestreamReadU16(stream, &data16));
-
-            /* step width LOQ-1: 15 bits
-             * reserved: 1 bit */
-            output->stepWidths[LOQ1] = (data16 >> 1) & 0x7FFF;
-        } else {
-            output->stepWidths[LOQ1] = QMaxStepWidth;
-        }
-
-        VN_DEBUG_SYNTAX("  Step-width LOQ-1: %u\n", output->stepWidths[LOQ1]);
-
-        if (qmMode != QMMUsePrevious) {
-            /* Default both quant-matrices initially if the frame is IDR */
-            if (output->type == NTIDR) {
-                quantMatrixSetDefault(&output->quantMatrix, output->scalingModes[LOQ0], output->transform);
-            }
-
-            /* Load up LOQ-0 quant-matrix if it's signalled */
-            if (qmMode == QMMCustomBoth || qmMode == QMMCustomLOQ0 || qmMode == QMMCustomBothUnique) {
-                /* Load up LOQ-0 quant-matrix */
-                VN_CHECK(quantMatrixParseLOQ(stream, LOQ0, output));
-            }
-
-            /* Load up LOQ-1 quant-matrix if its signalled */
-            if (qmMode == QMMCustomLOQ1 || qmMode == QMMCustomBothUnique) {
-                VN_CHECK(quantMatrixParseLOQ(stream, LOQ1, output));
-            } else if (qmMode == QMMCustomBoth) {
-                /* Copy LOQ-0 QM to LOQ-1 QM if both use the same custom signal. */
-                const uint8_t* loq0QM = quantMatrixGetValues(&output->quantMatrix, LOQ0);
-                uint8_t* loq1QM = quantMatrixGetValues(&output->quantMatrix, LOQ1);
-                const uint32_t copysize = output->numLayers * sizeof(uint8_t);
-
-                memcpy(loq1QM, loq0QM, copysize);
-            }
-        }
-
-        quantMatrixDebugLog(output, LOQ0);
-        quantMatrixDebugLog(output, LOQ1);
-
-        if (dequantOffsetEnabled != 0) {
-            VN_CHECK(bytestreamReadU8(stream, &data));
-
-            output->dequantOffsetMode = (DequantOffsetMode_t)((data >> 7) & 0x01);
-            output->dequantOffset = (int32_t)(data & 0x7F);
-
-            VN_DEBUG_SYNTAX("  Dequant offset mode: %s\n",
-                            dequantOffsetModeToString(output->dequantOffsetMode));
-            VN_DEBUG_SYNTAX("  Dequant offset: %d\n", output->dequantOffset);
-        } else {
-            output->dequantOffset = -1;
-        }
-
-        if (ditherControl) {
-            VN_CHECK(bytestreamReadU8(stream, &data));
-
-            /* dither type: 2 bits*/
-            output->ditherType = (DitherType_t)((data >> 6) & 0x03);
-
-            /* reserved: 1 bit
-             * dither strength: 5 bits */
-            output->ditherStrength = (data >> 0) & 0x1F;
-        } else if (output->currentGlobalConfigSet) {
-            /* On an IDR frame when dither is not signaled it should be disabled,
-             * otherwise the previous value should be used. (7.4.3.4) */
-            output->ditherType = DTNone;
-            output->ditherStrength = 0;
-        }
-
-        VN_DEBUG_SYNTAX("  Dithering type: %s\n", ditherTypeToString(output->ditherType));
-        VN_DEBUG_SYNTAX("  Dither strength: %u\n", output->ditherStrength);
-
-        /* Separate chunk is only signalled when we're not refreshing (and
-         * embedded is disabled) */
-        output->temporalChunkEnabled = output->temporalEnabled && !output->temporalRefresh;
-        VN_DEBUG_SYNTAX("  Temporal chunk enabled: %u\n", output->temporalChunkEnabled);
+        /* dithering_control_flag: 1 bit */
+        ditherControlPresent = true;
+        output->ditherControlFlag = (data16 >> 0) & 0x01;
+        VN_VERBOSE(log, "  Dither control: %u\n", output->ditherControlFlag);
     } else {
-        /* perseus disabled: 1 bit (already interpreted)
+        /* no_enhancement_bit_flag: 1 bit (already interpreted)
          * reserved: 4 bits */
-        VN_DEBUG_SYNTAX("  Enhancement disabled\n");
+        VN_VERBOSE(log, "  Enhancement disabled\n");
 
-        /* picture_type_bit: 1 bit */
+        /* picture_type_bit_flag: 1 bit */
         output->picType = (PictureType_t)((data >> 2) & 0x01);
-        VN_DEBUG_SYNTAX("  Picture type: %s\n", pictureTypeToString(output->picType));
+        VN_VERBOSE(log, "  Picture type: %s\n", pictureTypeToString(output->picType));
 
-        /* temporal_refresh_bit: 1 bit */
+        /* temporal_refresh_bit_flag: 1 bit */
         output->temporalRefresh = ((data >> 1) & 0x01);
-        VN_DEBUG_SYNTAX("  Temporal refresh: %u\n", output->temporalRefresh);
+        VN_VERBOSE(log, "  Temporal refresh: %u\n", output->temporalRefresh);
 
-        /* temporal_signalling_bit: 1 bit */
-        output->temporalChunkEnabled = ((data >> 0) & 0x01);
-        VN_DEBUG_SYNTAX("  Temporal chunk enabled: %u\n", output->temporalChunkEnabled);
+        /* temporal_signalling_present_flag: 1 bit */
+        output->temporalSignallingPresent = ((data >> 0) & 0x01);
+        VN_VERBOSE(log, "  Temporal signalling present: %u\n", output->temporalSignallingPresent);
 
         if (output->currentGlobalConfigSet) {
             /* Same situation as with LCEVC enabled, excepting that
              * dither control is implicitly not signalled here. */
-            VN_DEBUG_SYNTAX("Resetting dither state on IDR with LCEVC disabled\n");
+            VN_VERBOSE(log, "Resetting dither state on IDR with LCEVC disabled\n");
             output->ditherType = DTNone;
             output->ditherStrength = 0;
         }
+    }
+
+    /* Prior to BitstreamVersionAlignWithSpec, this data was only sent if enhancement was enabled */
+    if (output->vnovaConfig.bitstreamVersion >= BitstreamVersionAlignWithSpec || output->enhancementEnabled) {
+        VN_CHECK(parseBlockPictureConfigMisc(log, stream, qmMode, stepWidthLOQ1Enabled,
+                                             dequantOffsetEnabled, ditherControlPresent, output));
     }
 
     output->height = (output->globalHeight >> output->picType);
@@ -1211,7 +1361,7 @@ static int32_t chunkCheckAlloc(Memory_t memory, Logger_t log, DeserialisedData_t
         }
     }
 
-    if (data->temporalChunkEnabled) {
+    if (data->temporalSignallingPresent) {
         for (int32_t plane = 0; plane < data->numPlanes; ++plane) {
             chunkCount += data->tileCount[plane][LOQ0];
         }
@@ -1232,7 +1382,7 @@ static int32_t chunkCheckAlloc(Memory_t memory, Logger_t log, DeserialisedData_t
         return -1;
     }
 
-    VN_DEBUG_SYNTAX("  Chunk count: %d\n", data->numChunks);
+    VN_VERBOSE(log, "  Chunk count: %d\n", data->numChunks);
 
     return 0;
 }
@@ -1274,9 +1424,9 @@ static int32_t parseChunk(Logger_t log, ByteStream_t* stream, Chunk_t* chunk,
         chunk->data = bytestreamCurrent(stream);
         VN_CHECK(bytestreamSeek(stream, chunk->size));
 
-        VN_DEBUG_SYNTAX("%s=%u\n", chunk->rleOnly ? "RLE" : "Huffman", chunk->size);
+        VN_VERBOSE(log, "%s=%u\n", chunk->rleOnly ? "RLE" : "Huffman", chunk->size);
     } else {
-        VN_DEBUG_SYNTAX("disabled\n");
+        VN_VERBOSE(log, "disabled\n");
     }
 
     return 0;
@@ -1303,12 +1453,12 @@ static int32_t parseCoeffChunks(Logger_t log, ByteStream_t* stream, Deserialised
     VN_CHECK(deserialiseGetTileLayerChunks(output, plane, loq, 0, &chunks));
 
     for (int32_t layer = 0; layer < output->numLayers; ++layer) {
-        VN_DEBUG_SYNTAX("    [%d, %d, %2d]: ", plane, loq, layer);
+        VN_VERBOSE(log, "    [%d, %d, %2d]: ", plane, loq, layer);
         VN_CHECK(parseChunk(log, stream, &chunks[layer], &output->entropyEnabled[loq], NULL));
     }
 
-    VN_DEBUG_SYNTAX("    %s enabled: %d\n", loqIndexToString((LOQIndex_t)loq),
-                    output->entropyEnabled[loq]);
+    VN_VERBOSE(log, "    %s enabled: %d\n", loqIndexToString((LOQIndex_t)loq),
+               output->entropyEnabled[loq]);
 
     return res;
 }
@@ -1350,7 +1500,7 @@ static int32_t parseEncodedData(Memory_t memory, Logger_t log, ByteStream_t* str
             }
         }
 
-        if (output->temporalChunkEnabled) {
+        if (output->temporalSignallingPresent) {
             Chunk_t* temporalChunk;
             VN_CHECK(deserialiseGetTileTemporalChunk(output, plane, 0, &temporalChunk));
             VN_CHECK(parseChunkFlags(&chunkHeadersStream, temporalChunk, 1));
@@ -1365,7 +1515,7 @@ static int32_t parseEncodedData(Memory_t memory, Logger_t log, ByteStream_t* str
 
     /* --- Read chunk data --- */
 
-    VN_DEBUG_SYNTAX("  [Plane, LoQ, Layer]\n");
+    VN_VERBOSE(log, "  [Plane, LoQ, Layer]\n");
     for (int32_t plane = 0; plane < output->numPlanes; ++plane) {
         if (output->enhancementEnabled) {
             for (int32_t loq = LOQ1; loq >= LOQ0; --loq) {
@@ -1373,8 +1523,8 @@ static int32_t parseEncodedData(Memory_t memory, Logger_t log, ByteStream_t* str
             }
         }
 
-        if (output->temporalChunkEnabled) {
-            VN_DEBUG_SYNTAX("    [temporal: %d]: ", plane);
+        if (output->temporalSignallingPresent) {
+            VN_VERBOSE(log, "    [temporal: %d]: ", plane);
             Chunk_t* temporalChunk = NULL;
             VN_CHECK(deserialiseGetTileTemporalChunk(output, plane, 0, &temporalChunk));
             if (temporalChunk == NULL) {
@@ -1388,7 +1538,7 @@ static int32_t parseEncodedData(Memory_t memory, Logger_t log, ByteStream_t* str
 }
 
 static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t* stream,
-                                     DeserialisedData_t* output, bool useOldCodeLengths)
+                                     DeserialisedData_t* output)
 {
     int32_t res = 0;
 
@@ -1414,7 +1564,7 @@ static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t
     output->entropyEnabled[LOQ0] = false;
     output->entropyEnabled[LOQ1] = false;
 
-    if (output->enhancementEnabled || output->temporalChunkEnabled) {
+    if (output->enhancementEnabled || output->temporalSignallingPresent) {
         BitStream_t rleOnlyBS = {{0}};
         uint8_t layerRLEOnly = 0;
 
@@ -1428,8 +1578,8 @@ static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t
 
         /* --- Read the RLE-only flags --- */
 
-        VN_DEBUG_SYNTAX("  RLE only flags\n");
-        VN_DEBUG_SYNTAX("  [Plane, LoQ, Layer]\n");
+        VN_VERBOSE(log, "  RLE only flags\n");
+        VN_VERBOSE(log, "  [Plane, LoQ, Layer]\n");
 
         for (int32_t plane = 0; plane < output->numPlanes; ++plane) {
             /* Whole surface RLE only flag per-layer */
@@ -1441,7 +1591,7 @@ static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t
                         /* Read a bit for RLE signal. */
                         VN_CHECK(bitstreamReadBit(&rleOnlyBS, &layerRLEOnly));
 
-                        VN_DEBUG_SYNTAX("  [%u, %d, %2u]: %u\n", plane, loq, layer, layerRLEOnly);
+                        VN_VERBOSE(log, "  [%u, %d, %2u]: %u\n", plane, loq, layer, layerRLEOnly);
 
                         /* Broadcast RLE only to all tiles for a layer. */
                         for (int32_t tile = 0; tile < currentTileCount; ++tile) {
@@ -1455,14 +1605,14 @@ static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t
             }
 
             /* Temporal layer RLE only flag*/
-            if (output->temporalChunkEnabled) {
+            if (output->temporalSignallingPresent) {
                 /* Read a bit for RLE signal. */
                 uint8_t temporalRLEOnly = 0;
                 const int32_t currentTileCount = output->tileCount[plane][LOQ0];
                 Chunk_t* temporalTileChunks = &output->chunks[output->tileChunkTemporalIndex[plane]];
 
                 VN_CHECK(bitstreamReadBit(&rleOnlyBS, &temporalRLEOnly));
-                VN_DEBUG_SYNTAX("  [temporal: %u]: %u\n", plane, temporalRLEOnly);
+                VN_VERBOSE(log, "  [temporal: %u]: %u\n", plane, temporalRLEOnly);
 
                 /* Broadcast RLE only to all tiles for the temporal layer. */
                 for (int32_t tile = 0; tile < currentTileCount; ++tile) {
@@ -1504,7 +1654,7 @@ static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t
                 }
             }
 
-            if (output->temporalChunkEnabled) {
+            if (output->temporalSignallingPresent) {
                 const int32_t currentTileCount = output->tileCount[plane][LOQ0];
                 Chunk_t* temporalTileChunks = &output->chunks[output->tileChunkTemporalIndex[plane]];
 
@@ -1527,8 +1677,8 @@ static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t
 
         /* --- Read chunk data --- */
 
-        VN_DEBUG_SYNTAX("  Entropy Signal\n");
-        VN_DEBUG_SYNTAX("  [Plane, LOQ, Layer, Tile] \n");
+        VN_VERBOSE(log, "  Entropy Signal\n");
+        VN_VERBOSE(log, "  [Plane, LOQ, Layer, Tile] \n");
         for (int32_t plane = 0; plane < output->numPlanes; ++plane) {
             if (output->enhancementEnabled) {
                 for (int32_t loq = LOQ1; loq >= LOQ0; --loq) {
@@ -1547,9 +1697,9 @@ static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t
                                 numChunksEnabled += chunk->entropyEnabled;
                             }
 
-                            VN_CHECK(tiledSizeDecoderInitialise(memory, log, &sizeDecoder, numChunksEnabled,
-                                                                stream, output->tileSizeCompression,
-                                                                useOldCodeLengths));
+                            VN_CHECK(tiledSizeDecoderInitialise(
+                                memory, log, &sizeDecoder, numChunksEnabled, stream,
+                                output->tileSizeCompression, output->vnovaConfig.bitstreamVersion));
                         }
 
                         for (int32_t tile = 0; tile < currentTileCount; ++tile) {
@@ -1557,19 +1707,19 @@ static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t
                                 getLayerChunkIndex(output, plane, (LOQIndex_t)loq, tile, layer);
                             Chunk_t* chunk = &output->chunks[chunkIndex];
 
-                            VN_DEBUG_SYNTAX("    [%d, %d, %2d, %3d] chunk %-4d: ", plane, loq,
-                                            layer, tile, chunkIndex);
+                            VN_VERBOSE(log, "    [%d, %d, %2d, %3d] chunk %-4d: ", plane, loq,
+                                       layer, tile, chunkIndex);
                             VN_CHECK(parseChunk(log, stream, chunk, &output->entropyEnabled[loq],
                                                 sizeDecoderPtr));
                         }
                     }
 
-                    VN_DEBUG_SYNTAX("    %s enabled: %s\n", loqIndexToString((LOQIndex_t)loq),
-                                    output->entropyEnabled[loq] ? "true" : "false");
+                    VN_VERBOSE(log, "    %s enabled: %s\n", loqIndexToString((LOQIndex_t)loq),
+                               output->entropyEnabled[loq] ? "true" : "false");
                 }
             }
 
-            if (output->temporalChunkEnabled) {
+            if (output->temporalSignallingPresent) {
                 const int32_t currentTileCount = output->tileCount[plane][LOQ0];
                 Chunk_t* temporalTileChunks = &output->chunks[output->tileChunkTemporalIndex[plane]];
 
@@ -1580,12 +1730,13 @@ static int32_t parseEncodedDataTiled(Memory_t memory, Logger_t log, ByteStream_t
                         numChunksEnabled += temporalTileChunks[tile].entropyEnabled;
                     }
 
-                    VN_CHECK(tiledSizeDecoderInitialise(memory, log, &sizeDecoder, numChunksEnabled, stream,
-                                                        output->tileSizeCompression, useOldCodeLengths));
+                    VN_CHECK(tiledSizeDecoderInitialise(memory, log, &sizeDecoder, numChunksEnabled,
+                                                        stream, output->tileSizeCompression,
+                                                        output->vnovaConfig.bitstreamVersion));
                 }
 
                 for (int32_t tile = 0; tile < currentTileCount; ++tile) {
-                    VN_DEBUG_SYNTAX("    temporal: [%d, %3u]: ", plane, tile);
+                    VN_VERBOSE(log, "    temporal: [%d, %3u]: ", plane, tile);
                     VN_CHECK(parseChunk(log, stream, &temporalTileChunks[tile],
                                         &output->entropyEnabled[LOQ0], sizeDecoderPtr));
                 }
@@ -1604,7 +1755,7 @@ static int32_t parseBlockFiller(ByteStream_t* stream, uint32_t blockSize)
     return bytestreamSeek(stream, blockSize);
 }
 
-static int32_t parseSEIPayload(ByteStream_t* stream, lcevc_hdr_info* hdrInfoOut,
+static int32_t parseSEIPayload(const Logger_t log, ByteStream_t* stream, lcevc_hdr_info* hdrInfoOut,
                                DeserialisedData_t* deserialisedOut, uint32_t blockSize)
 {
     int32_t res = 0;
@@ -1612,7 +1763,7 @@ static int32_t parseSEIPayload(ByteStream_t* stream, lcevc_hdr_info* hdrInfoOut,
     uint8_t data;
     VN_CHECK(bytestreamReadU8(stream, &data));
     SEIPayloadType_t payloadType = (SEIPayloadType_t)data;
-    VN_DEBUG_SYNTAX("    sei_payload_type: %s\n", seiPayloadTypeToString(payloadType));
+    VN_VERBOSE(log, "    sei_payload_type: %s\n", seiPayloadTypeToString(payloadType));
 
     if (payloadType == SPT_MasteringDisplayColourVolume) {
         /* D.2.2 */
@@ -1624,8 +1775,8 @@ static int32_t parseSEIPayload(ByteStream_t* stream, lcevc_hdr_info* hdrInfoOut,
             VN_CHECK(bytestreamReadU16(stream, &colorInfo->display_primaries_x[i]));
             VN_CHECK(bytestreamReadU16(stream, &colorInfo->display_primaries_y[i]));
 
-            VN_DEBUG_SYNTAX("      display primaries: index %u - x=%u, y=%u\n", i,
-                            colorInfo->display_primaries_x[i], colorInfo->display_primaries_y[i]);
+            VN_VERBOSE(log, "      display primaries: index %u - x=%u, y=%u\n", i,
+                       colorInfo->display_primaries_x[i], colorInfo->display_primaries_y[i]);
         }
 
         VN_CHECK(bytestreamReadU16(stream, &colorInfo->white_point_x));
@@ -1633,12 +1784,12 @@ static int32_t parseSEIPayload(ByteStream_t* stream, lcevc_hdr_info* hdrInfoOut,
         VN_CHECK(bytestreamReadU32(stream, &colorInfo->max_display_mastering_luminance));
         VN_CHECK(bytestreamReadU32(stream, &colorInfo->min_display_mastering_luminance));
 
-        VN_DEBUG_SYNTAX("      white point x: %u\n", colorInfo->white_point_x);
-        VN_DEBUG_SYNTAX("      white point y: %u\n", colorInfo->white_point_y);
-        VN_DEBUG_SYNTAX("      max display mastering luminance: %u\n",
-                        colorInfo->max_display_mastering_luminance);
-        VN_DEBUG_SYNTAX("      min display mastering luminance: %u\n",
-                        colorInfo->min_display_mastering_luminance);
+        VN_VERBOSE(log, "      white point x: %u\n", colorInfo->white_point_x);
+        VN_VERBOSE(log, "      white point y: %u\n", colorInfo->white_point_y);
+        VN_VERBOSE(log, "      max display mastering luminance: %u\n",
+                   colorInfo->max_display_mastering_luminance);
+        VN_VERBOSE(log, "      min display mastering luminance: %u\n",
+                   colorInfo->min_display_mastering_luminance);
 
         hdrInfoOut->flags |= LCEVC_HDRF_MASTERING_DISPLAY_COLOUR_VOLUME_PRESENT;
     } else if (payloadType == SPT_ContentLightLevelInfo) {
@@ -1650,14 +1801,14 @@ static int32_t parseSEIPayload(ByteStream_t* stream, lcevc_hdr_info* hdrInfoOut,
         VN_CHECK(bytestreamReadU16(stream, &lightLevel->max_content_light_level));
         VN_CHECK(bytestreamReadU16(stream, &lightLevel->max_pic_average_light_level));
 
-        VN_DEBUG_SYNTAX("      max content light level: %u\n", lightLevel->max_content_light_level);
-        VN_DEBUG_SYNTAX("      max pic average light level: %u\n", lightLevel->max_pic_average_light_level);
+        VN_VERBOSE(log, "      max content light level: %u\n", lightLevel->max_content_light_level);
+        VN_VERBOSE(log, "      max pic average light level: %u\n", lightLevel->max_pic_average_light_level);
 
         hdrInfoOut->flags |= LCEVC_HDRF_CONTENT_LIGHT_LEVEL_INFO_PRESENT;
     } else if (payloadType == SPT_UserDataRegistered) {
         /* D.2.4 */
 
-        /* Write values to deserialisedOut and its vnova_config (IF present in stream) */
+        /* Write values to deserialisedOut and its vnovaConfig (IF present in stream) */
         uint8_t ituHeader[ITUC_Length] = {0};
 
         VN_CHECK(bytestreamReadU8(stream, &ituHeader[0]));
@@ -1675,19 +1826,31 @@ static int32_t parseSEIPayload(ByteStream_t* stream, lcevc_hdr_info* hdrInfoOut,
             return bytestreamSeek(stream, blockSize - ITUC_Length);
         }
 
-        VNConfig_t* cfg = &deserialisedOut->vnova_config;
-        VN_DEBUG_SYNTAX("      V-Nova SEI Payload Found\n");
-
-        VN_CHECK(bytestreamReadU8(stream, &cfg->bitstreamVersion));
-        VN_DEBUG_SYNTAX("      Bitstream version: %u\n", cfg->bitstreamVersion);
-
-        cfg->valid = true;
-        deserialisedOut->currentVnovaConfigSet = true;
-
-        VN_DEBUG_SYNTAX("V-Nova Bitstream Version: %u\n", cfg->bitstreamVersion);
-
+        VNConfig_t* cfg = &deserialisedOut->vnovaConfig;
+        VN_VERBOSE(log, "      V-Nova SEI Payload Found\n");
+        if (cfg->set) {
+            VN_CHECK(bytestreamSeek(stream, 1));
+            /* Stream shouldn't provide version more than once, but it's technically not bad if it
+             * does, so just do a debug rather than full warning. */
+            VN_VERBOSE(
+                log,
+                "      Ignoring version. Version was either set to %u by the config, or else the "
+                "stream is providing version data wrongly (i.e. multiple times, or too late to be "
+                "used).\n",
+                cfg->bitstreamVersion);
+        } else {
+            VN_CHECK(bytestreamReadU8(stream, &cfg->bitstreamVersion));
+            cfg->set = (cfg->bitstreamVersion >= BitstreamVersionInitial &&
+                        cfg->bitstreamVersion <= BitstreamVersionCurrent);
+            if (!cfg->set) {
+                VN_ERROR(log, "Unsupported bitstream version detected %d, supported versions are between %d and %d",
+                         cfg->bitstreamVersion, BitstreamVersionInitial, BitstreamVersionCurrent);
+                return -1;
+            }
+            VN_VERBOSE(log, "      Bitstream version: %u\n", cfg->bitstreamVersion);
+        }
     } else {
-        VN_DEBUG_SYNTAX("      unsupported SEI payload type, skipping %d bytes\n", blockSize - 1);
+        VN_WARNING(log, "      unsupported SEI payload type, skipping %d bytes\n", blockSize - 1);
         return bytestreamSeek(stream, blockSize - 1);
     }
 
@@ -1695,7 +1858,8 @@ static int32_t parseSEIPayload(ByteStream_t* stream, lcevc_hdr_info* hdrInfoOut,
 }
 
 /* E.2 */
-static int32_t parseVUIParameters(ByteStream_t* stream, lcevc_vui_info* vuiInfoOut, uint32_t vuiSize)
+static int32_t parseVUIParameters(const Logger_t log, ByteStream_t* stream,
+                                  lcevc_vui_info* vuiInfoOut, uint32_t vuiSize)
 {
     int32_t res = 0;
     uint8_t bit = 0;
@@ -1706,7 +1870,7 @@ static int32_t parseVUIParameters(ByteStream_t* stream, lcevc_vui_info* vuiInfoO
 
     /* aspect_ratio_info_present_flag: 1 bit */
     VN_CHECK(bitstreamReadBit(&bitstream, &bit));
-    VN_DEBUG_SYNTAX("    aspect_ratio_info_present: %d\n", bit);
+    VN_VERBOSE(log, "    aspect_ratio_info_present: %d\n", bit);
 
     if (bit) {
         vuiInfoOut->flags |= PSS_VUIF_ASPECT_RATIO_INFO_PRESENT;
@@ -1714,7 +1878,7 @@ static int32_t parseVUIParameters(ByteStream_t* stream, lcevc_vui_info* vuiInfoO
         /* aspect_ratio_idc: 8 bits */
         VN_CHECK(bitstreamReadBits(&bitstream, 8, &bits));
         vuiInfoOut->aspect_ratio_idc = (uint8_t)bits;
-        VN_DEBUG_SYNTAX("      aspect_ratio_idc: %u\n", vuiInfoOut->aspect_ratio_idc);
+        VN_VERBOSE(log, "      aspect_ratio_idc: %u\n", vuiInfoOut->aspect_ratio_idc);
 
         if (vuiInfoOut->aspect_ratio_idc == kVUIAspectRatioIDCExtendedSAR) {
             /* sar_width: 16 bits */
@@ -1725,14 +1889,14 @@ static int32_t parseVUIParameters(ByteStream_t* stream, lcevc_vui_info* vuiInfoO
             VN_CHECK(bitstreamReadBits(&bitstream, 16, &bits));
             vuiInfoOut->sar_height = (uint16_t)bits;
 
-            VN_DEBUG_SYNTAX("      sar_width: %u\n", vuiInfoOut->sar_width);
-            VN_DEBUG_SYNTAX("      sar_height: %u\n", vuiInfoOut->sar_height);
+            VN_VERBOSE(log, "      sar_width: %u\n", vuiInfoOut->sar_width);
+            VN_VERBOSE(log, "      sar_height: %u\n", vuiInfoOut->sar_height);
         }
     }
 
     /* overscan_info_present_flag: 1 bit */
     VN_CHECK(bitstreamReadBit(&bitstream, &bit));
-    VN_DEBUG_SYNTAX("    overscan_info_present: %d\n", bit);
+    VN_VERBOSE(log, "    overscan_info_present: %d\n", bit);
 
     if (bit) {
         vuiInfoOut->flags |= PSS_VUIF_OVERSCAN_INFO_PRESENT;
@@ -1743,12 +1907,12 @@ static int32_t parseVUIParameters(ByteStream_t* stream, lcevc_vui_info* vuiInfoO
             vuiInfoOut->flags |= PSS_VUIF_OVERSCAN_APPROPRIATE;
         }
 
-        VN_DEBUG_SYNTAX("      overscan_appropriate: %d\n", bit);
+        VN_VERBOSE(log, "      overscan_appropriate: %d\n", bit);
     }
 
     /* video_signal_type_present_flag: 1 bit */
     VN_CHECK(bitstreamReadBit(&bitstream, &bit));
-    VN_DEBUG_SYNTAX("    video_signal_type: %d\n", bit);
+    VN_VERBOSE(log, "    video_signal_type: %d\n", bit);
 
     if (bit) {
         vuiInfoOut->flags |= PSS_VUIF_VIDEO_SIGNAL_TYPE_PRESENT;
@@ -1756,18 +1920,18 @@ static int32_t parseVUIParameters(ByteStream_t* stream, lcevc_vui_info* vuiInfoO
         /* video_format: 3 bits */
         VN_CHECK(bitstreamReadBits(&bitstream, 3, &bits));
         vuiInfoOut->video_format = (lcevc_vui_video_format)bits;
-        VN_DEBUG_SYNTAX("      video_format: %u\n", vuiInfoOut->video_format);
+        VN_VERBOSE(log, "      video_format: %u\n", vuiInfoOut->video_format);
 
         /* video_full_range_flag: 1 bit */
         VN_CHECK(bitstreamReadBit(&bitstream, &bit));
         if (bit) {
             vuiInfoOut->flags |= PSS_VUIF_VIDEO_SIGNAL_FULL_RANGE_FLAG;
         }
-        VN_DEBUG_SYNTAX("      video_full_range: %d\n", bit);
+        VN_VERBOSE(log, "      video_full_range: %d\n", bit);
 
         /* colour_description_present_flag: 1 bit */
         VN_CHECK(bitstreamReadBit(&bitstream, &bit));
-        VN_DEBUG_SYNTAX("      colour_description_present: %d\n", bit);
+        VN_VERBOSE(log, "      colour_description_present: %d\n", bit);
 
         if (bit) {
             vuiInfoOut->flags |= PSS_VUIF_VIDEO_SIGNAL_COLOUR_DESC_PRESENT;
@@ -1784,15 +1948,15 @@ static int32_t parseVUIParameters(ByteStream_t* stream, lcevc_vui_info* vuiInfoO
             VN_CHECK(bitstreamReadBits(&bitstream, 8, &bits));
             vuiInfoOut->matrix_coefficients = (uint8_t)bits;
 
-            VN_DEBUG_SYNTAX("        colour_primaries: %u\n", vuiInfoOut->colour_primaries);
-            VN_DEBUG_SYNTAX("        transfer_characteristics: %u\n", vuiInfoOut->transfer_characteristics);
-            VN_DEBUG_SYNTAX("        matrix_coefficients: %u\n", vuiInfoOut->matrix_coefficients);
+            VN_VERBOSE(log, "        colour_primaries: %u\n", vuiInfoOut->colour_primaries);
+            VN_VERBOSE(log, "        transfer_characteristics: %u\n", vuiInfoOut->transfer_characteristics);
+            VN_VERBOSE(log, "        matrix_coefficients: %u\n", vuiInfoOut->matrix_coefficients);
         }
     }
 
     /* chroma_loc_info_present_flag: 1 bit*/
     VN_CHECK(bitstreamReadBit(&bitstream, &bit));
-    VN_DEBUG_SYNTAX("    chroma_loc_info_present: %d\n", bit);
+    VN_VERBOSE(log, "    chroma_loc_info_present: %d\n", bit);
 
     if (bit) {
         vuiInfoOut->flags |= PSS_VUIF_CHROMA_LOC_INFO_PRESENT;
@@ -1803,17 +1967,17 @@ static int32_t parseVUIParameters(ByteStream_t* stream, lcevc_vui_info* vuiInfoO
         /* chroma_sample_loc_type_bottom_field: ue(v) */
         VN_CHECK(bitstreamReadExpGolomb(&bitstream, &vuiInfoOut->chroma_sample_loc_type_bottom_field));
 
-        VN_DEBUG_SYNTAX("      chroma_sample_loc_type_top_field: %u\n",
-                        vuiInfoOut->chroma_sample_loc_type_top_field);
-        VN_DEBUG_SYNTAX("      chroma_sample_loc_type_bottom_field: %u\n",
-                        vuiInfoOut->chroma_sample_loc_type_bottom_field);
+        VN_VERBOSE(log, "      chroma_sample_loc_type_top_field: %u\n",
+                   vuiInfoOut->chroma_sample_loc_type_top_field);
+        VN_VERBOSE(log, "      chroma_sample_loc_type_bottom_field: %u\n",
+                   vuiInfoOut->chroma_sample_loc_type_bottom_field);
     }
 
     /* Finally seek the byte-stream forward */
     return bytestreamSeek(stream, vuiSize);
 }
 
-static int32_t parseSFilterPayload(ByteStream_t* stream, DeserialisedData_t* output)
+static int32_t parseSFilterPayload(const Logger_t log, ByteStream_t* stream, DeserialisedData_t* output)
 {
     int32_t res = 0;
     uint8_t sfilterByte;
@@ -1822,8 +1986,8 @@ static int32_t parseSFilterPayload(ByteStream_t* stream, DeserialisedData_t* out
     output->sharpenType = (SharpenType_t)((sfilterByte & 0xE0) >> 5);
     const uint8_t signalledSharpenStrength = (sfilterByte & 0x1F);
     output->sharpenStrength = (signalledSharpenStrength + 1) * 0.01f;
-    VN_DEBUG_SYNTAX("    sharpen_type: %s\n", sharpenTypeToString(output->sharpenType));
-    VN_DEBUG_SYNTAX("    sharpen_strength: %d [%f]\n", signalledSharpenStrength, output->sharpenStrength);
+    VN_VERBOSE(log, "    sharpen_type: %s\n", sharpenTypeToString(output->sharpenType));
+    VN_VERBOSE(log, "    sharpen_strength: %d [%f]\n", signalledSharpenStrength, output->sharpenStrength);
     return res;
 }
 
@@ -1837,22 +2001,22 @@ static int32_t parseHDRPayload(Logger_t log, ByteStream_t* stream, lcevc_hdr_inf
 
     /* tone_mapper_location: 1 bit */
     uint8_t toneMapperLocation = (byte >> 7) & 0b1;
-    VN_DEBUG_SYNTAX("    tone_mapper_location: %u\n", toneMapperLocation);
+    VN_VERBOSE(log, "    tone_mapper_location: %u\n", toneMapperLocation);
     /* tone_mapper_type: 5 bit */
     uint8_t toneMapperType = (byte >> 2) & 0b11111;
-    VN_DEBUG_SYNTAX("    tone_mapper_type: %u\n", toneMapperType);
+    VN_VERBOSE(log, "    tone_mapper_type: %u\n", toneMapperType);
     /* tone_mapper_data_present_flag: 1 bit */
     uint8_t toneMapperDataPresentFlag = (byte >> 1) & 0b1;
-    VN_DEBUG_SYNTAX("    tone_mapper_data_present_flag: %u\n", toneMapperDataPresentFlag);
+    VN_VERBOSE(log, "    tone_mapper_data_present_flag: %u\n", toneMapperDataPresentFlag);
     /* deinterlacer_enabled_flag: 1 bit */
     uint8_t deinterlacerEnabledFlag = byte & 0b1;
-    VN_DEBUG_SYNTAX("    deinterlacer_enabled_flag: %u\n", deinterlacerEnabledFlag);
+    VN_VERBOSE(log, "    deinterlacer_enabled_flag: %u\n", deinterlacerEnabledFlag);
 
     if (toneMapperDataPresentFlag) {
         /*  tone_mapper.size: multibyte */
         uint64_t toneMapperSize = 0;
         VN_CHECK(bytestreamReadMultiByte(stream, &toneMapperSize));
-        VN_DEBUG_SYNTAX("        tone_mapper_size: %" PRIu64 "\n", toneMapperSize);
+        VN_VERBOSE(log, "        tone_mapper_size: %" PRIu64 "\n", toneMapperSize);
         /*  tone_mapper.payload: tone_mapper.size */
         // Skip tonemapper data as not supported yet
         VN_CHECK(bytestreamSeek(stream, (size_t)toneMapperSize));
@@ -1860,7 +2024,7 @@ static int32_t parseHDRPayload(Logger_t log, ByteStream_t* stream, lcevc_hdr_inf
     if (toneMapperType == 31) {
         /* tone_mapper_type_extended: 8 bit */
         VN_CHECK(bytestreamReadU8(stream, &toneMapperType));
-        VN_DEBUG_SYNTAX("        tone_mapper_type_extended: %u\n", toneMapperType);
+        VN_VERBOSE(log, "        tone_mapper_type_extended: %u\n", toneMapperType);
     }
     int8_t deinterlacerType = -1;
     uint8_t topFieldFirstFlag = 0;
@@ -1869,10 +2033,10 @@ static int32_t parseHDRPayload(Logger_t log, ByteStream_t* stream, lcevc_hdr_inf
 
         /* deinterlacer_type: 4 bit */
         deinterlacerType = (byte >> 4) & 0b1111;
-        VN_DEBUG_SYNTAX("        deinterlacer_type: %u\n", deinterlacerType);
+        VN_VERBOSE(log, "        deinterlacer_type: %u\n", deinterlacerType);
         /* top_field_first_flag: 1 bit */
         topFieldFirstFlag = (byte >> 3) & 0b1;
-        VN_DEBUG_SYNTAX("        top_field_first_flag: %u\n", topFieldFirstFlag);
+        VN_VERBOSE(log, "        top_field_first_flag: %u\n", topFieldFirstFlag);
         /* reserved_zeros_3bit: 3 bit */
         if (byte & 0b111) {
             VN_ERROR(log, "hdr_payload_global_config: reserved_zeros_3bit is non zero\n");
@@ -1911,19 +2075,19 @@ static int32_t parseBlockAdditionalInfo(Logger_t log, ByteStream_t* stream,
     uint8_t byte = 0;
     VN_CHECK(bytestreamReadU8(stream, &byte));
     const AdditionalInfoType_t infoType = (AdditionalInfoType_t)byte;
-    VN_DEBUG_SYNTAX("  additional_info_type: %s\n", additionalInfoTypeToString(infoType));
+    VN_VERBOSE(log, "  additional_info_type: %s\n", additionalInfoTypeToString(infoType));
 
     switch (infoType) {
         case AIT_SEI:
-            VN_CHECK(parseSEIPayload(stream, hdrInfoOut, deserialisedOut, blockSize - 1));
+            VN_CHECK(parseSEIPayload(log, stream, hdrInfoOut, deserialisedOut, blockSize - 1));
             break;
-        case AIT_VUI: VN_CHECK(parseVUIParameters(stream, vuiInfoOut, blockSize - 1)); break;
-        case AIT_SFilter: VN_CHECK(parseSFilterPayload(stream, deserialisedOut)); break;
+        case AIT_VUI: VN_CHECK(parseVUIParameters(log, stream, vuiInfoOut, blockSize - 1)); break;
+        case AIT_SFilter: VN_CHECK(parseSFilterPayload(log, stream, deserialisedOut)); break;
         case AIT_HDR:
             VN_CHECK(parseHDRPayload(log, stream, hdrInfoOut, deinterlacingInfoOut));
             break;
         default:
-            VN_DEBUG_SYNTAX("    unsupported additional info type, skipping %d bytes\n", blockSize - 1);
+            VN_WARNING(log, "    unsupported additional info type, skipping %d bytes\n", blockSize - 1);
             return bytestreamSeek(stream, blockSize - 1);
     }
 
@@ -1934,7 +2098,7 @@ static int32_t parseBlockAdditionalInfo(Logger_t log, ByteStream_t* stream,
 static int32_t parseBlock(Memory_t memory, Logger_t log, ByteStream_t* stream, lcevc_hdr_info* hdrOut,
                           lcevc_vui_info* vuiOut, lcevc_deinterlacing_info* deinterlacingOut,
                           DeserialisedData_t* deserialisedOut, ParseType_t parseMode,
-                          perseus_pipeline_mode pipelineMode, bool useOldCodeLengths)
+                          perseus_pipeline_mode pipelineMode)
 {
     // @todo(bob): Remove parse mode, think its probably not exactly what we're after.
     // @todo(bob): swap to using size_t for things that are sized in bytes.
@@ -1968,24 +2132,24 @@ static int32_t parseBlock(Memory_t memory, Logger_t log, ByteStream_t* stream, l
     /* Process each block. */
     const size_t initialOffset = stream->offset;
 
-    VN_DEBUG_SYNTAX("Block: %s - size: %u\n", blockTypeToString(blockType), blockSize);
+    VN_VERBOSE(log, "Block: %s - size: %u\n", blockTypeToString(blockType), blockSize);
 
     if (parseMode == Parse_Full) {
         switch (blockType) {
             case BT_SequenceConfig:
-                VN_CHECK(parseBlockSequenceConfig(stream, deserialisedOut));
+                VN_CHECK(parseBlockSequenceConfig(log, stream, deserialisedOut));
                 break;
             case BT_GlobalConfig:
                 VN_CHECK(parseBlockGlobalConfig(log, stream, deserialisedOut));
                 break;
             case BT_PictureConfig:
-                VN_CHECK(parseBlockPictureConfig(stream, deserialisedOut));
+                VN_CHECK(parseBlockPictureConfig(log, stream, deserialisedOut));
                 break;
             case BT_EncodedData:
                 VN_CHECK(parseEncodedData(memory, log, stream, deserialisedOut, pipelineMode));
                 break;
             case BT_EncodedDataTiled:
-                VN_CHECK(parseEncodedDataTiled(memory, log, stream, deserialisedOut, useOldCodeLengths));
+                VN_CHECK(parseEncodedDataTiled(memory, log, stream, deserialisedOut));
                 break;
             case BT_AdditionalInfo:
                 VN_CHECK(parseBlockAdditionalInfo(log, stream, hdrOut, vuiOut, deinterlacingOut,
@@ -2010,7 +2174,7 @@ static int32_t parseBlock(Memory_t memory, Logger_t log, ByteStream_t* stream, l
         return -1;
     }
 
-    VN_DEBUG_SYNTAX("\n");
+    VN_VERBOSE(log, "\n");
 
     /* Handle block misread. */
     if ((stream->offset - initialOffset) - blockSize) {
@@ -2024,11 +2188,20 @@ static int32_t parseBlock(Memory_t memory, Logger_t log, ByteStream_t* stream, l
 
 /*------------------------------------------------------------------------------*/
 
-void deserialiseInitialise(Memory_t memory, DeserialisedData_t* data)
+void deserialiseInitialise(Memory_t memory, DeserialisedData_t* data, uint8_t forceBitstreamVersion)
 {
     memset(data, 0, sizeof(DeserialisedData_t));
 
+    /* If we have a forced bitstream version, set it BEFORE deserialising, because it will affect
+     * the deserialising process. */
+    if (forceBitstreamVersion != BitstreamVersionInvalid) {
+        data->vnovaConfig.set = true;
+        data->vnovaConfig.bitstreamVersion = forceBitstreamVersion;
+    }
+
     data->memory = memory;
+
+    /* Set defaults. Many of these are determined by the standard. */
     data->chroma = CT420;
     data->baseDepth = Depth8;
     data->enhaDepth = Depth8;
@@ -2036,9 +2209,19 @@ void deserialiseInitialise(Memory_t memory, DeserialisedData_t* data)
     data->upscale = USLinear;
     data->scalingModes[LOQ0] = Scale2D;
     data->scalingModes[LOQ1] = Scale0D;
-    data->chromaStepWidthMultiplier = QDefaultChromaSWMultiplier;
+    data->chromaStepWidthMultiplier = kDefaultChromaStepWidthMultiplier;
+    data->temporalStepWidthModifier = kDefaultTemporalStepWidthModifier;
+    data->deblock.enabled = false; /* 7.4.3.4 */
+    data->ditherType = DTNone;
+    data->ditherStrength = 0;
+    for (uint8_t loq = 0; loq < LOQEnhancedCount; loq++) {
+        memset(data->quantMatrix.values[loq], 0, RCLayerCountDDS * sizeof(data->quantMatrix.values[0][0]));
+    }
+    data->quantMatrix.set = false;
 
-    vnovaConfigReset(&data->vnova_config);
+    if (!data->vnovaConfig.set) {
+        vnovaConfigReset(&data->vnovaConfig);
+    }
 }
 
 void deserialiseRelease(DeserialisedData_t* data)
@@ -2152,7 +2335,7 @@ int32_t deserialiseGetTileTemporalChunk(const DeserialisedData_t* data, int32_t 
         return -1;
     }
 
-    if (data->temporalEnabled && data->temporalChunkEnabled && data->chunks) {
+    if (deserialiseIsTemporalChunkEnabled(data) && data->chunks) {
         const int32_t chunkIndex = data->tileChunkTemporalIndex[planeIndex] + tileIndex;
 
         if (tileIndex < 0 || tileIndex >= data->tileCount[planeIndex][LOQ0]) {
@@ -2211,7 +2394,7 @@ int32_t deserialise(Memory_t memory, Logger_t log, const uint8_t* serialised, ui
     ByteStream_t stream;
     int32_t res = 0;
 
-    VN_DEBUG_SYNTAX("------>>> Begin: %" PRId64 "\n\n", ctx->deserialiseCount);
+    VN_VERBOSE(log, "------>>> Begin deserialise, number %" PRId64 "\n\n", ctxOut->deserialiseCount);
 
     // @todo(bob): Don't really need a byte-stream for unencapsulation.
     if (bytestreamInitialise(&stream, serialised, serialisedSize) < 0) {
@@ -2219,7 +2402,6 @@ int32_t deserialise(Memory_t memory, Logger_t log, const uint8_t* serialised, ui
     }
 
     deserialisedOut->currentGlobalConfigSet = false;
-    deserialisedOut->currentVnovaConfigSet = false;
     deserialisedOut->pictureConfigSet = false;
 
     VN_CHECK(unencapsulate(memory, log, deserialisedOut, &stream));
@@ -2231,8 +2413,7 @@ int32_t deserialise(Memory_t memory, Logger_t log, const uint8_t* serialised, ui
 
     while (bytestreamRemaining(&stream) > 0) {
         VN_CHECK(parseBlock(memory, log, &stream, &(ctxOut->hdrInfo), &(ctxOut->vuiInfo),
-                            &(ctxOut->deinterlacingInfo), deserialisedOut, parseMode,
-                            ctxOut->pipelineMode, ctxOut->useOldCodeLengths));
+                            &(ctxOut->deinterlacingInfo), deserialisedOut, parseMode, ctxOut->pipelineMode));
 
         /* global config hit when using parse_mode == Parse_GlobalConfig skip other blocks. */
         if (res == 1) {
@@ -2247,7 +2428,7 @@ int32_t deserialise(Memory_t memory, Logger_t log, const uint8_t* serialised, ui
         }
     }
 
-    VN_DEBUG_SYNTAX("------>>> End: %" PRId64 "\n\n", ctx->deserialiseCount);
+    VN_VERBOSE(log, "------>>> End deserialise, number %" PRId64 "\n\n", ctxOut->deserialiseCount);
 
     ctxOut->deserialiseCount += 1;
 

@@ -1,0 +1,3 @@
+git-python==1.0.*
+requests==2.*
+numpy==1.24.*

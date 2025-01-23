@@ -1,16 +1,19 @@
 /* Copyright (c) V-Nova International Limited 2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#ifndef VN_DEC_CORE_DECODE_APPLY_CMDBUFFER_APPLICATOR_H_
-#define VN_DEC_CORE_DECODE_APPLY_CMDBUFFER_APPLICATOR_H_
+#ifndef VN_DEC_CORE_APPLY_CMDBUFFER_APPLICATOR_H_
+#define VN_DEC_CORE_APPLY_CMDBUFFER_APPLICATOR_H_
 
 #include "common/cmdbuffer.h"
 #include "common/tile.h"
@@ -266,4 +269,4 @@ bool cmdBufferApplicatorSurfaceTemplate(const TileState_t* tile, size_t entryPoi
     return true;
 }
 
-#endif // VN_DEC_CORE_DECODE_APPLY_CMDBUFFER_APPLICATOR_H_
+#endif // VN_DEC_CORE_APPLY_CMDBUFFER_APPLICATOR_H_

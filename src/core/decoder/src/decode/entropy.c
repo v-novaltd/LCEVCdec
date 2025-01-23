@@ -1,19 +1,28 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "decode/entropy.h"
 
-#include "context.h"
+#include "common/log.h"
+#include "common/platform.h"
+#include "common/types.h"
+#include "decode/deserialiser.h"
+#include "decode/huffman.h"
 
 #include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 
 /*------------------------------------------------------------------------------*/
@@ -33,14 +42,14 @@ static const uint8_t kNextTemporalContext[HuffTemporalCount][2] = {{HuffTemporal
 /*! \brief initialise the chunk for the entropy decoder. This loads up the HuffmanStream
  *         reader for rle decoding when the syntax signals the case otherwise it
  *         loads up the huffman decoder.
- *  \param memory       Context's memory manager
- *  \param log          Context's logger
- *  \param state        Layer decoder state to initialise.
- *  \param chunk        The chunk to decode from.
- *  \param chunk_idx    Chunk index to load.
+ *  \param memory            Context's memory manager
+ *  \param log               Context's logger
+ *  \param state             Layer decoder state to initialise.
+ *  \param chunk             The chunk to decode from.
+ *  \param bitstreamVersion  Bitstream version (only present in some streams).
  */
 static int32_t chunkInitialise(Logger_t log, EntropyDecoder_t* state, const Chunk_t* chunk,
-                               bool useOldCodeLengths)
+                               uint8_t bitstreamVersion)
 {
     int32_t res = 0;
 
@@ -67,14 +76,14 @@ static int32_t chunkInitialise(Logger_t log, EntropyDecoder_t* state, const Chun
     if (state->type == EDTDefault) {
         /* The default type of entropy decoder (consisting of 3 huffman streams: lsb, msb, and rl)
          * uses a triple-decoder as an optimisation. */
-        VN_CHECK(huffmanTripleInitialize(log, &state->comboHuffman, &state->hstream, useOldCodeLengths));
+        VN_CHECK(huffmanTripleInitialize(log, &state->comboHuffman, &state->hstream, bitstreamVersion));
     } else {
         /* Other entropy decodes just have two huffman streams (or, HuffTemporalCount, which equals
          * HuffSizeCount), so initialise each. */
         for (uint8_t huffType = 0; huffType < HuffTemporalCount; huffType++) {
             VN_CHECK(huffmanManualInitialiseWithLut(log, &state->huffman[huffType].manualState,
                                                     &state->huffman[huffType].table,
-                                                    &state->hstream, useOldCodeLengths));
+                                                    &state->hstream, bitstreamVersion));
         }
     }
 
@@ -147,7 +156,7 @@ static int32_t getNextSymbolTemporalAndHuffman(EntropyDecoder_t* state)
 /*------------------------------------------------------------------------------*/
 
 int32_t entropyInitialise(Logger_t log, EntropyDecoder_t* state, const Chunk_t* chunk,
-                          EntropyDecoderType_t type, bool useOldCodeLengths)
+                          EntropyDecoderType_t type, uint8_t bitstreamVersion)
 {
     int32_t res = 0;
 
@@ -166,7 +175,7 @@ int32_t entropyInitialise(Logger_t log, EntropyDecoder_t* state, const Chunk_t* 
     state->type = type;
 
     /* Syntax specific setup. */
-    VN_CHECK(chunkInitialise(log, state, chunk, useOldCodeLengths));
+    VN_CHECK(chunkInitialise(log, state, chunk, bitstreamVersion));
 
     return 0;
 }

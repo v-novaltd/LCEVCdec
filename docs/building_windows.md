@@ -8,7 +8,7 @@ For these instructions, this 'out of source' build directory is specified as `_b
 
 Most of these steps only need to be done once. The exceptions are: when you *edit* files, you will obviously need to *build* again (`cmake . --build`, or click 'build' in an IDE); and, when you *add* files, you will typically need to update `Sources.cmake` and then *cmake and build* again.
 
-If you get stuck or make a typo during the conan step, it's usually sufficient to clear the build directory and the conan data directory and try the conan install again. That is, from `lcevc_dec`, run `rm -rf _build ~/.conan/data`.
+If you get stuck or make a typo during the conan step, it's usually sufficient to clear the build directory and the conan data directory and try the conan install again. That is, from `LCEVCdec`, run `rm -rf _build ~/.conan/data`.
 
 ---
 
@@ -29,8 +29,8 @@ python [CONAN_HOME]/windows/create_all_windows_conan_profiles.py
 
 mkdir _build
 cd _build
-conan install .. -g cmake_find_package_multi -pr vs-2019-MT-Debug # AND
-conan install .. -g cmake_find_package_multi -pr vs-2019-MT-Release
+conan install .. -g cmake_find_package_multi -pr vs-2022-MT-Debug # AND
+conan install .. -g cmake_find_package_multi -pr vs-2022-MT-Release
 ```
 
 Instructions are provided for your choice of Visual Studio, Visual Studio Code, and Ninja (a command-line-only build tool).

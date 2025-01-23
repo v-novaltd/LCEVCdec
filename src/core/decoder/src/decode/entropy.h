@@ -1,13 +1,16 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
- * This software is licensed under the BSD-3-Clause-Clear License.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
  * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
  * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
  * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
- * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. ANY ONWARD
- * DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO THE
- * EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #ifndef VN_DEC_CORE_ENTROPY_H_
 #define VN_DEC_CORE_ENTROPY_H_
@@ -16,6 +19,8 @@
 #include "common/memory.h"
 #include "decode/deserialiser.h"
 #include "decode/huffman.h"
+
+#include <stdint.h>
 
 /*------------------------------------------------------------------------------*/
 
@@ -64,11 +69,11 @@ typedef struct EntropyDecoder
  *  \param state              state of the decoder to initialize
  *  \param chunk              chunk to use for this layer.
  *  \param type               specifies the type of layer decoder to prepare for this chunk.
- *  \param useOldCodeLengths  Backwards compatibility for a previous wrong stream version.
+ *  \param bitstreamVersion   Stream version (streams that lack this are treated as "current"
  *
  *  \return 0 on success, otherwise -1. */
 int32_t entropyInitialise(Logger_t log, EntropyDecoder_t* state, const Chunk_t* chunk,
-                          EntropyDecoderType_t type, bool useOldCodeLengths);
+                          EntropyDecoderType_t type, uint8_t bitstreamVersion);
 
 /*! \brief Decode the next coefficient from a stream. Coefficients are the things that get
  *         transformed ("Inverse hadamard transformed") to produce residuals.
