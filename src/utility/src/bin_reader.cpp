@@ -22,6 +22,7 @@
 #include <fmt/core.h>
 
 #include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <string_view>
 
