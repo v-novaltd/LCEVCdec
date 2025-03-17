@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,10 +14,10 @@
 
 #include "LCEVC/utility/get_program_dir.h"
 
-#include "LCEVC/utility/filesystem.h"
-
 #include <climits>
+#include <filesystem>
 
+namespace filesystem = std::filesystem;
 namespace lcevc_dec::utility {
 
 #if VN_OS(WINDOWS)

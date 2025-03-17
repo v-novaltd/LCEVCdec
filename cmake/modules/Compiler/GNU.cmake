@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -23,9 +23,9 @@ endif ()
 
 target_compile_options(
     lcevc_dec::compiler
-    INTERFACE -Werror
+    INTERFACE $<$<BOOL:${VN_SDK_WARNINGS_FAIL}>:-Werror>
               -Wall
-              # -Wshadow
+              -Wshadow
               -Wwrite-strings
               $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>
               $<$<COMPILE_LANGUAGE:C>:--std=gnu11>

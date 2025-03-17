@@ -15,7 +15,7 @@
 #ifndef VN_API_ENUMS_H_
 #define VN_API_ENUMS_H_
 
-#include <LCEVC/utility/enum_map.h>
+#include <LCEVC/api_utility/enum_map.h>
 
 #include <cstddef>
 #include <cstdint>

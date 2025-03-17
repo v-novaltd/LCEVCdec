@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -12,18 +12,20 @@
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
-include(Sources.cmake)
+include("Sources.cmake")
 
-find_package(GTest REQUIRED)
+add_library(lcevc_dec_api_utility STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
+lcevc_set_properties(lcevc_dec_api_utility)
 
-add_executable(lcevc_core_sequencing_test_unit)
-lcevc_set_properties(lcevc_core_sequencing_test_unit)
+target_include_directories(lcevc_dec_api_utility PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+target_include_directories(lcevc_dec_api_utility PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../api/include")
 
-target_sources(lcevc_core_sequencing_test_unit PRIVATE ${SOURCES})
+target_link_libraries(lcevc_dec_api_utility PUBLIC lcevc_dec::platform lcevc_dec::compiler)
 
-target_link_libraries(lcevc_core_sequencing_test_unit PRIVATE lcevc_dec::sequencing
-                                                              GTest::gtest_main)
+add_library(lcevc_dec::api_utility ALIAS lcevc_dec_api_utility)
 
-add_executable(lcevc_dec::core_sequencing_test_unit ALIAS lcevc_core_sequencing_test_unit)
+include(GNUInstallDirs)
 
-install(TARGETS lcevc_core_sequencing_test_unit DESTINATION "bin")
+install(TARGETS lcevc_dec_api_utility DESTINATION lib)
+install(FILES ${INTERFACES} DESTINATION include/LCEVC/api_utility)
+install(FILES ${SOURCES} ${HEADERS} DESTINATION ${CMAKE_INSTALL_DOCDIR}/src/api_utility)

@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -12,18 +12,21 @@
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
-include(Sources.cmake)
+list(APPEND SOURCES "src/picture_layout.cpp" "src/threading.cpp")
 
-find_package(GTest REQUIRED)
+list(APPEND HEADERS "src/math_utils.h")
 
-add_executable(lcevc_core_sequencing_test_unit)
-lcevc_set_properties(lcevc_core_sequencing_test_unit)
+list(
+    APPEND
+    INTERFACES
+    "include/LCEVC/api_utility/chrono.h"
+    "include/LCEVC/api_utility/enum_map.h"
+    "include/LCEVC/api_utility/linear_math.h"
+    "include/LCEVC/api_utility/picture_layout.h"
+    "include/LCEVC/api_utility/picture_layout_inl.h"
+    "include/LCEVC/api_utility/threading.h")
 
-target_sources(lcevc_core_sequencing_test_unit PRIVATE ${SOURCES})
+set(ALL_FILES ${SOURCES} ${HEADERS} ${INTERFACES} "Sources.cmake")
 
-target_link_libraries(lcevc_core_sequencing_test_unit PRIVATE lcevc_dec::sequencing
-                                                              GTest::gtest_main)
-
-add_executable(lcevc_dec::core_sequencing_test_unit ALIAS lcevc_core_sequencing_test_unit)
-
-install(TARGETS lcevc_core_sequencing_test_unit DESTINATION "bin")
+# IDE groups
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${ALL_FILES})

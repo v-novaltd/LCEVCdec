@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -21,8 +21,14 @@ find_package(xxHash REQUIRED)
 add_executable(lcevc_dec_test_harness ${SOURCES})
 lcevc_set_properties(lcevc_dec_test_harness)
 
-target_link_libraries(lcevc_dec_test_harness lcevc_dec::api lcevc_dec::utility fmt::fmt
-                      CLI11::CLI11 xxHash::xxHash)
+target_link_libraries(
+    lcevc_dec_test_harness
+    lcevc_dec::api
+    lcevc_dec::api_utility
+    lcevc_dec::utility
+    fmt::fmt
+    CLI11::CLI11
+    xxHash::xxHash)
 
 # Tests can include internal headers from helper sources
 target_include_directories(lcevc_dec_test_harness PUBLIC "${CMAKE_SOURCE_DIR}/src/utility/src")

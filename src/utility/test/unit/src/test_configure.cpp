@@ -100,12 +100,12 @@ TEST(Configure, All)
                                            " \"nnnn\":\"aaaaaaaaaaa\\\"aaaaaaaaaaa\"}"),
               LCEVC_Success);
     EXPECT_EQ(os.str(),
-              "LCEVC_ConfigureDecoderInt(1554, \"xx\", 1234345)\n"
               "LCEVC_ConfigureDecoderBool(1554, \"b1\", true)\n"
-              "LCEVC_ConfigureDecoderFloat(1554, \"yyy\", 324)\n"
               "LCEVC_ConfigureDecoderBool(1554, \"b2\", false)\n"
+              "LCEVC_ConfigureDecoderString(1554, \"nnnn\", \"aaaaaaaaaaa\"aaaaaaaaaaa\")\n"
+              "LCEVC_ConfigureDecoderInt(1554, \"xx\", 1234345)\n"
               "LCEVC_ConfigureDecoderFloat(1554, \"yadayayd\", 42.2)\n"
-              "LCEVC_ConfigureDecoderString(1554, \"nnnn\", \"aaaaaaaaaaa\"aaaaaaaaaaa\")\n");
+              "LCEVC_ConfigureDecoderFloat(1554, \"yyy\", 324)\n");
     os.str("");
 
     EXPECT_EQ(configureDecoderFromJson(
@@ -124,19 +124,19 @@ TEST(Configure, All)
               LCEVC_Success);
     EXPECT_EQ(
         os.str(),
-        "LCEVC_ConfigureDecoderInt(1554, \"xx\", 1234345)\n"
-        "LCEVC_ConfigureDecoderBoolArray(1554, \"barray\", true)\n"
         "LCEVC_ConfigureDecoderBool(1554, \"b1\", true)\n"
-        "LCEVC_ConfigureDecoderBoolArray(1554, \"barray2\", true, false, false, true)\n"
-        "LCEVC_ConfigureDecoderFloat(1554, \"yyy\", 324)\n"
         "LCEVC_ConfigureDecoderBool(1554, \"b2\", false)\n"
-        "LCEVC_ConfigureDecoderIntArray(1554, \"ints\", 10, 9, 8, 7, 6, 5, 4, 3, 3, 2, 1)\n"
-        "LCEVC_ConfigureDecoderFloat(1554, \"yadayayd\", 42.2)\n"
+        "LCEVC_ConfigureDecoderBoolArray(1554, \"barray\", true)\n"
+        "LCEVC_ConfigureDecoderBoolArray(1554, \"barray2\", true, false, false, true)\n"
         "LCEVC_ConfigureDecoderFloatArray(1554, \"floats\", 10, 11.1, 9087.3, 78786.2, 89, 0, "
         "3.14)\n"
-        "LCEVC_ConfigureDecoderString(1554, \"nnnn\", \"aaaaaaaaaaaaaaaaaaaaaa\")\n"
+        "LCEVC_ConfigureDecoderIntArray(1554, \"ints\", 10, 9, 8, 7, 6, 5, 4, 3, 3, 2, 1)\n"
         "LCEVC_ConfigureDecoderStringArray(1554, \"names\", tango, whisky, uniform, november, "
-        "tango)\n");
+        "tango)\n"
+        "LCEVC_ConfigureDecoderString(1554, \"nnnn\", \"aaaaaaaaaaaaaaaaaaaaaa\")\n"
+        "LCEVC_ConfigureDecoderInt(1554, \"xx\", 1234345)\n"
+        "LCEVC_ConfigureDecoderFloat(1554, \"yadayayd\", 42.2)\n"
+        "LCEVC_ConfigureDecoderFloat(1554, \"yyy\", 324)\n");
     os.str("");
 }
 

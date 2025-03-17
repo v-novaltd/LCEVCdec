@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -14,8 +14,10 @@
 
 import os
 
-from conans import ConanFile, CMake, tools
-from conans.tools import save
+from conan import ConanFile
+from conan.tools.scm import Git
+from conan.tools.files import save
+from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps, cmake_layout
 
 
 class LCEVCDecoderSDK(ConanFile):
@@ -24,7 +26,7 @@ class LCEVCDecoderSDK(ConanFile):
     description = "LCEVC Decoder SDK"
     url = "https://github.com/v-novaltd/LCEVCdec"
 
-    settings = "os", "compiler", "libc", "build_type", "arch"
+    settings = "os", "compiler", "build_type", "arch"
 
     options = {
         "shared": [True, False],
@@ -37,14 +39,13 @@ class LCEVCDecoderSDK(ConanFile):
         "debug_syntax": [True, False],
         "api_layer": [True, False],
         "json_config": [True, False],
-        "use_ghc_filesystem": [True, False],
-        "base_decoder": ["ffmpeg-libs-minimal", "ffmpeg", "libav", "none"],
+        "base_decoder": ["ffmpeg-libs-minimal", "ffmpeg", "libav", "manual", "none"],
     }
 
-    # NB: executables, unit_tests, base_decoder, use_ghc_filesystem have defaults set by
-    # config_options()
     default_options = {
         "shared": True,
+        "executables": True,
+        "unit_tests": True,
         "utility": True,
         "benchmark": False,
         "simd": True,
@@ -52,16 +53,14 @@ class LCEVCDecoderSDK(ConanFile):
         "debug_syntax": False,
         "api_layer": True,
         "json_config": True,
-
         "fmt:header_only": True,
     }
 
-    generators = ["cmake_find_package_multi"]
-
+    generators = "cmake_find_package_multi"
     # CMake generator to use (default is Ninja)
-    _generators = {
-        "iOS": 'Unix Makefiles',
-        "Macos": 'Unix Makefiles',
+    cmake_generator = {
+        'iOS': 'Unix Makefiles',
+        'Macos': 'Unix Makefiles',
         'Linux': 'Unix Makefiles',
     }
 
@@ -71,34 +70,64 @@ class LCEVCDecoderSDK(ConanFile):
                        "include/*", "src/*", "!*.pyc", "!src/utility/unit_tests",
                        "!src/core/emscripten", "!src/func_tests")
 
-    def is_android_vndk(self):
-        return (self.settings.os == "Android" and self.settings.compiler.libcxx != "c++_shared")
+    keep_imports = True
 
     def can_have_executables(self):
         return not ((self.settings.os == 'iOS' or self.settings.os == 'tvOS')
-                    or (self.settings.os == 'Windows' and self.settings.compiler.runtime == 'MD')
-                    or (self.is_android_vndk()))
+                    or (self.settings.os == 'Windows' and self.settings.compiler.runtime == 'MD'))
 
-    def config_options(self):
+    def configure(self):
         # Some targets don't support the sample and test harness exes
         if self.options.executables == None:
             self.options.executables = self.can_have_executables()
 
         if self.options.base_decoder == None:
-            if ((self.settings.os == 'iOS' or self.settings.os == 'tvOS')
-                    or (self.settings.os == 'Windows' and self.settings.compiler.runtime == 'MD')
-                    or (self.is_android_vndk())):
-                self.options.base_decoder = "none"
+            if self.can_have_executables():
+                self.options.base_decoder = "ffmpeg"
             else:
-                self.options.base_decoder = "ffmpeg-libs-minimal"
+                self.options.base_decoder = "none"
 
         # Install test dependencies if installing in dev dir
         if self.options.unit_tests == None:
             self.options.unit_tests = not self.in_local_cache and self.can_have_executables()
 
-        # Use std::filesystem replacement on android vndk
-        if self.options.use_ghc_filesystem == None:
-            self.options.use_ghc_filesystem = self.is_android_vndk()
+        if self.options.base_decoder == "ffmpeg-libs-minimal":
+            self.options['ffmpeg-libs-minimal'].shared = True
+
+        if self.options.base_decoder == "ffmpeg":
+            self.options['ffmpeg'].shared = True
+            if self.settings.os == 'Linux':
+                self.options['ffmpeg'].with_libalsa = False
+                self.options['ffmpeg'].with_pulse = False
+                self.options['ffmpeg'].with_vaapi = False
+                self.options['ffmpeg'].with_vdpau = False
+                self.options['ffmpeg'].with_vulkan = False
+                self.options['ffmpeg'].with_xcb = False
+                self.options['ffmpeg'].with_libdrm = False
+                self.options['ffmpeg'].with_xlib = False
+            self.options['ffmpeg'].with_asm = False
+            self.options['ffmpeg'].with_zlib = False
+            self.options['ffmpeg'].with_bzip2 = False
+            self.options['ffmpeg'].with_lzma = False
+            self.options['ffmpeg'].with_libiconv = False
+            self.options['ffmpeg'].with_freetype = False
+            self.options['ffmpeg'].with_openjpeg = False
+            self.options['ffmpeg'].with_openh264 = False
+            self.options['ffmpeg'].with_opus = False
+            self.options['ffmpeg'].with_vorbis = False
+            self.options['ffmpeg'].with_zeromq = False
+            self.options['ffmpeg'].with_sdl = False
+            self.options['ffmpeg'].with_libx264 = False
+            self.options['ffmpeg'].with_libx265 = False
+            self.options['ffmpeg'].with_libvpx = False
+            self.options['ffmpeg'].with_libmp3lame = False
+            self.options['ffmpeg'].with_libfdk_aac = False
+            self.options['ffmpeg'].with_libwebp = False
+            self.options['ffmpeg'].with_ssl = False
+            self.options['ffmpeg'].with_programs = False
+            self.options['ffmpeg'].with_libsvtav1 = False
+            self.options['ffmpeg'].with_libaom = False
+            self.options['ffmpeg'].with_libdav1d = False
 
         # Now set the default options for ffmpeg for android
         if self.options.base_decoder == "ffmpeg-libs-minimal" and self.settings.os == "Android":
@@ -118,30 +147,24 @@ class LCEVCDecoderSDK(ConanFile):
         if self.options.benchmark:
             reqs.append('benchmark/1.5.5')
 
-        if self.options.executables:
-            reqs.extend(['xxhash/0.8.1', 'cli11/2.3.2'])
-
-        if self.options.utility or self.options.executables:
-            reqs.append('fmt/8.0.1')
-
-        if self.options.unit_tests:
-            reqs.extend(['gtest/1.12.1', 'range-v3/0.12.0'])
-
         if self.options.json_config:
-            reqs.append('rapidjson/06d58b9')
+            reqs.append('nlohmann_json/3.11.3')
 
-        # This should be private, but that does not seem to work as documented
         if self.options.base_decoder == "ffmpeg-libs-minimal":
-            reqs.append('ffmpeg-libs-minimal/n6.1-vnova-8')
+            reqs.append('ffmpeg-libs-minimal/n6.1-vnova-29')
 
         if self.options.base_decoder == "ffmpeg":
-            reqs.append('ffmpeg/n6.1-vnova-7')
+            reqs.append('ffmpeg/5.1')
 
         if self.options.base_decoder == "libav":
             reqs.append('libav/12.3')
 
-        if self.options.use_ghc_filesystem:
-            reqs.append('ghc-filesystem/1.5.14@')
+        if self.options.base_decoder != "none":
+            if self.options.executables:
+                reqs.extend(['xxhash/0.8.1', 'cli11/2.3.2', 'fmt/8.0.1'])
+
+            if self.options.unit_tests:
+                reqs.extend(['gtest/1.12.1', 'range-v3/0.12.0'])
 
         for package in reqs:
             self.build_requires(package)
@@ -157,8 +180,8 @@ class LCEVCDecoderSDK(ConanFile):
         Will be picked up by version file generation tools instead of running git.
         """
         if os.path.exists(os.path.join(self.recipe_folder, '.git')):
-            git = tools.Git()
-            # Only consider tags of form <digits>.<digits>.<digits>...
+            git = Git(self)
+            # Only consider tags of form [dev]<digits>.<digits>.<digits>...
             self.git_hash = git.run(f"-C {self.recipe_folder} rev-parse --verify --short=8 HEAD")
             self.git_long_hash = git.run(
                 f"-C {self.recipe_folder} rev-parse --verify --short=10 HEAD")
@@ -166,9 +189,9 @@ class LCEVCDecoderSDK(ConanFile):
                 f"-C {self.recipe_folder} log -1 --format=%cd --date=format:%Y-%m-%d")
             self.git_branch = git.run(f"-C {self.recipe_folder} rev-parse --abbrev-ref HEAD")
             self.git_version = git.run(
-                f"-C {self.recipe_folder} describe --match \"[0-9].[0-9].[0-9]\" --abbrev=1 --dirty")
+                f"-C {self.recipe_folder} describe --match \"*.*.*\" --dirty")
             self.git_short_version = git.run(
-                f"-C {self.recipe_folder} describe --match \"[0-9].[0-9].[0-9]\" --abbrev=0")
+                f"-C {self.recipe_folder} describe --match \"*.*.*\" --abbrev=0")
         else:
             with open(os.path.join(self.recipe_folder, '.githash')) as f:
                 self.git_hash = f.read()
@@ -186,60 +209,60 @@ class LCEVCDecoderSDK(ConanFile):
     def export_sources(self):
         self._get_git_info()
 
-        save(os.path.join(self.export_sources_folder, ".githash"), self.git_hash)
-        save(os.path.join(self.export_sources_folder, ".gitlonghash"), self.git_long_hash)
-        save(os.path.join(self.export_sources_folder, ".gitdate"), self.git_date)
-        save(os.path.join(self.export_sources_folder, ".gitbranch"), self.git_branch)
-        save(os.path.join(self.export_sources_folder, ".gitversion"), self.git_version)
-        save(os.path.join(self.export_sources_folder, ".gitshortversion"), self.git_short_version)
+        save(self, os.path.join(self.export_sources_folder, ".githash"), self.git_hash)
+        save(self, os.path.join(self.export_sources_folder, ".gitlonghash"), self.git_long_hash)
+        save(self, os.path.join(self.export_sources_folder, ".gitdate"), self.git_date)
+        save(self, os.path.join(self.export_sources_folder, ".gitbranch"), self.git_branch)
+        save(self, os.path.join(self.export_sources_folder, ".gitversion"), self.git_version)
+        save(self, os.path.join(self.export_sources_folder, ".gitshortversion"), self.git_short_version)
 
-    @staticmethod
-    def _on_off(b):
-        """Convert truth value to ON/OFF for CMake definitions."""
-        if b:
-            return "ON"
-        else:
-            return "OFF"
+    def generate(self):
+        deps = CMakeDeps(self)
+        deps.generate()
 
-    def _configure_cmake(self):
-        cmake = CMake(self, generator=self._generators.get(str(self.settings.os), "Ninja"))
-        cmake.definitions["TARGET_ARCH"] = self.settings.arch
-        cmake.definitions["CMAKE_FIND_ROOT_PATH_MODE_PACKAGE"] = "BOTH"
-        cmake.definitions["BUILD_SHARED_LIBS"] = self._on_off(self.options.shared)
-        cmake.definitions["VN_SDK_SAMPLE_SOURCE"] = "OFF"
-        cmake.definitions["VN_SDK_UNIT_TESTS"] = self._on_off(self.options.unit_tests)
-        cmake.definitions["VN_SDK_EXECUTABLES"] = self._on_off(self.options.executables)
-        cmake.definitions["VN_SDK_UTILITY"] = self._on_off(self.options.utility)
-        cmake.definitions["VN_SDK_API_LAYER"] = self._on_off(self.options.api_layer)
-        cmake.definitions["VN_SDK_USE_GHC_FILESYSTEM"] = self._on_off(
-            self.options.use_ghc_filesystem)
-        cmake.definitions["VN_SDK_FFMPEG_LIBS_PACKAGE"] = self.options.base_decoder if self.options.base_decoder else ""
-        cmake.definitions["VN_CORE_BENCHMARK"] = self._on_off(self.options.benchmark)
-        cmake.definitions["VN_CORE_SIMD"] = self._on_off(self.options.simd)
-        cmake.definitions["VN_CORE_FORCE_OVERLAY"] = self._on_off(self.options.force_overlay)
+        if self.options.base_decoder == "none":
+            self.output.warn("Base decoder disabled, not building unit tests or executables")
+            self.options.unit_tests = False
+            self.options.executables = False
+
+        cmake = CMakeToolchain(self, generator=self.cmake_generator.get(
+            str(self.settings.os), "Ninja"))
+        cmake.variables["TARGET_ARCH"] = self.settings.arch
+        cmake.variables["CMAKE_FIND_ROOT_PATH_MODE_PACKAGE"] = "BOTH"
+        cmake.variables["BUILD_SHARED_LIBS"] = self.options.shared
+        cmake.variables["VN_SDK_SAMPLE_SOURCE"] = False
+        cmake.variables["VN_SDK_UNIT_TESTS"] = self.options.unit_tests
+        cmake.variables["VN_SDK_EXECUTABLES"] = self.options.executables
+        cmake.variables["VN_SDK_API_LAYER"] = self.options.api_layer
+        cmake.variables["VN_CORE_BENCHMARK"] = self.options.benchmark
+        cmake.variables["VN_CORE_SIMD"] = self.options.simd
+        cmake.variables["VN_CORE_FORCE_OVERLAY"] = self.options.force_overlay
 
         if self.settings.os == 'Android' and self.settings.arch == 'armv7':
-            cmake.definitions["CMAKE_ANDROID_ARM_NEON"] = self._on_off(self.options.simd)
+            cmake.variables["CMAKE_ANDROID_ARM_NEON"] = self.options.simd
 
         if self.settings.compiler == "Visual Studio":
-            cmake.definitions["VN_MSVC_RUNTIME_STATIC"] = self._on_off(
-                'MT' in self.settings.compiler.runtime)
+            cmake.variables["VN_MSVC_RUNTIME_STATIC"] = 'MT' in self.settings.compiler.runtime
 
-        cmake.configure()
+        cmake.generate()
         return cmake
 
     def imports(self):
         # Copy shared libraries from dependencies
-        self.copy("*.dll", src="@bindirs", dst="bin")
-        self.copy("*.so*", src="@libdirs", dst="lib")
-        self.copy("*.dylib*", src="@libdirs", dst="lib")
+        self.copy("*.dll", src="@bindirs", dst=os.path.join(self.folders.build, "bin"))
+        self.copy("*.so*", src="@libdirs", dst=os.path.join(self.folders.build, "lib"))
+        self.copy("*.dylib*", src="@libdirs", dst=os.path.join(self.folders.build, "lib"))
+
+    def layout(self):
+        cmake_layout(self)
 
     def build(self):
-        cmake = self._configure_cmake()
+        cmake = CMake(self)
+        cmake.configure()
         cmake.build()
 
     def package(self):
-        cmake = self._configure_cmake()
+        cmake = CMake(self)
         cmake.install()
         self.copy(pattern="licenses", dst="licenses")
 

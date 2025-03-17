@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -17,7 +17,7 @@ find_package(PkgConfig)
 # ##################################################################################################
 # libav::libav
 # ##################################################################################################
-# todo handle version, set dep>=ver or dep==ver in module spec here Find the package
+
 pkg_check_modules(libav libav)
 find_package_handle_standard_args(libav DEFAULT_MSG libav_FOUND libav_VERSION)
 

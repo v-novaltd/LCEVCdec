@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -30,12 +30,12 @@ namespace lcevc_dec::utility {
  * as a filename.
  *
  * @param[in]       decoder 		Decoder to be configured
- * @param[in]       json            JSON string of filename
+ * @param[in]       jsonStr         JSON string of filename
  * @return 					        LCEVC_Success
  *                  				LCEVC_NotFound
  *                  				LCEVC_Error
  */
-LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoder, std::string_view json);
+LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoder, std::string_view jsonStr);
 
 } // namespace lcevc_dec::utility
 

@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -16,16 +16,11 @@ include(Sources.cmake)
 
 find_package(GTest REQUIRED)
 find_package(range-v3 REQUIRED)
-if (VN_SDK_USE_GHC_FILESYSTEM)
-    find_package(ghc_filesystem REQUIRED)
-endif ()
 
 add_executable(lcevc_core_test_unit)
 lcevc_set_properties(lcevc_core_test_unit)
 
 target_sources(lcevc_core_test_unit PRIVATE ${SOURCES})
-
-target_compile_features(lcevc_core_test_unit PRIVATE cxx_std_17)
 
 # Disable DLL import as core is statically linked
 target_compile_definitions(lcevc_core_test_unit PRIVATE VNDisablePublicAPI)
@@ -38,8 +33,7 @@ target_link_libraries(
             lcevc_dec::platform
             lcevc_dec::compiler
             GTest::gtest_main
-            range-v3::range-v3
-            $<TARGET_NAME_IF_EXISTS:ghcFilesystem::ghc_filesystem>)
+            range-v3::range-v3)
 
 add_executable(lcevc_dec::core_test_unit ALIAS lcevc_core_test_unit)
 

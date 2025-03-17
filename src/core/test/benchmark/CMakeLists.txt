@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -15,9 +15,6 @@
 include(Sources.cmake)
 
 find_package(benchmark REQUIRED)
-if (VN_SDK_USE_GHC_FILESYSTEM)
-    find_package(ghc_filesystem REQUIRED)
-endif ()
 
 add_executable(lcevc_core_test_benchmark)
 lcevc_set_properties(lcevc_core_test_benchmark)
@@ -34,8 +31,7 @@ target_link_libraries(
             lcevc_dec::unit_test_utilities
             lcevc_dec::platform
             lcevc_dec::compiler
-            benchmark::benchmark
-            $<TARGET_NAME_IF_EXISTS:ghcFilesystem::ghc_filesystem>)
+            benchmark::benchmark)
 
 target_include_directories(lcevc_core_test_benchmark PRIVATE ../core/src/)
 

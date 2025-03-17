@@ -21,6 +21,8 @@ venv
 .codechecker
 .scannerwork
 .report.json
+CMakeUserPresets.json
+conan_imports_manifest.txt
 
 .DS_Store
 

@@ -25,7 +25,6 @@
     VN_COMPILER:            Use for host compiler testing
     VN_VARIANT:             Use for build variant testing
     VN_CORE_FEATURE:        Use for core codec specific feature testing
-    VN_INTEGRATION_FEATURE: Use for integration library specific feature testing
     VN_SDK_FEATURE:         Use for general SDK feature testing
 
     ----------------------------------------------------------------------------
@@ -60,7 +59,6 @@
 
     Available `VN_SDK_FEATURE` values:
         BASE_DECODER
-        USE_GHC_FILESYSTEM
 
     Available `VN_CORE_FEATURE` values:
         DEBUG_SYNTAX
@@ -107,9 +105,6 @@
             // SSE specifics
         #endif
 
-        #if VN_INTEGRATION_FEATURE(OPENGL)
-            // OpenGL specifics
-        #endif
 
     ----------------------------------------------------------------------------
 
@@ -354,15 +349,8 @@
 #define VN_CORE_FEATURE_PRIVATE_DEF_WINTHREADS() 0
 #endif
 
-#if defined(__ANDROID_VNDK__)
-#define VN_CORE_FEATURE_PRIVATE_DEF_VNDK() 1
-#else
-#define VN_CORE_FEATURE_PRIVATE_DEF_VNDK() 0
-#endif
-
 /* General SDK features */
 #define VN_SDK_FEATURE_PRIVATE_DEF_BASE_DECODER() VN_@VN_SDK_BASE_DECODER@
-#define VN_SDK_FEATURE_PRIVATE_DEF_USE_GHC_FILESYSTEM() VN_@VN_SDK_USE_GHC_FILESYSTEM@
 
 /* clang-format on */
 

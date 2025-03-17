@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -126,7 +126,7 @@ static bool stampedBufferListInsert(StampedBufferList* list, StampedBuffer_t* en
     const uint64_t timehandle = entry->timehandle;
 
     StampedBuffer_t* curPtr = list->head;
-    int i = 0;
+    size_t i = 0;
     while (i < list->capacity && curPtr != NULL) {
         const uint64_t curTH = curPtr->timehandle;
 

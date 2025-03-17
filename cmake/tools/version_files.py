@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -177,7 +177,7 @@ END
 
 class ComponentGenerator:
     version_re = re.compile(
-        r"(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<revision>[0-9]+)(\-(?P<ahead>[0-9]+))?(\-g(?P<hash>[0-9a-f]+))?(\-(?P<dirty>dirty))?"
+        r"(dev)?(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<revision>[0-9]+)(\-(?P<ahead>[0-9]+))?(\-g(?P<hash>[0-9a-f]+))?(\-(?P<dirty>dirty))?"
     )
 
     date_re = re.compile(r"(?P<year>[0-9]+)-(?P<month>[0-9]+)-(?P<day>[0-9]+)")
@@ -255,7 +255,7 @@ if __name__ == "__main__":
     # Capture current git version
     source_dir = dir_path = os.path.dirname(os.path.realpath(__file__))
     git_version = args.git_version or capture_output(
-        ['git', '-C', source_dir, 'describe', '--dirty'])
+        ['git', '-C', source_dir, 'describe', '--match', '*.*.*', '--dirty'])
     git_hash = args.git_hash or capture_output(
         ['git', '-C', source_dir, 'rev-parse', '--verify', 'HEAD'])
     git_date = args.git_date or capture_output(

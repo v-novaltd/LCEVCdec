@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -17,8 +17,9 @@
 #include "LCEVC/utility/base_decoder.h"
 //
 #include "LCEVC/utility/extract.h"
-#include "LCEVC/utility/picture_layout.h"
 #include "LCEVC/utility/string_utils.h"
+
+#include <LCEVC/api_utility/picture_layout.h>
 
 extern "C"
 {

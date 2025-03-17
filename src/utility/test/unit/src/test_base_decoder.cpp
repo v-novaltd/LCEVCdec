@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -15,13 +15,14 @@
 #include "find_assets_dir.h"
 #include "LCEVC/utility/base_decoder.h"
 #include "LCEVC/utility/bin_reader.h"
-#include "LCEVC/utility/filesystem.h"
 
 #include <gtest/gtest.h>
 #include <xxhash.h>
 
+#include <filesystem>
 #include <string>
 
+namespace filesystem = std::filesystem;
 using namespace lcevc_dec::utility;
 
 const static filesystem::path kTestAssets{findAssetsDir("src/utility/test/assets")};
@@ -30,7 +31,7 @@ TEST(BaseDecoder, CreateH264TS)
 {
     std::unique_ptr<BaseDecoder> decoder =
         createBaseDecoderLibAV((kTestAssets / "test_h264.ts").string());
-    EXPECT_TRUE(decoder);
+    ASSERT_NE(decoder, nullptr);
 
     EXPECT_EQ(decoder->description().width, 176);
     EXPECT_EQ(decoder->description().height, 144);

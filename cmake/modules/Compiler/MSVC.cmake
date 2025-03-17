@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -12,9 +12,10 @@
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
-target_compile_options(lcevc_dec::compiler INTERFACE /arch:AVX)
+if (TARGET_ARCH MATCHES "^x86")
+    target_compile_options(lcevc_dec::compiler INTERFACE /arch:AVX)
+endif ()
 
-# XXX move to toolchain/platform ?
 target_compile_definitions(
     lcevc_dec::compiler
     INTERFACE _SCL_SECURE_NO_WARNINGS _CRT_SECURE_NO_WARNINGS
@@ -23,13 +24,10 @@ target_compile_definitions(
 
 target_compile_options(
     lcevc_dec::compiler
-    INTERFACE # /W4 /wd4146 /wd4245 /D_CRT_SECURE_NO_WARNINGS)
-              /nologo
+    INTERFACE /nologo
               /Zc:wchar_t
               /Zc:forScope
               /GF
-              /WX
+              $<$<BOOL:${VN_SDK_WARNINGS_FAIL}>:/WX>
               /W3
-              /wd5105 # Disable warning about 'defined' operator in some macros, Windows SDK headers
-                      # do this, which is UB in C code.
-)
+              /wd5105)

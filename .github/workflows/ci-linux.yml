@@ -20,16 +20,21 @@ on:
 env:
   BUILD_TYPE: Release
 
+permissions: {}
+
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
           lfs: true
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Install required lib
         run: pip3 install -r cmake/tools/lint_requirements.txt
@@ -41,12 +46,15 @@ jobs:
     name: Build
     needs: lint
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          lfs: true
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Update System Packages
         run: sudo apt-get update
@@ -54,7 +62,7 @@ jobs:
       - name: Cache APT Packages
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: rapidjson-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev unzip
+          packages: nlohmann-json3-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev unzip
 
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -66,14 +74,14 @@ jobs:
         run: |
           export PATH="/usr/lib/ccache:$PATH"
           mkdir build && cd build
-          cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} ..
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DVN_SDK_EXECUTABLES=ON -DVN_SDK_UNIT_TESTS=ON -DVN_SDK_WARNINGS_FAIL=ON ..
           cmake --build .
 
       - name: Cmake Install
-        run: cmake --install build --prefix $GITHUB_WORKSPACE/install
+        run: cmake --install build --prefix "${GITHUB_WORKSPACE}"/install
 
       - name: Create Build Archive
-        run: tar -czf install.tar.gz -C $GITHUB_WORKSPACE install
+        run: tar -czf install.tar.gz -C "${GITHUB_WORKSPACE}" install
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
@@ -85,17 +93,20 @@ jobs:
     name: Unit tests
     needs: build
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
           lfs: true
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Cache APT Packages
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: rapidjson-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev unzip
+          packages: nlohmann-json3-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev unzip
 
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
@@ -111,8 +122,7 @@ jobs:
           status=0
           for test in install/bin/*test_unit; do
             echo "Running test: ${test}"
-            "${test}"
-            if [[ $? -ne 0 ]]; then
+            if ! "${test}"; then
               echo "Unit Test failed: ${test}"
               status=1
               continue
@@ -124,17 +134,20 @@ jobs:
     name: Functional Tests
     needs: unit_tests
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
           lfs: true
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Cache APT Packages
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: rapidjson-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev unzip
+          packages: nlohmann-json3-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev unzip
 
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4
@@ -146,12 +159,11 @@ jobs:
 
       - name: Create URLs
         run: |
-          git fetch --tags
-          echo "https://nbg1.your-objectstorage.com/lcevcdec/LCEVCdec_3.3.3_external_test_assets.zip" > url.txt
+          echo "https://nbg1.your-objectstorage.com/lcevcdec/LCEVCdec_$(git describe --match "[0-9].[0-9].[0-9]" --abbrev=0)_external_test_assets.zip" > url.txt
 
       - name: Cache External Assets
         id: cache-assets
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: external_assets/
           key: test-assets-${{ hashFiles('url.txt') }}
@@ -160,7 +172,7 @@ jobs:
         if: steps.cache-assets.outputs.cache-hit != 'true'
         run: |
           mkdir -p external_assets
-          curl -L -o external_assets/test_cache.zip $(cat url.txt)
+          curl -L -o external_assets/test_cache.zip "$(cat url.txt)"
 
       - name: Unzip Test Assets
         run: unzip external_assets/test_cache.zip

@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -16,7 +16,8 @@
 #include "bench_utility.h"
 #include "find_assets_dir.h"
 #include "LCEVC/utility/bin_reader.h"
-#include "LCEVC/utility/filesystem.h"
+
+#include <filesystem>
 
 extern "C"
 {
@@ -30,6 +31,7 @@ extern "C"
 #include "surface/surface.h"
 }
 
+namespace filesystem = std::filesystem;
 using namespace lcevc_dec::utility;
 
 const static filesystem::path kTestAssets = findAssetsDir("src/core/test/assets");

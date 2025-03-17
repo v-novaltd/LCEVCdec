@@ -14,17 +14,13 @@
 
 // Functions for common Picture operations.
 //
-#include "LCEVC/utility/check.h"
 #include "math_utils.h"
 
-#include <fmt/core.h>
+#include <LCEVC/api_utility/picture_layout.h>
 #include <LCEVC/lcevc_dec.h>
-#include <LCEVC/utility/picture_layout.h>
 
 #include <algorithm>
 #include <cassert>
-#include <cstdint>
-#include <string>
 #include <string_view>
 
 namespace lcevc_dec::utility {
@@ -92,7 +88,9 @@ namespace {
     LCEVC_PictureDesc getPictureDesc(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture)
     {
         LCEVC_PictureDesc desc = {0};
-        VN_LCEVC_CHECK(LCEVC_GetPictureDesc(decoder, picture, &desc));
+        if (LCEVC_GetPictureDesc(decoder, picture, &desc) != LCEVC_Success) {
+            std::exit(EXIT_FAILURE);
+        }
         return desc;
     }
 } // namespace
@@ -293,7 +291,14 @@ bool PictureLayout::isInterleaved() const
 // Construct a vooya/YUView style filename from base
 std::string PictureLayout::makeRawFilename(std::string_view name) const
 {
-    return fmt::format("{}_{}x{}{}", name, width(), height(), m_layoutInfo->suffix);
+    static const uint16_t kMaxFilenameLength = 256; // Max filename length on Windows
+    if (name.length() > kMaxFilenameLength) {
+        std::exit(EXIT_FAILURE);
+    }
+    char ret[kMaxFilenameLength];
+    snprintf(ret, kMaxFilenameLength, "%s_%dx%d%s", std::string(name).c_str(), width(), height(),
+             m_layoutInfo->suffix);
+    return ret;
 }
 
 } // namespace lcevc_dec::utility

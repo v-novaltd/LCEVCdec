@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -36,7 +36,7 @@ target_include_directories(
 target_link_libraries(
     lcevc_dec_api
     PUBLIC lcevc_dec::core lcevc_dec::sequencing
-    PRIVATE lcevc_dec::utility lcevc_dec::api_version)
+    PRIVATE lcevc_dec::api_utility lcevc_dec::api_version)
 
 # lcevc_api_static (for unit tests)
 
@@ -50,7 +50,7 @@ target_include_directories(lcevc_dec_api_static PUBLIC "${CMAKE_CURRENT_LIST_DIR
 target_link_libraries(
     lcevc_dec_api_static
     PUBLIC lcevc_dec::core lcevc_dec::sequencing
-    PRIVATE lcevc_dec::utility lcevc_dec::api_version)
+    PRIVATE lcevc_dec::api_utility lcevc_dec::api_version)
 
 # Installation.
 #

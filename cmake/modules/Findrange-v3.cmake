@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -17,7 +17,7 @@ find_package(PkgConfig)
 # ##################################################################################################
 # range-v3::range-v3
 # ##################################################################################################
-# todo handle version, set dep>=ver or dep==ver in module spec here Find the package
+
 pkg_check_modules(range-v3 range-v3)
 find_package_handle_standard_args(range-v3 DEFAULT_MSG range-v3_FOUND range-v3_VERSION)
 

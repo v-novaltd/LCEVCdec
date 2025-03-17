@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -12,25 +12,28 @@
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
-cmake_minimum_required(VERSION 3.17.1 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.19.0 FATAL_ERROR)
 
-# Configuration
-#
-# General
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(VN_MSVC_RUNTIME_STATIC "Use static multi-threaded runtime for MSVC" ON)
-option(VN_STRIP_RELEASE_BUILDS "Compile Release builds without debug symbols." ON)
 
-# SDK
-option(VN_SDK_EXECUTABLES "SDK: Include samples and test harness executables in SDK installations"
-       ON)
-option(VN_SDK_SAMPLE_SOURCE "SDK: Include sample sources in SDK installations" ON)
-option(VN_SDK_UNIT_TESTS "SDK: Enable unit test executables" ON)
-option(VN_SDK_API_LAYER "SDK: Include API layer library in SDK installations" ON)
-option(VN_SDK_JSON_CONFIG "Allow decoder to be configured with JSON, requires rapidjson" ON)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
+include("VNovaSetup")
+
+project(
+    LCEVCdec_SDK
+    DESCRIPTION "The Open Source LCEVC Decoder SDK"
+    LANGUAGES CXX C)
+
+# Configuration
+option(VN_SDK_EXECUTABLES "Include samples and test harness executables in SDK installations" OFF)
+option(VN_SDK_SAMPLE_SOURCE "Include sample sources in SDK installations" ON)
+option(VN_SDK_UNIT_TESTS "Enable unit test executables" OFF)
+option(VN_SDK_API_LAYER "Include API layer library in SDK installations" ON)
+option(VN_SDK_JSON_CONFIG "Allow decoder to be configured with JSON, requires nlohmann-json" OFF)
 option(VN_SDK_DOCS "Build Doxygen and Sphinx documentation" OFF)
-option(VN_SDK_USE_GHC_FILESYSTEM "Use ghc-filesystem instead of C++ standard <filesystem>" OFF)
 option(VN_SDK_COVERAGE "Generate gcov statistics for coverage" OFF)
+option(VN_SDK_WARNINGS_FAIL "Compiler warnings will cause a build to fail" OFF)
 
 # cmake-format: off
 set(VN_SDK_FFMPEG_LIBS_PACKAGE "" CACHE STRING
@@ -45,7 +48,8 @@ else ()
 endif ()
 
 if (VN_SDK_EXECUTABLES AND NOT VN_SDK_JSON_CONFIG)
-    message(FATAL_ERROR "JSON configuration option is required for executables")
+    message(STATUS "Executables enabled, enabling required JSON config")
+    set(VN_SDK_JSON_CONFIG ON)
 endif ()
 
 # Core
@@ -65,16 +69,6 @@ option(
 option(VN_CORE_FORCE_OVERLAY "Core: Enable forced overlay" OFF)
 option(VN_CORE_BENCHMARK "Core: Build benchmark tool" OFF)
 
-# Local modules - searched last
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
-include("VNovaSetup")
-
-#
-project(
-    LCEVCdec_SDK
-    DESCRIPTION "The Open Source LCEVC Decoder SDK"
-    LANGUAGES CXX C)
-
 # Binary destination
 set(MONOLITHIC_BUILD_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${MONOLITHIC_BUILD_OUTPUT_DIR})
@@ -87,11 +81,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${MONOLITHIC_BUILD_OUTPUT_DIR})
 # API Layer
 if (VN_SDK_API_LAYER)
     lcevc_add_subdirectory(src/api)
-    lcevc_add_subdirectory(src/utility)
+    lcevc_add_subdirectory(src/api_utility)
     lcevc_add_subdirectory(src/enhancement_cpu)
-    if (VN_SDK_UNIT_TESTS)
-        lcevc_add_subdirectory(src/utility/test/unit)
-    endif ()
     if (VN_SDK_EXECUTABLES)
         lcevc_add_subdirectory(src/sample_cpp)
         lcevc_add_subdirectory(src/api/test/harness)
@@ -101,14 +92,19 @@ if (VN_SDK_API_LAYER)
     endif ()
 endif ()
 
+if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
+    lcevc_add_subdirectory(src/utility)
+endif ()
+
 # Core layer
 lcevc_add_subdirectory(src/core/decoder)
 lcevc_add_subdirectory(src/core/sequencing)
 lcevc_add_subdirectory(src/overlay_images)
 if (VN_SDK_UNIT_TESTS)
+    lcevc_add_subdirectory(src/utility/test/unit)
+    lcevc_add_subdirectory(src/utility/test/utilities)
     lcevc_add_subdirectory(src/core/test/decoder_unit)
     lcevc_add_subdirectory(src/core/test/sequencing_unit)
-    lcevc_add_subdirectory(src/utility/test/utilities)
 endif ()
 if (VN_CORE_BENCHMARK)
     lcevc_add_subdirectory(src/core/test/benchmark)
@@ -130,7 +126,6 @@ configure_file("cmake/templates/lcevc_dec.pc.in" "generated/lcevc_dec.pc" @ONLY)
 #
 install(FILES "COPYING" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
-install(FILES "cmake/install/conanfile.txt" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_dec.pc"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
 install(DIRECTORY "licenses" DESTINATION "${CMAKE_INSTALL_DOCDIR}")

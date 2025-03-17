@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -117,8 +117,8 @@ TEST(eventManagerInit, noCallbackUntilInit)
 
     auto callback = [](Handle<Decoder>, int32_t event, Handle<Picture>,
                        const LCEVC_DecodeInformation*, const uint8_t*, uint32_t, void* userData) {
-        auto* callbackCounts = static_cast<EventCountArr*>(userData);
-        (*callbackCounts)[event]++;
+        auto* counts = static_cast<EventCountArr*>(userData);
+        (*counts)[event]++;
     };
 
     manager.setEventCallback(callback, &callbackCounts);

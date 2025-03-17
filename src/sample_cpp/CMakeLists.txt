@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -20,7 +20,8 @@ find_package(CLI11 REQUIRED)
 add_executable(lcevc_dec_sample ${SOURCES})
 lcevc_set_properties(lcevc_dec_sample)
 
-target_link_libraries(lcevc_dec_sample lcevc_dec::api lcevc_dec::utility fmt::fmt CLI11::CLI11)
+target_link_libraries(lcevc_dec_sample lcevc_dec::api lcevc_dec::api_utility lcevc_dec::utility
+                      fmt::fmt CLI11::CLI11)
 
 add_executable(lcevc_dec::sample ALIAS lcevc_dec_sample)
 

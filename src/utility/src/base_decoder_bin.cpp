@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -15,10 +15,10 @@
 #include "base_decoder_bin.h"
 
 #include "LCEVC/utility/bin_reader.h"
-#include "LCEVC/utility/picture_layout.h"
 #include "LCEVC/utility/raw_reader.h"
 
 #include <fmt/core.h>
+#include <LCEVC/api_utility/picture_layout.h>
 
 #include <cstdint>
 #include <iterator>

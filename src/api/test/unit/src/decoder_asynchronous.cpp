@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,18 +14,12 @@
 
 #include "decoder_asynchronous.h"
 
-#include "utils.h"
-
 #include <gtest/gtest.h>
 #include <LCEVC/lcevc_dec.h>
-#include <LCEVC/utility/chrono.h>
-#include <LCEVC/utility/threading.h>
 
-#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <string_view>
-#include <thread>
 
 using namespace lcevc_dec::decoder;
 using namespace lcevc_dec::utility;

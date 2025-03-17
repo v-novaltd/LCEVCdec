@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,18 +14,15 @@
 
 #include "LCEVC/utility/configure.h"
 
-#include "LCEVC/lcevc_dec.h"
-
 #include <fmt/core.h>
-#include <rapidjson/document.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <cstdio>
 #include <fstream>
 #include <string_view>
 #include <vector>
 
-using namespace rapidjson;
+using json = nlohmann::json;
 
 namespace {
 // Configuration value types
@@ -38,33 +35,29 @@ enum class ValueType
     Bool,
 };
 
-// Classify type of a single rapidjson value
-ValueType classifyValue(const Value& value)
+// Classify the type of a single json value
+ValueType classifyValue(const json::value_t& value)
 {
-    switch (value.GetType()) {
+    switch (value) {
         default: return ValueType::Unknown;
-        case kFalseType:
-        case kTrueType: return ValueType::Bool;
-        case kStringType: return ValueType::String;
-        case kNumberType:
-            if (value.IsInt()) {
-                return ValueType::Int;
-            } else {
-                return ValueType::Float;
-            }
+        case json::value_t::boolean: return ValueType::Bool;
+        case json::value_t::string: return ValueType::String;
+        case json::value_t::number_integer:
+        case json::value_t::number_unsigned: return ValueType::Int;
+        case json::value_t::number_float: return ValueType::Float;
     }
 }
 
-// Classify type of a rapidjson array
-ValueType classifyArray(const Value& array)
+// Classify type of a json array
+ValueType classifyArray(const json::array_t& array)
 {
-    if (array.Size() == 0) {
+    if (array.size() == 0) {
         return ValueType::Unknown;
     }
 
     ValueType type = classifyValue(array[0]);
 
-    for (const auto& v : array.GetArray()) {
+    for (const auto& v : array) {
         if (classifyValue(v) != type) {
             return ValueType::Unknown;
         }
@@ -76,98 +69,103 @@ ValueType classifyArray(const Value& array)
 
 namespace lcevc_dec::utility {
 
-LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std::string_view json)
+LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std::string_view jsonStr)
 {
-    if (json.empty()) {
+    if (jsonStr.empty()) {
         return LCEVC_Error;
     }
 
-    Document configuration;
+    //    Document configuration;
 
-    if (json[0] != '{') {
+    json configuration;
+
+    if (jsonStr[0] != '{') {
         // File
-        std::ifstream jsonFile(json.data());
+        std::ifstream jsonFile(jsonStr.data());
         if (!jsonFile) {
             return LCEVC_Error;
         }
         std::string str{std::istreambuf_iterator<char>(jsonFile), std::istreambuf_iterator<char>()};
-        configuration.Parse(str.c_str());
+        try {
+            configuration = json::parse(str.c_str());
+        } catch (const json::parse_error&) {
+            return LCEVC_Error;
+        }
     } else {
         // Raw json
-        configuration.Parse(json.data());
+        try {
+            configuration = json::parse(jsonStr);
+        } catch (const json::parse_error&) {
+            return LCEVC_Error;
+        }
     }
 
     // Expecting a valid json object
-    if (configuration.HasParseError() || !configuration.IsObject()) {
+    if (configuration.is_null()) {
         return LCEVC_Error;
     }
 
-    for (Value::ConstMemberIterator item = configuration.MemberBegin();
-         item != configuration.MemberEnd(); ++item) {
+    for (auto& item : configuration.items()) {
         LCEVC_ReturnCode ret = LCEVC_Error;
 
-        if (!item->value.IsArray()) {
+        if (item.value().type() != json::value_t::array) {
             // Scalar value
-            switch (classifyValue(item->value)) {
+            switch (classifyValue(item.value())) {
                 case ValueType::Int:
-                    ret = LCEVC_ConfigureDecoderInt(decoderHandle, item->name.GetString(),
-                                                    item->value.GetInt());
+                    ret = LCEVC_ConfigureDecoderInt(decoderHandle, item.key().c_str(), item.value());
                     if (ret == LCEVC_Success) {
                         break;
                     }
                     // Fall through to float case if int configuration fails
                 case ValueType::Float:
-                    ret = LCEVC_ConfigureDecoderFloat(decoderHandle, item->name.GetString(),
-                                                      item->value.GetFloat());
+                    ret = LCEVC_ConfigureDecoderFloat(decoderHandle, item.key().c_str(), item.value());
                     break;
-                case ValueType::String:
-                    ret = LCEVC_ConfigureDecoderString(decoderHandle, item->name.GetString(),
-                                                       item->value.GetString());
+                case ValueType::String: {
+                    std::string value = configuration[item.key()];
+                    ret = LCEVC_ConfigureDecoderString(decoderHandle, item.key().c_str(), value.c_str());
                     break;
+                }
                 case ValueType::Bool:
-                    ret = LCEVC_ConfigureDecoderBool(decoderHandle, item->name.GetString(),
-                                                     item->value.GetBool());
+                    ret = LCEVC_ConfigureDecoderBool(decoderHandle, item.key().c_str(), item.value());
                     break;
                 default: break;
             }
         } else {
             // Array of values
-            switch (classifyArray(item->value)) {
+            switch (classifyArray(item.value())) {
                 case ValueType::Int: {
-                    std::vector<int32_t> arr(item->value.Size());
-                    std::transform(item->value.GetArray().begin(), item->value.GetArray().end(),
-                                   arr.begin(), [](const Value& v) { return v.GetInt(); });
-                    ret = LCEVC_ConfigureDecoderIntArray(decoderHandle, item->name.GetString(),
+                    std::vector<int32_t> arr = item.value();
+                    ret = LCEVC_ConfigureDecoderIntArray(decoderHandle, item.key().c_str(),
                                                          static_cast<uint32_t>(arr.size()), arr.data());
                     break;
                 }
                 case ValueType::Float: {
-                    std::vector<float> arr(item->value.Size());
-                    std::transform(item->value.GetArray().begin(), item->value.GetArray().end(),
-                                   arr.begin(), [](const Value& v) { return v.GetFloat(); });
-                    ret = LCEVC_ConfigureDecoderFloatArray(decoderHandle, item->name.GetString(),
+                    std::vector<float> arr = item.value();
+                    ret = LCEVC_ConfigureDecoderFloatArray(decoderHandle, item.key().c_str(),
                                                            static_cast<uint32_t>(arr.size()), arr.data());
                     break;
                 }
                 case ValueType::String: {
-                    std::vector<const char*> arr(item->value.Size());
-                    std::transform(item->value.GetArray().begin(), item->value.GetArray().end(),
-                                   arr.begin(), [](const Value& v) { return v.GetString(); });
-                    ret = LCEVC_ConfigureDecoderStringArray(decoderHandle, item->name.GetString(),
-                                                            static_cast<uint32_t>(arr.size()),
+                    const auto vec = item.value().get<std::vector<std::string>>();
+                    std::vector<const char*> arr;
+                    for (const auto& i : vec) {
+                        arr.push_back(i.c_str());
+                    }
+                    ret = LCEVC_ConfigureDecoderStringArray(decoderHandle, item.key().c_str(),
+                                                            static_cast<uint32_t>(item.value().size()),
                                                             arr.data());
                     break;
                 }
 
                 case ValueType::Bool: {
                     // std::vector<bool> is special - can't convert it to a raw array
-                    bool* arr = static_cast<bool*>(alloca(item->value.Size() * sizeof(bool)));
+                    bool* arr = static_cast<bool*>(alloca(item.value().size() * sizeof(bool)));
                     bool* ptr = arr;
-                    for (const auto& v : item->value.GetArray()) {
-                        *ptr++ = v.GetBool();
+                    for (const auto& v : item.value()) {
+                        *ptr++ = v;
                     }
-                    ret = LCEVC_ConfigureDecoderBoolArray(decoderHandle, item->name.GetString(),
-                                                          item->value.Size(), arr);
+                    ret = LCEVC_ConfigureDecoderBoolArray(decoderHandle, item.key().c_str(),
+                                                          static_cast<uint32_t>(item.value().size()), arr);
                     break;
                 }
                 default: break;
@@ -175,7 +173,7 @@ LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std
         }
 
         if (ret != LCEVC_NotFound && ret != LCEVC_Success) {
-            fmt::print("Unknown parameter '{}'\n", item->name.GetString());
+            fmt::print("Unknown parameter '{}'\n", item.key());
             return ret;
         }
     }

@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -77,12 +77,12 @@ else ()
         OUTPUT_VARIABLE GIT_BRANCH
         OUTPUT_STRIP_TRAILING_WHITESPACE)
     execute_process(
-        COMMAND git describe --match "[0-9].[0-9].[0-9]" --abbrev=1 --dirty
+        COMMAND git describe --match "*.*.*" --dirty
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE GIT_VERSION
         OUTPUT_STRIP_TRAILING_WHITESPACE)
     execute_process(
-        COMMAND git describe --match "[0-9].[0-9].[0-9]" --abbrev=0
+        COMMAND git describe --match "*.*.*" --abbrev=0
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE GIT_SHORT_VERSION
         OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -90,10 +90,7 @@ endif ()
 
 message(STATUS "Git: Version=${GIT_VERSION} ShortVersion=${GIT_SHORT_VERSION} Hash=${GIT_HASH}")
 
-# Default MSVC runtime library
-#
-# NB: This has to before the 'project()' command
-#
+# Default MSVC runtime library, this has to before the 'project()' command
 cmake_policy(SET CMP0091 NEW)
 if (VN_MSVC_RUNTIME_STATIC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -167,21 +164,19 @@ function (lcevc_set_properties TARGET)
         set_target_properties(${TARGET} PROPERTIES FOLDER "Executables")
     else ()
         set_target_properties(${TARGET} PROPERTIES FOLDER "Libraries")
-
-        if (VN_STRIP_RELEASE_BUILDS
-            AND ("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
-            AND NOT ("${CMAKE_GENERATOR}" MATCHES "^Visual Studio.*"))
-            # Note: "stripped" is the default on MSVC Release builds, and it doesn't recognise -s.
-            # But, if you DID want to handle this, you couldn't use "CMAKE_BUILD_TYPE", since MSVC
-            # doesn't use that to determine Release vs Debug builds. Instead it uses `--config` at
-            # build time (and it defaults to `--config Debug`)
-            target_link_options(${TARGET} PRIVATE -s)
-        endif ()
-
         if ((IOS OR MACOS) AND BUILD_SHARED_LIBS)
             set_target_properties(${TARGET} PROPERTIES FRAMEWORK TRUE MACOSX_FRAMEWORK_IDENTIFIER
                                                                       "com.v-nova.${TARGET}")
         endif ()
+    endif ()
+
+    if ("${CMAKE_BUILD_TYPE}" STREQUAL "Release" AND NOT "${CMAKE_GENERATOR}" MATCHES
+                                                     "^Visual Studio.*")
+        # Note: "stripped" is the default on MSVC Release builds, and it doesn't recognise -s. But,
+        # if you DID want to handle this, you couldn't use "CMAKE_BUILD_TYPE", since MSVC doesn't
+        # use that to determine Release vs Debug builds. Instead it uses `--config` at build time
+        # (and it defaults to `--config Debug`)
+        target_link_options(${TARGET} PRIVATE -s)
     endif ()
 
     target_compile_features(${TARGET} PRIVATE cxx_std_17)

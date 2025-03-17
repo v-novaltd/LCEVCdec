@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,26 +12,57 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#ifndef VN_API_THREADING_H_
-#define VN_API_THREADING_H_
+#include "LCEVC/api_utility/threading.h"
+
+#include <sys/stat.h>
 
 #include <string_view>
 
-#if defined(_WIN32)
+#ifdef WIN32
+#include <direct.h>
+#include <io.h>
+#include <processthreadsapi.h>
 #include <Windows.h>
-#define VNThreadLocal __declspec(thread)
-#define VN_TO_THREAD_NAME(x) L##x
+#define stat _stat
 #else
-#define VNThreadLocal __thread
-#define VN_TO_THREAD_NAME(x) x
+#ifdef __ANDROID__
+#include <android/dlext.h>
+#endif
+#include <dlfcn.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <unistd.h>
 #endif
 
 namespace lcevc_dec::decoder {
-#if defined(WIN32)
-bool setThreadName(std::wstring_view name);
-#else
-bool setThreadName(std::string_view name);
-#endif
-} // namespace lcevc_dec::decoder
 
-#endif // VN_API_THREADING_H_
+#if defined(WIN32)
+bool setThreadName(std::wstring_view name)
+{
+    if (!name.empty()) {
+        // This might not be available on Windows prior to Windows10
+        const HRESULT hr = SetThreadDescription(GetCurrentThread(), name.data());
+        if (FAILED(hr)) {
+            return false;
+        }
+    }
+    return true;
+}
+#else
+bool setThreadName(std::string_view name)
+{
+    if (!name.empty()) {
+#if defined(__ANDROID__) || defined(__linux__)
+        const int res = pthread_setname_np(pthread_self(), name.data());
+#else // i.e. Apple
+        const int res = pthread_setname_np(name.data());
+#endif
+        if (res != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+#endif
+
+} // namespace lcevc_dec::decoder

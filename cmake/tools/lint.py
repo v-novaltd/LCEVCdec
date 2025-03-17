@@ -38,13 +38,15 @@ COPYRIGHT_TYPES = ('*.cpp', '*.c', '*.h', '*.py', '*.js',
 CLANG_FORMAT_TYPES = ('*.cpp', '*.c', '*.h')
 CMAKE_TYPES = ('*.cmake', 'CMakeLists.txt')
 PYTHON_TYPES = ('*.py',)
+WORKFLOW_TYPES = ('*.yml', '*.yaml')
 GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/**/',
              'include/**/', 'docs/sphinx/**', '.github/**/', '')
 WIN_CLANG_FORMAT_ENV_VAR = 'CLANG_FORMAT_PATH'
 WIN_DEFAULT_CLANG_FORMAT_PATH = r'C:\Program Files\LLVM\bin\clang-format.exe'
 # These files are copied from other sources and have their own copyrights,
 # find associated licenses in the licenses folder
-EXCLUDED_GLOBS = ('cmake/toolchains/ios.toolchain.cmake', 'cmake/toolchains/Emscripten.*')
+EXCLUDED_GLOBS = ('cmake/toolchains/ios.toolchain.cmake',
+                  'cmake/toolchains/Emscripten.*', '.github/workflows/cla.yml')
 TRAILING_SPACE_GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/**/', 'include/**/',
                             'docs/', 'docs/sphinx/**', '.github/**/', 'licenses/**/', '')
 
@@ -87,10 +89,11 @@ def get_paths(glob_types, changed_files, global_dirs=GLOB_DIRS, excluded_dirs=EX
     for glob_dir in global_dirs:
         for glob_type in glob_types:
             paths.extend(glob.glob(glob_dir + glob_type, recursive=True))
-    to_exclude = [path for path in paths for exclude in get_excluded_files(excluded_dirs)
-                  if os.path.samefile(path, exclude)]
-    for exclude in to_exclude:
-        paths.remove(exclude)
+    if excluded_dirs:
+        to_exclude = [path for path in paths for exclude in get_excluded_files(excluded_dirs)
+                      if os.path.samefile(path, exclude)]
+        for exclude in to_exclude:
+            paths.remove(exclude)
     if changed_files is not False:
         paths = [path for path in paths for changed in changed_files
                  if os.path.samefile(path, changed)]
@@ -197,6 +200,8 @@ def find_clang_format():
             print(f"Could not find clang format executable, either set it's location to '{WIN_CLANG_FORMAT_ENV_VAR}' "
                   f"environment variable or install it to the default location '{WIN_DEFAULT_CLANG_FORMAT_PATH}'")
             exit(1)
+    elif os.environ.get('CLANG_FORMAT_PATH'):
+        exe = os.environ.get('CLANG_FORMAT_PATH')
     else:
         exe = 'clang-format-14'
 
@@ -255,6 +260,26 @@ def remove_tailing_space(file, check_only=False):
         except Exception as e:
             print(f"Failed to remove tailing spaces on {file}: {e}")
             return False
+
+
+def lint_readme(check_only=False):
+    readme_copyright_match = 'V-Nova Limited 2014-'
+    readme_path = 'README.md'
+    assert os.path.isfile(readme_path), "Cannot find README.md file"
+    with open(readme_path) as f:
+        readme_content = f.read()
+    str_loc = readme_content.find(readme_copyright_match) + len(readme_copyright_match)
+    cur_year = readme_content[str_loc:str_loc + 4]
+    if cur_year != THIS_YEAR:
+        if check_only:
+            print("\033[0;33m!>>\033[0m README copyright \033[0;31mFAILED\033[0m")
+            return False
+        else:
+            readme_content = readme_content[:str_loc] + THIS_YEAR + readme_content[str_loc + 4:]
+            with open(readme_path, 'w') as f:
+                f.write(readme_content)
+            print('Updated README.md copyright year')
+    return True
 
 
 def parse_args():
@@ -319,9 +344,20 @@ def main():
     for path in get_paths(COPYRIGHT_TYPES, changed_files):
         if not copyright_file(path, args.check_only):
             errors += 1
+    if not lint_readme():
+        errors += 1
 
-    for path in get_paths('*.*', changed_files, TRAILING_SPACE_GLOB_DIRS, ()):
+    for path in get_paths('*.*', changed_files, global_dirs=TRAILING_SPACE_GLOB_DIRS, excluded_dirs=None):
         if not remove_tailing_space(path, args.check_only):
+            errors += 1
+
+    zizmor_exe = find_formatter('zizmor', '1.3.0')
+    for path in get_paths(WORKFLOW_TYPES, changed_files, global_dirs=['.github/workflows/**'], excluded_dirs=None):
+        cmd = [zizmor_exe, path]
+        process = run_cmd(cmd)
+        if process.returncode != 0:
+            print(f"\033[0;33m!>>\033[0m zizmor \033[0;31mFAILED\033[0m "
+                  f"on {process.stdout.decode('utf-8')}")
             errors += 1
 
     if errors == 0:

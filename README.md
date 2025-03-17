@@ -2,7 +2,7 @@
 
 ## About
 
-Low Complexity Enhancement Video Codec Decoder (LCEVC_DEC) is the primary MPEG-5 Part 2 decoder SDK repository maintained by V-Nova. To learn what the LCEVC codec is and how it works, please refer to the [V-Nova documentation portal](https://docs.v-nova.com/v-nova/lcevc/lcevc-sdk-overview).
+Low Complexity Enhancement Video Codec Decoder (LCEVCdec) is the primary MPEG-5 Part 2 decoder SDK repository maintained by V-Nova. To learn what the LCEVC codec is and how it works, please refer to the [V-Nova documentation portal](https://docs.v-nova.com/v-nova/lcevc/lcevc-sdk-overview).
 
 ## Features
 
@@ -18,30 +18,13 @@ Low Complexity Enhancement Video Codec Decoder (LCEVC_DEC) is the primary MPEG-5
 
 ![block_diagram](./docs/img/block_diagram.svg)
 
-## Requirements
-
-See [Getting Started](docs/getting_started.md) to set up the appropriate build tools for the host OS.
-
 ## Building
 
-See:
-
- * [Building - Linux](docs/building_linux.md) to build Linux hosted targets.
- * [Building - macOS](docs/building_macos.md) to build macOS hosted targets.
- * [Building - Windows](docs/building_windows.md) to build Windows hosted targets.
- * [(Optional) Building with PGO](docs/building_with_pgo.md) to build with Profile-Guided Optimization.
-
-## Installation
-
-To install a build of the SDK, see [Installation](docs/install.md)
-
-## Conan Packaging
-
-To install, build and upload a Conan package for **LCEVC_DEC** see [Conan Packaging](docs/conan_packaging.md)
+See [the build guide](docs/building.md) to get started.
 
 ## Notice
 
-Copyright © V-Nova Limited 2014-2024
+Copyright © V-Nova Limited 2014-2025
 
 Additional Information and Restrictions
 * The LCEVCdec software is licensed under the BSD-3-CLAUSE-CLEAR License

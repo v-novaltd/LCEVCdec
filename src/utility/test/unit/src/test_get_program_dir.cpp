@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,10 +12,11 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include "LCEVC/utility/filesystem.h"
 #include "LCEVC/utility/get_program_dir.h"
-//
+
 #include <gtest/gtest.h>
+
+#include <filesystem>
 
 #if defined(_WIN32)
 const char kProgramName[] = {"lcevc_dec_utility_test_unit.exe"};
@@ -23,6 +24,7 @@ const char kProgramName[] = {"lcevc_dec_utility_test_unit.exe"};
 const char kProgramName[] = {"lcevc_dec_utility_test_unit"};
 #endif
 
+namespace filesystem = std::filesystem;
 using namespace lcevc_dec::utility;
 
 TEST(GetProgramDir, Test)

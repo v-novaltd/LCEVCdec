@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -23,12 +23,10 @@ list(
     "src/md5.cpp"
     "src/parse_raw_name.cpp"
     "src/picture_functions.cpp"
-    "src/picture_layout.cpp"
     "src/picture_lock.cpp"
     "src/raw_reader.cpp"
     "src/raw_writer.cpp"
     "src/string_utils.cpp"
-    "src/threading.cpp"
     "src/types_convert.cpp"
     "src/types_cli11.cpp"
     "src/types_stream.cpp")
@@ -47,8 +45,7 @@ if (VN_SDK_JSON_CONFIG)
     list(APPEND SOURCES "src/configure.cpp")
 endif ()
 
-list(APPEND HEADERS "src/bin_writer.h" "src/math_utils.h" "src/parse_raw_name.h"
-     "src/base_decoder_bin.h")
+list(APPEND HEADERS "src/bin_writer.h" "src/parse_raw_name.h" "src/base_decoder_bin.h")
 
 list(
     APPEND
@@ -57,19 +54,12 @@ list(
     "include/LCEVC/utility/bin_reader.h"
     "include/LCEVC/utility/byte_order.h"
     "include/LCEVC/utility/check.h"
-    "include/LCEVC/utility/chrono.h"
-    "include/LCEVC/utility/enum_map.h"
     "include/LCEVC/utility/extract.h"
-    "include/LCEVC/utility/filesystem.h"
     "include/LCEVC/utility/get_program_dir.h"
-    "include/LCEVC/utility/linear_math.h"
     "include/LCEVC/utility/picture_functions.h"
-    "include/LCEVC/utility/picture_layout.h"
-    "include/LCEVC/utility/picture_layout_inl.h"
     "include/LCEVC/utility/raw_reader.h"
     "include/LCEVC/utility/raw_writer.h"
     "include/LCEVC/utility/string_utils.h"
-    "include/LCEVC/utility/threading.h"
     "include/LCEVC/utility/types.h"
     "include/LCEVC/utility/types_cli11.h"
     "include/LCEVC/utility/types_convert.h"

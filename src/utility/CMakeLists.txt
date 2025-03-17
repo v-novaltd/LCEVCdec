@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -14,15 +14,12 @@
 
 include("Sources.cmake")
 
-if (VN_SDK_JSON_CONFIG)
-    find_package(rapidjson NAMES RapidJSON rapidjson REQUIRED)
-endif ()
 find_package(fmt REQUIRED)
+if (VN_SDK_JSON_CONFIG)
+    find_package(nlohmann_json REQUIRED)
+endif ()
 if (VN_SDK_BASE_DECODER)
     find_package(ffmpeg-libs REQUIRED)
-endif ()
-if (VN_SDK_USE_GHC_FILESYSTEM)
-    find_package(ghc_filesystem REQUIRED)
 endif ()
 
 add_library(lcevc_dec_utility STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
@@ -34,9 +31,7 @@ target_include_directories(lcevc_dec_utility PUBLIC "${CMAKE_CURRENT_LIST_DIR}/.
 target_link_libraries(
     lcevc_dec_utility
     PUBLIC lcevc_dec::platform lcevc_dec::compiler $<TARGET_NAME_IF_EXISTS:ffmpeg-libs::ffmpeg-libs>
-    PRIVATE fmt::fmt $<TARGET_NAME_IF_EXISTS:rapidjson::rapidjson>
-            $<TARGET_NAME_IF_EXISTS:RapidJSON::RapidJSON>
-            $<TARGET_NAME_IF_EXISTS:ghcFilesystem::ghc_filesystem>)
+    PRIVATE lcevc_dec::api_utility fmt::fmt $<TARGET_NAME_IF_EXISTS:nlohmann_json::nlohmann_json>)
 
 add_library(lcevc_dec::utility ALIAS lcevc_dec_utility)
 
