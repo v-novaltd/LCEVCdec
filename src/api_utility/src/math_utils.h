@@ -18,6 +18,7 @@
 #define VN_LCEVC_UTILITY_MATH_UTILS_H
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
