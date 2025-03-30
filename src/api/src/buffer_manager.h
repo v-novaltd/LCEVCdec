@@ -15,6 +15,7 @@
 #ifndef VN_API_BUFFER_MANAGER_H_
 #define VN_API_BUFFER_MANAGER_H_
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <set>
