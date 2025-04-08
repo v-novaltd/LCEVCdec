@@ -18,7 +18,7 @@
 #include <string_view>
 
 #if defined(_WIN32)
-#include <Windows.h>
+#include <windows.h>
 #define VNThreadLocal __declspec(thread)
 #define VN_TO_THREAD_NAME(x) L##x
 #else
