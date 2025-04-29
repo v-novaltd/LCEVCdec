@@ -8,14 +8,17 @@ This document outlines the process for making contributions to the LCEVC decoder
 
 Before we can incorporate your contributions into the LCEVC decoder codebase, you must sign the LCEVC Contributor License Agreement (CLA). This agreement ensures that while you retain ownership of your contributions, you grant us the necessary rights to use, modify, and distribute them as part of the project.
 
-The CLA protects both you and V-Nova by clarifying the following:
-- You retain ownership of the copyright for your contributions.
-- You grant us the rights necessary to use, distribute, and modify your code.
-- You will notify us if you are aware of any third-party patents that your code might infringe.
+Before submitting a PR please reach out to legal@v-nova.com to sign the [CLA](https://gist.github.com/v-nova-ci/f66ee698bdfda7b1ec9649cc806826a4). Here's a plain-language summary of what you're agreeing to:
+- You keep the copyright in your contributions, but you give V-Nova the right to use, modify, and distribute them under the project’s BSD-3-Clause Clear license.
+- You confirm the work is yours (or that you have the right to contribute it) and that your contribution doesn’t knowingly infringe anyone else’s IP.
+- You grant V-Nova a license to any patents that your contribution reads on, so we can use it freely — including in commercial and sublicensed contexts.¹
+- You're not required to support your code, and we don’t provide any warranties — just like most open source projects.
 
-Although you are not required to sign the CLA immediately, we cannot merge your contribution into the project until it has been signed. If you are planning a larger contribution, it is a good idea to contact us first to discuss your ideas. This helps us guide you and ensures a smoother contribution process.
+This is only a summary — please read the full agreement before signing!
 
-Before submitting a PR please reach out to legal@v-nova.com to sign the [CLA](https://gist.github.com/v-nova-ci/f66ee698bdfda7b1ec9649cc806826a4).
+Although you are not required to sign the CLA immediately, we cannot merge your contribution into the project until it has been signed. If you are planning a larger contribution, it is a good idea to raise an issue first to discuss your ideas. This helps us guide you and ensures a smoother contribution process.
+
+¹ Note: The patent license is granted to V-Nova only. The BSD-3-Clause Clear license does not automatically pass on patent rights to downstream users.
 
 ---
 

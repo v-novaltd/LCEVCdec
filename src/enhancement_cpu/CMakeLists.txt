@@ -30,5 +30,3 @@ target_include_directories(
     lcevc_dec_enhancement_cpu
     PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
     PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
-
-install(FILES ${INTERFACES} DESTINATION "include/LCEVC")

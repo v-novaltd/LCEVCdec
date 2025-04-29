@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -164,7 +164,7 @@ class ADBRunner(Runner):
 
     def run(self, **kwargs):
         ret = self.run_adb(['shell', f'cd {self.workdir} '
-                            f'&& export LD_LIBRARY_PATH={self.BUILD_DIR}/lib/:{self.BUILD_DIR}/bin/:{self.BUILD_DIR}/ '
+                            f'&& export LD_LIBRARY_PATH={self.BUILD_DIR}/lib/:{self.BUILD_DIR}/bin/:{self.BUILD_DIR}/:{self.BUILD_DIR}/3rdparty/FFmpeg '
                             f'&& {" ".join(self.get_command_line(separate_param_from_value=True, as_string=False))}'])
         self._copy_back_results()
         return ret
@@ -248,7 +248,7 @@ class ADBRunner(Runner):
                 pushed_assets.sort(key=lambda k: k['time'])
                 while len(pushed_assets) > self.DEVICE_ENCODE_CACHE_SIZE:
                     oldest_encode = pushed_assets.pop(0)
-                    oldest_path = f"{self.ASSETS_DIR}/{oldest_encode[0]['hash']}_{oldest_encode[0]['time']}.{oldest_encode[0]['extension']}"
+                    oldest_path = f"{self.ASSETS_DIR}/{oldest_encode['hash']}_{oldest_encode['time']}.{oldest_encode['extension']}"
                     self.run_adb(['shell', f"rm {oldest_path}"], assert_rc=True)
                 return f"{self.ASSETS_DIR}/{translated_name}"
 

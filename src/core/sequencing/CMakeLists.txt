@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -27,5 +27,5 @@ target_include_directories(
     PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
     PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
 
-install(FILES ${INTERFACES} DESTINATION "include/LCEVC")
+install(FILES ${INTERFACES} DESTINATION "include/LCEVC/sequencing")
 install(TARGETS lcevc_dec_core_sequencing DESTINATION lib)

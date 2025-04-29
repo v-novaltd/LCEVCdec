@@ -32,26 +32,18 @@ if (NOT TARGET ffmpeg-libs::ffmpeg-libs)
         "libavfilter"
         "libavutil"
         "libavdevice")
-    if ("ffmpeg-libs-minimal" IN_LIST PACKAGE_LIST)
-        message("Found libav packages from conan package 'ffmpeg-libs-minimal'")
-        target_link_libraries(ffmpeg-libs::ffmpeg-libs
-                              INTERFACE ffmpeg-libs-minimal::ffmpeg-libs-minimal)
-        set(FFMPEG_SHARED_PATH
-            "${ffmpeg-libs-minimal_LIB_DIRS_DEBUG}${ffmpeg-libs-minimal_LIB_DIRS_RELEASE}")
-        if (WIN32)
-            set(FFMPEG_SHARED_PATH
-                "${ffmpeg-libs-minimal_LIB_DIRS_DEBUG}${ffmpeg-libs-minimal_LIB_DIRS_RELEASE}/../bin"
-            )
-        endif ()
-        file(COPY ${FFMPEG_SHARED_PATH} DESTINATION "${CMAKE_BINARY_DIR}")
-    elseif ("ffmpeg" IN_LIST PACKAGE_LIST)
+    if ("ffmpeg" IN_LIST PACKAGE_LIST)
         message("Found libav packages from conan package 'ffmpeg'")
         target_link_libraries(ffmpeg-libs::ffmpeg-libs INTERFACE ffmpeg::ffmpeg)
-        set(FFMPEG_SHARED_PATH "${ffmpeg_LIBS_RELEASE}${ffmpeg_LIBS_DEBUG}")
+        string(TOUPPER ${CMAKE_BUILD_TYPE} UPPER_BUILD_TYPE)
+        set(FFMPEG_SHARED_PATH "${ffmpeg_LIB_DIRS_${UPPER_BUILD_TYPE}}")
         if (WIN32)
-            set(FFMPEG_SHARED_PATH "${ffmpeg_LIBS_RELEASE}${ffmpeg_LIBS_DEBUG}/../bin")
+            set(FFMPEG_SHARED_PATH "${ffmpeg_LIB_DIRS_${UPPER_BUILD_TYPE}}/../bin")
         endif ()
         file(COPY ${FFMPEG_SHARED_PATH} DESTINATION "${CMAKE_BINARY_DIR}")
+        file(GLOB FFMPEG_LIBS "${FFMPEG_SHARED_PATH}/*")
+        install(FILES ${FFMPEG_LIBS} DESTINATION "3rdparty/FFmpeg")
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/licenses/FFmpeg" DESTINATION "3rdparty")
     else ()
         # Attempt to find via pkgconfig
         find_package(PkgConfig)

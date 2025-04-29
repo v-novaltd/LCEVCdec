@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -45,7 +45,8 @@ if (NOT DEFINED TARGET_ARCH)
         OR CMAKE_SYSTEM_PROCESSOR MATCHES "^arm64")
         set(TARGET_ARCH "armv8")
     else ()
-        message(FATAL_ERROR "Unknown target processor: [${CMAKE_SYSTEM_PROCESSOR}]")
+        message(WARNING "Unknown target processor: [${CMAKE_SYSTEM_PROCESSOR}],
+                         this is an untested and unsupported target")
     endif ()
 endif ()
 
@@ -109,6 +110,6 @@ message(
     STATUS "Target: Platform=${TARGET_PLATFORM} Arch=${TARGET_ARCH} Compiler=${TARGET_COMPILER}")
 
 #
-include("Arch/${TARGET_ARCH}")
+include("Arch/${TARGET_ARCH}" OPTIONAL)
 include("Platform/${TARGET_PLATFORM}")
 include("Compiler/${TARGET_COMPILER}")

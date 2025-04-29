@@ -92,6 +92,34 @@ def get_conformance(version, conf_id, content_name, stream_type='bit', get_confi
     return conformance_stream_path, conformance_config_path
 
 
+def get_compliance(version, conf_id, content_name, stream_type='bit', get_config=True):
+    compliance_dir = os.path.join(config.get('CACHE_PATH'), 'assets')
+    os.makedirs(os.path.join(compliance_dir, version), exist_ok=True)
+    compliance_stream_path = os.path.abspath(os.path.join(
+        compliance_dir, version, f"{conf_id}_{content_name}.{stream_type}"))
+    compliance_config_path = os.path.abspath(os.path.join(
+        compliance_dir, version, f"{conf_id}_{content_name}.cfg"))
+    missing = dict()
+    if not os.path.isfile(compliance_stream_path):
+        missing['bit'] = compliance_stream_path
+    if get_config and not os.path.isfile(compliance_config_path):
+        missing['cfg'] = compliance_config_path
+    if missing:
+        start_time = time.perf_counter()
+        for asset_type, path in missing.items():
+            url = config.get('HERP_URL', DEFAULT_HERP_URL) + '/asset'
+            req = requests.get(url, params=dict(
+                path=f"compliance_{stream_type}/{conf_id}/{content_name}_{conf_id}.{asset_type}"))
+            if not req.ok:
+                raise RuntimeError(f"Error while getting compliance {asset_type} {conf_id}_{content_name}"
+                                   f" ({req.status_code}): {req.text}")
+            save_file_safe(req, compliance_dir, path)
+        logger.info(f"Retrieved compliance asset {conf_id}_{content_name}.{stream_type} from HERP in "
+                    f"{(time.perf_counter() - start_time) * 1000:.3f}ms. Asset location:"
+                    f"{os.path.join(compliance_dir, path)}")
+    return compliance_stream_path, compliance_config_path
+
+
 def get_asset(asset):
     asset_root = os.path.join(config.get('CACHE_PATH'), 'assets')
     os.makedirs(asset_root, exist_ok=True)
@@ -170,41 +198,51 @@ def herp_is_accessible():
         return False
 
 
-def download_assets_externally():
-    logger.info("Cannot reach HERP, downloading assets externally...")
+def download_assets_externally(platform):
     repo = git.Repo(search_parent_directories=True)
     tags = sorted(repo.tags, key=lambda t: t.commit.committed_date)
 
     # Filter tags that match the numerical format (e.g., 1.2.3)
     numeric_tags = [tag for tag in tags if re.match(r'^\d+(\.\d+)*$', str(tag))]
     version = numeric_tags[-1] if numeric_tags else None
-    if version:
-        external_url = config.get('EXTERNAL_ASSET_URL', "None").format(VERSION=version)
-        test_cache_path = os.path.join(config.get('CACHE_PATH', 'test_cache'), "test_cache.zip")
+    assert version, f"Cannot determine git version to download the correct test assets: {version}"
+    variant = 'external' if platform == 'External' else 'full'
+    external_url = config.get('EXTERNAL_ASSET_URL').format(VERSION=version, VARIANT=variant)
+    test_cache_path = config.get('CACHE_PATH', 'test_cache')
+    test_cache_zip = os.path.join(test_cache_path, "test_cache.zip")
 
-        # If external URL exists and the target path does not already exist
-        if external_url and not os.listdir(config.get('CACHE_PATH')):
-            req = requests.head(external_url)
-            if not req.ok:
-                raise RuntimeError(
-                    f"Error while getting test assets externally ({req.status_code}): {req.text}")
-            size = round(float(req.headers.get('content-length')) / (1024 ** 3), 2) \
-                if req.headers.get('content-length') else 'unknown'
-            logger.info(f"Downloading test assets from '{external_url}' ({size} GB)...")
-            req = requests.get(external_url, stream=True)
-            if req.status_code == 200:
-                with open(test_cache_path, 'wb') as f:
-                    # Download in 128KiB chunks
-                    for chunk in req.iter_content(chunk_size=(128 * 1024)):
-                        f.write(chunk)
-            else:
-                raise RuntimeError(
-                    f"Error while downloading test cache ({req.status_code}): {req.text}")
-            try:
-                shutil.unpack_archive(test_cache_path, format='zip')
-            except Exception as e:
-                raise RuntimeError(f"Unable to unzip {test_cache_path}: {e}")
-            assert config.get(
-                'PLATFORM') == 'External' "Platform must be External to use External assets"
-    else:
-        raise RuntimeError(f"Version/Tags is returned as: {version}")
+    existing = None
+    if os.path.isfile(os.path.join(test_cache_path, 'version.txt')):
+        with open(os.path.join(test_cache_path, 'version.txt'), 'r') as f:
+            existing = f.read()
+        existing_version, existing_platform = existing.split('-')
+
+    # If external URL exists and the correct assets are not already downloaded
+    if external_url and (not existing or existing_version != version
+                         or (existing_platform == 'External' and platform != 'External')):
+        req = requests.head(external_url)
+        if not req.ok:
+            raise RuntimeError(
+                f"Error while getting test assets externally from {external_url} ({req.status_code}): {req.text}")
+        size = round(float(req.headers.get('content-length')) / (1024 ** 3), 2) \
+            if req.headers.get('content-length') else 'unknown'
+        logger.info(f"Downloading test assets from '{external_url}' ({size} GB)...")
+        if os.listdir(test_cache_path):
+            shutil.rmtree(test_cache_path)
+            os.makedirs(test_cache_path)
+        req = requests.get(external_url, stream=True)
+        if req.status_code == 200:
+            with open(test_cache_zip, 'wb') as f:
+                # Download in 128KiB chunks
+                for chunk in req.iter_content(chunk_size=(128 * 1024)):
+                    f.write(chunk)
+        else:
+            raise RuntimeError(
+                f"Error while downloading test cache ({req.status_code}): {req.text}")
+        logger.info("Extracting test assets zip...")
+        shutil.unpack_archive(test_cache_zip, extract_dir=test_cache_path, format='zip')
+        for dir in os.listdir(os.path.join(test_cache_path, 'test_cache')):
+            shutil.move(os.path.join(test_cache_path, 'test_cache', dir), test_cache_path)
+        os.rmdir(os.path.join(test_cache_path, 'test_cache'))
+        with open(os.path.join(test_cache_path, 'version.txt'), 'w') as f:
+            f.write(f"{version}-{platform}")

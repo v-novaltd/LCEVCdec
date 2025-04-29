@@ -39,7 +39,7 @@ class LCEVCDecoderSDK(ConanFile):
         "debug_syntax": [True, False],
         "api_layer": [True, False],
         "json_config": [True, False],
-        "base_decoder": ["ffmpeg-libs-minimal", "ffmpeg", "libav", "manual", "none"],
+        "base_decoder": ["ffmpeg", "libav", "manual", "none"],
     }
 
     default_options = {
@@ -91,11 +91,9 @@ class LCEVCDecoderSDK(ConanFile):
         if self.options.unit_tests == None:
             self.options.unit_tests = not self.in_local_cache and self.can_have_executables()
 
-        if self.options.base_decoder == "ffmpeg-libs-minimal":
-            self.options['ffmpeg-libs-minimal'].shared = True
-
         if self.options.base_decoder == "ffmpeg":
             self.options['ffmpeg'].shared = True
+            self.options['ffmpeg'].postproc = False
             if self.settings.os == 'Linux':
                 self.options['ffmpeg'].with_libalsa = False
                 self.options['ffmpeg'].with_pulse = False
@@ -103,8 +101,10 @@ class LCEVCDecoderSDK(ConanFile):
                 self.options['ffmpeg'].with_vdpau = False
                 self.options['ffmpeg'].with_vulkan = False
                 self.options['ffmpeg'].with_xcb = False
-                self.options['ffmpeg'].with_libdrm = False
-                self.options['ffmpeg'].with_xlib = False
+            if self.settings.os in ("Macos", "iOS", "tvOS"):
+                self.options['ffmpeg'].with_coreimage = False
+                self.options['ffmpeg'].with_audiotoolbox = False
+                self.options['ffmpeg'].with_videotoolbox = False
             self.options['ffmpeg'].with_asm = False
             self.options['ffmpeg'].with_zlib = False
             self.options['ffmpeg'].with_bzip2 = False
@@ -125,22 +125,9 @@ class LCEVCDecoderSDK(ConanFile):
             self.options['ffmpeg'].with_libwebp = False
             self.options['ffmpeg'].with_ssl = False
             self.options['ffmpeg'].with_programs = False
-            self.options['ffmpeg'].with_libsvtav1 = False
-            self.options['ffmpeg'].with_libaom = False
-            self.options['ffmpeg'].with_libdav1d = False
 
-        # Now set the default options for ffmpeg for android
-        if self.options.base_decoder == "ffmpeg-libs-minimal" and self.settings.os == "Android":
-            # TODO: only set the default when it's not provide on command line like this
-            # -o ffmpeg:shared=True -o dav1d:shared=True -o libvvdec:shared=True
-            self.options['ffmpeg'].add_option('shared', False)
-            self.options['dav1d'].add_option('shared', False)
-            self.options['libvvdec'].add_option('shared', False)
-            self.output.info(f'Building for android: shared library ffmpeg {self.options["ffmpeg"].shared}, '
-                             f'dav1d {self.options["dav1d"].shared}, libvvdec {self.options["libvvdec"].shared}')
-
-    def build_requirements(self):
-        """ Add any extra build requirements based on options and settings.
+    def requirements(self):
+        """ Add build requirements based on options and settings.
         """
         reqs = list()
 
@@ -150,11 +137,8 @@ class LCEVCDecoderSDK(ConanFile):
         if self.options.json_config:
             reqs.append('nlohmann_json/3.11.3')
 
-        if self.options.base_decoder == "ffmpeg-libs-minimal":
-            reqs.append('ffmpeg-libs-minimal/n6.1-vnova-29')
-
         if self.options.base_decoder == "ffmpeg":
-            reqs.append('ffmpeg/5.1')
+            reqs.append('ffmpeg/7.1')
 
         if self.options.base_decoder == "libav":
             reqs.append('libav/12.3')
@@ -167,7 +151,7 @@ class LCEVCDecoderSDK(ConanFile):
                 reqs.extend(['gtest/1.12.1', 'range-v3/0.12.0'])
 
         for package in reqs:
-            self.build_requires(package)
+            self.requires(package)
 
     def set_version(self):
         """ Extract version from git
@@ -264,7 +248,6 @@ class LCEVCDecoderSDK(ConanFile):
     def package(self):
         cmake = CMake(self)
         cmake.install()
-        self.copy(pattern="licenses", dst="licenses")
 
     def package_info(self):
 

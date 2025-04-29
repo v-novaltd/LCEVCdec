@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -15,7 +15,7 @@
 import json
 import os
 
-from utilities.assets import get_asset, get_conformance
+from utilities.assets import get_asset, get_compliance
 from utilities.config import config, logger
 from utilities.load_tests import csv_json_to_dict
 from utilities.ltm import LOCAL_LTM_PATH, ltm_vs_harness_hash_match
@@ -27,8 +27,8 @@ from utilities.test_runner import BaseTest
 class Test(BaseTest):
     def test(self, test, test_dir):
         hash_file = 'hashes.json'
-        asset_path = f"conformance_bin/{test['conformance']['version']}/{test['conformance']['id']}" \
-            f"/{test['conformance']['content']}.bin"
+        asset_path = f"compliance_bin/{test['compliance']['id']}" \
+            f"/{test['compliance']['content']}.bin"
         stream_path = get_asset(asset_path)
 
         runner = get_runner(get_executable('lcevc_dec_test_harness'), test_dir)
@@ -57,13 +57,13 @@ class Test(BaseTest):
                         f"Harness {hash_name} hash does not match"
 
     def validate_regen(self, test, test_dir):
-        es_path, stream_config_path = get_conformance(test['conformance']['version'],
-                                                      test['conformance']['id'], test['conformance']['content'])
+        es_path, stream_config_path = get_compliance(
+            test['compliance']['version'], test['compliance']['id'], test['compliance']['content'])
         with open(stream_config_path, 'r') as json_file:
             stream_config = json.load(json_file)
         ltm_runner = get_runner(os.path.abspath(os.path.join(
             LOCAL_LTM_PATH, 'ModelDecoder')), test_dir, force_local=True)
-        assert not isinstance(ltm_runner, ADBRunner), "Cannot regen conformance hashes on Android"
+        assert not isinstance(ltm_runner, ADBRunner), "Cannot regen compliance hashes on Android"
         ltm_runner.set_param('--input_file', es_path)
         if not stream_config['format'].startswith("yuv") or stream_config['format'].endswith("12") or \
                 stream_config['format'].endswith("14"):

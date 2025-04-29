@@ -30,7 +30,7 @@ If a name is not provided it will be auto generated
 The remaining fields in the CSV definitions are grouped using a key, value syntax delimited by a colon, eg. `group:param`.
 The groups are passed to the test function in a dictionary format and have no strict format but there are some examples
 of parameters that are already in use:
-* `meta` - used by the python test function itself, eg. `meta:hash_sfilter` is used to compare as a reference hash
+* `meta` - used by the python test function itself, eg. `meta:hash` is used to compare as a reference hash
 from hashing functions within the test_harness
 * `cli` - command line parameters for the harness under test. These are directly passed through so `--` dashes
 must be included correctly. For positional arguments, use a number e.g. `cli:0` (positional arguments always come first)
@@ -55,7 +55,14 @@ assets will be cached to the `CACHE_PATH` for any subsequent runs. From time to 
 local cache to save space and remove any assets that are no longer in use, this can be done by manually deleting the folder
 or enabling `RESET_LOCAL_CACHE`. Assets are only downloaded for the tests that are enabled. The SDK version of the encoder
 is set with `ENCODER_VERSION`, please use a hash from the [dashboard](http://dashboard/sdk_builds).
-Please note that HERP is V-Nova's internal tool for generating and managing LCEVC encodes. It is not accessible to external users.
+
+Please note that HERP is V-Nova's internal tool for generating and managing LCEVC encodes and it is not accessible to
+external users. For external users a zip file of all the required test assets for a given version is downloadable so that
+the tests can be run as they are, although development is limited as you cannot create any new test streams. The
+`EXTERNAL_ASSET_URL` config param sets this URL and the tests will automatically download this file if it cannot reach
+HERP. Two variants are available, `external` and `full` following the `External` and `cpu` platforms from the CSVs.
+The external zip runs most tests with a ~3GB download and the full zip runs all tests with a ~20GB download - notably
+including the performance group that requires some large base YUVs.
 
 ## Config
 The test suite takes many config options, these are all defined in `config.ini` and the path to the config is set by an
@@ -79,7 +86,7 @@ than your logical core count
 'Qualcomm_devkit' are supported. When running on Windows, please use the 'ubuntu' platform.
 * `LEVEL` - usually taken from the Jenkins `BUILD_TYPE`, when set to 'MR', a limited test set is selected
 * `FILTER_GROUP` - uncomment to filter by an exact group name as defined in the CSV 'Group' column
-* `FILTER_NAME` - uncomment to filter by the substring of a test name, can be use in conjunction with `FILTER_GROUP`
+* `FILTER_NAME` - uncomment to filter by the substring of a test name, can be used in conjunction with `FILTER_GROUP`
 * `DELETE_TEMP_DIR` - either 'ALWAYS', 'ON_PASS' or 'NEVER' - specifies whether temp folders for each test in `WORKDIR`
 are removed after each test run, 'ON_PASS' will only keep folders of tests that fail. The `WORKDIR` will always be cleared
 when tests are re-run regardless of this parameter
@@ -90,8 +97,7 @@ and the stderr captured by the test will contain valgrind's report
 * `ADB_PATH` - path to the Android Debug Bridge executable, must be set when running android tests on Windows
 * `ADB_SERIAL` - the serial number of the target device within ADB, must be set even when only one device is connected.
 Can be a networked device.
-* `ABD_SERVER_HOST` - the hostname of the node with the connected android device, currently the Qualcomm_devkit is
-attached to 'padubt146'
+* `ABD_SERVER_HOST` - the hostname of the node with the connected android device
 * `DEVICE_BASE_DIR` - base location to copy assets, executables and run tests on the android device
 * `DEVICE_BUILD_DIR` - optionally specify a separate location for executables as some devices don't allow running
 executables from the SD card however internal storage may not be large enough for the assets
@@ -101,13 +107,13 @@ executables from the SD card however internal storage may not be large enough fo
 * `CACHE_PATH` - path to store encoded assets locally, this folder can become large when certain tests are selected
 * `ENCODER_VERSION` - an 8-character hash of an SDK build, please stick to release builds, caution when changing as the
 HERP cache will have to be re-built
-* `HERP_URL` - URL for herp, ensure you are connected to the VPN
+* `HERP_URL` - URL for herp - connection to the V-Nova network is required
 * `RESET_LOCAL_CACHE` - deletes the contents of `ENCODE_CACHE_PATH` at the start of the tests
-* `EXTERNAL_ASSET_URL` - download minimal version of test assets from external url
+* `EXTERNAL_ASSET_URL` - URL for downloading test assets outside V-Nova
 
 
 * `LTM_URL` - URL to the exact LTM build to download from the [Nexus](nexus.dev.v-nova.com), can use the Nexus API
-features to download the latest rather than hardcode a specific hash
+features to download the latest rather than hardcode a specific hash - connection to the V-Nova network is required
 * `NEXUS_USER` - Hardcode the user for authentication to the Nexus API, use 'PROMPT' for an interactive prompt at runtime
 * `NEXUS_PASSWORD` - Hardcode the password for authentication to the Nexus API - not recommended to set in the ini file,
 primarily for use via environment vars in CI, use 'PROMPT' for an interactive prompt at runtime
@@ -116,19 +122,7 @@ caching them yields a performance improvement in certain cases. This does result
 disk so use with care
 
 ## Content attribution
-The following contents are used to measure decoder performance. Required frames are extracted from the source files (links provided below)
-and concatenated into a merged YUV file.
-
-| *Title*                                   | *Frame nums*  | *Link*                                                                      |
-| ------------------------------------------|:-------------:| ---------------------------------------------------------------------------:|
-| Big Bug Bunny                             | 0-23          |   http://www.bigbuckbunny.org/                                              |
-| Into The Cave Of Wonders                  | 24-71         |   https://4kmedia.org/into-the-cave-of-wonders-uhd-4k-demo/                 |
-| Jelly fish                                | 72-95         |   https://repo.jellyfin.org/jellyfish/                                      |
-| LG Cymatic Jazz                           | 96-167        |   https://4kmedia.org/lg-cymatic-jazz-hdr-hlg-uhd-4k-demo/                  |
-| LG New York                               | 168-239       |   https://4kmedia.org/lg-new-york-hdr-uhd-4k-demo/                          |
-| Sony Swordsmith                           | 240-287       |   https://4kmedia.org/sony-swordsmith-hdr-uhd-4k-demo/                      |
-| Sony Aquarium            	                | 288-323       |   https://4kmedia.org/sony-aquarium-uhd-4k-demo/                            |
-| Samsung and RedBull See the Unexpected    | 324-359       |   https://4kmedia.org/samsung-x-redbull-see-the-unexpected-hdr-uhd-4k-demo/ |
-| V-NOVA VR Mission ISS                     | 360-407       |   https://www.meta.com/en-gb/experiences/2094303753986147/                  |
-| Lifting                                   | 408-443       |   https://www.cablelabs.com/4k                                              |
-| Indoor                                    | 444-503       |   https://www.cablelabs.com/4k                                              |
+The functional tests use a modified version of the 'ElFuenteTunnel' clip, which is part of Netflix's Open Content and is
+licensed under the [Creative Commons Attribution 4.0 International License (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+The clip has been trimmed and re-encoded. All rights are retained by [Netflix](https://opencontent.netflix.com/). The
+performance test group uses the 'Performance' clip. Copyright © V-Nova International Limited 2025. All rights reserved.

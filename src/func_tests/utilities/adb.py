@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -63,19 +63,15 @@ def initialise_adb_device():
     host_build_path = os.path.dirname(config.get('BIN_DIR'))
     if host_build_path.endswith('bin'):
         host_build_path = os.path.dirname(host_build_path)
-    host_bin_dir = os.path.join(host_build_path, 'bin')
-    host_lib_dir = os.path.join(host_build_path, 'lib')
-    dest_bin_dir = ADBRunner.BUILD_DIR + '/bin'
-    dest_lib_dir = ADBRunner.BUILD_DIR + '/lib'
-    logger.info(
-        f"Pushing build to Android device... {host_bin_dir} -> {dest_bin_dir}, {host_lib_dir} -> {dest_lib_dir}")
+    logger.info(f"Pushing build to Android device... {host_build_path} -> {ADBRunner.BUILD_DIR}")
     run_adb(['shell', f'rm -rf {ADBRunner.WORK_DIR} && mkdir {ADBRunner.WORK_DIR}'], assert_rc=True)
     run_adb(
         ['shell', f'rm -rf {ADBRunner.BUILD_DIR} && mkdir {ADBRunner.BUILD_DIR}'], assert_rc=True)
 
-    run_adb(['push', host_bin_dir, dest_bin_dir], assert_rc=True, timeout=600)
-    if os.path.exists(host_lib_dir):  # Some compiler configs just shove everything in the bin
-        run_adb(['push', host_lib_dir, dest_lib_dir], assert_rc=True, timeout=600)
+    for artifact_dir in ('bin', 'lib', '3rdparty'):
+        host_dir = os.path.join(host_build_path, artifact_dir)
+        if os.path.exists(host_dir):
+            run_adb(['push', host_dir, f'{ADBRunner.BUILD_DIR}/{artifact_dir}'], assert_rc=True, timeout=600)
     run_adb(['shell', f'chmod +x {ADBRunner.BUILD_DIR}/bin/*'])
     logger.info(f"Initialised Android device in {time.perf_counter() - start_time:.3f}s")
 

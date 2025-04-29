@@ -338,12 +338,17 @@ void BaseDecoderLibAV::close()
         avfilter_graph_free(&m_filterGraph);
     }
 
+    av_parser_close(m_parserCtx);
+
     av_frame_free(&m_frame);
     av_packet_free(&m_demuxPacket);
     av_packet_free(&m_videoPacket);
+    av_packet_free(&m_basePacket);
 
     if (m_videoDecCtx) {
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 0, 0)
         avcodec_close(m_videoDecCtx);
+#endif
         avcodec_free_context(&m_videoDecCtx);
     }
 

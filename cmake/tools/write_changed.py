@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -25,11 +25,19 @@ import sys
 import subprocess
 
 
-def capture_output(cmd):
+def run_command(cmd):
     '''Run `cmd` as a subprocess, returning stdout.'''
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if not proc or proc.returncode != 0:
         raise RuntimeError(f"Failed to run command: \"{cmd}\"")
+    return proc.stdout.decode().rstrip()
+
+
+def git_command(cmd):
+    '''Run `cmd` as a subprocess, returning stdout.'''
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if not proc or proc.returncode != 0:
+        return "Unknown"
     return proc.stdout.decode().rstrip()
 
 
@@ -48,5 +56,5 @@ def write_if_changed(path, content):
 
 
 if __name__ == "__main__":
-    if write_if_changed(sys.argv[1], capture_output(" ".join(sys.argv[2:]))):
+    if write_if_changed(sys.argv[1], run_command(" ".join(sys.argv[2:]))):
         print(f"Updated \"{sys.argv[1]}\"")

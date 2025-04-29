@@ -41,7 +41,7 @@ def setup_tests_get_threads(test_definitions):
     if config.getboolean('ENABLE_VALGRIND'):
         assert platform.system() == 'Linux', "Valgrind option only works on Linux"
     if not herp_is_accessible():
-        download_assets_externally()
+        download_assets_externally(config.get('PLATFORM'))
         return True
     else:
         get_bases(test_definitions)

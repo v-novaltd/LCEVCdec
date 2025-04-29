@@ -32,6 +32,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           lfs: true
           fetch-depth: 0
           persist-credentials: false
@@ -52,6 +53,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           lfs: true
           fetch-depth: 0
           persist-credentials: false
@@ -99,6 +101,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           lfs: true
           fetch-depth: 0
           persist-credentials: false
@@ -140,6 +143,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           lfs: true
           fetch-depth: 0
           persist-credentials: false

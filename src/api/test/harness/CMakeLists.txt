@@ -28,7 +28,8 @@ target_link_libraries(
     lcevc_dec::utility
     fmt::fmt
     CLI11::CLI11
-    xxHash::xxHash)
+    $<TARGET_NAME_IF_EXISTS:xxHash::xxHash>
+    $<TARGET_NAME_IF_EXISTS:xxhash::xxhash>)
 
 # Tests can include internal headers from helper sources
 target_include_directories(lcevc_dec_test_harness PUBLIC "${CMAKE_SOURCE_DIR}/src/utility/src")

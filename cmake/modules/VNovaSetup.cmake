@@ -60,35 +60,41 @@ else ()
         COMMAND git rev-parse --verify --short=8 HEAD
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE GIT_HASH
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     execute_process(
         COMMAND git rev-parse --verify --short=10 HEAD
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE GIT_LONG_HASH
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     execute_process(
         COMMAND git log -1 --format=%cd --date=format:%Y-%m-%d
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE GIT_DATE
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     execute_process(
         COMMAND git rev-parse --abbrev-ref HEAD
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE GIT_BRANCH
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     execute_process(
         COMMAND git describe --match "*.*.*" --dirty
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE GIT_VERSION
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     execute_process(
         COMMAND git describe --match "*.*.*" --abbrev=0
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE GIT_SHORT_VERSION
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 endif ()
 
-message(STATUS "Git: Version=${GIT_VERSION} ShortVersion=${GIT_SHORT_VERSION} Hash=${GIT_HASH}")
+if (GIT_VERSION STREQUAL ""
+    OR GIT_SHORT_VERSION STREQUAL ""
+    OR GIT_HASH STREQUAL "")
+    message(WARNING "Cannot determine git version, please clone from a git repo")
+else ()
+    message(STATUS "Git: Version=${GIT_VERSION} ShortVersion=${GIT_SHORT_VERSION} Hash=${GIT_HASH}")
+endif ()
 
 # Default MSVC runtime library, this has to before the 'project()' command
 cmake_policy(SET CMP0091 NEW)
@@ -143,6 +149,7 @@ function (
             "${COMPONENT}" --name "${NAME}" --output_src "${PATH_SRC}" --output_h "${PATH_H}"
             --binary_name "${BINARY}" --binary_type "${TYPE}" --description "${DESC}" "${OPT_RC}"
             "${OPT_GIT_VERSION}" "${OPT_GIT_HASH}" "${OPT_GIT_DATE}"
+            $<$<BOOL:${VN_SDK_BUILD_DETAILS}>:--build_details>
         BYPRODUCTS ${TARGET_SOURCES})
     set_target_properties(${TARGET}_generate PROPERTIES FOLDER "Version Files")
 

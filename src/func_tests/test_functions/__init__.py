@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -14,8 +14,7 @@
 #  Add any new test function files here
 
 from .asset_hash import Test
-from .conformance_backwards_compatibility import Test
-from .conformance_hash import Test
+from .compliance_hash import Test
 from .core_generate_pgo import Test
 from .core_hash import Test
 from .tolerance import Test

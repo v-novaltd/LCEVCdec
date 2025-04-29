@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -41,8 +41,8 @@ add_custom_target(
     documentation ALL
     DEPENDS doxygen
     COMMAND
-        ${SPHINX_EXECUTABLE} -b html -W -n -a -Dversion=${GIT_SHORT_VERSION}
-        -Drelease=${GIT_VERSION} -Dbreathe_projects.LCEVC_DEC=${DOXYGEN_OUTPUT_DIR}/xml
-        ${SPHINX_SOURCE} ${SPHINX_BUILD}
+        ${SPHINX_EXECUTABLE} ${SPHINX_SOURCE} ${SPHINX_BUILD} -b html -W -n -a
+        -Dversion=${GIT_SHORT_VERSION} -Drelease=${GIT_VERSION}
+        -Dbreathe_projects.LCEVC_DEC=${DOXYGEN_OUTPUT_DIR}/xml
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Generating docs with Sphinx")

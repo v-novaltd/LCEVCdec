@@ -39,7 +39,7 @@ CLANG_FORMAT_TYPES = ('*.cpp', '*.c', '*.h')
 CMAKE_TYPES = ('*.cmake', 'CMakeLists.txt')
 PYTHON_TYPES = ('*.py',)
 WORKFLOW_TYPES = ('*.yml', '*.yaml')
-GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/**/',
+GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/lcevc_dec_headers/*', 'conan/ffmpeg/[!conanfile.py]*'
              'include/**/', 'docs/sphinx/**', '.github/**/', '')
 WIN_CLANG_FORMAT_ENV_VAR = 'CLANG_FORMAT_PATH'
 WIN_DEFAULT_CLANG_FORMAT_PATH = r'C:\Program Files\LLVM\bin\clang-format.exe'

@@ -29,7 +29,7 @@ All build options can be added to the cmake generation step eg. `-DVN_SDK_EXECUT
 ### Other requirements (all platforms)
 
 - Git
-- Python >= 3.9
+- Python >= 3.9 - use of a venv is recommended
 - CMake >= 3.19.0
 - Ninja, recommended but not required - replace `-G Ninja` with `-G "Unix Makefiles"` on Linux and macOS or remove it on Windows from the following CMake commands if not using Ninja
 
@@ -65,12 +65,17 @@ sudo apt-get install -y pkg-config nlohmann-json3-dev libfmt-dev libcli11-dev li
 
 OR gather the dependencies with conan:
 ```shell
+cd LCEVCdec
 pip install -r requirements.txt
+./conan/ffmpeg/create.sh
 conan install -r conancenter -u .. --build=missing -s build_type=Release -s compiler.libcxx=libstdc++11
 ```
 
 Finally build:
 ```shell
+cd LCEVCdec
+mkdir build
+cd build
 cmake -DVN_SDK_EXECUTABLES=ON -DVN_SDK_UNIT_TESTS=ON -DCMAKE_BUILD_TYPE=Release -G Ninja ..
 cmake --build .
 cmake --install .
@@ -81,6 +86,7 @@ cmake --install .
 ```shell
 cd LCEVCdec
 pip install -r requirements.txt
+./conan/ffmpeg/create.[sh|bat]
 mkdir build
 cd build
 conan install -r conan-center -u --build=missing --settings=build_type=Release ..
@@ -89,7 +95,7 @@ cmake --build . --config Release
 cmake --install .
 ```
 
-Please note that the conan install step is likely to attempt to build ffmpeg which is non-trivial, please see the [ffmpeg compilation guide](https://trac.ffmpeg.org/wiki/CompilationGuide) for tips. Alternatively you can download these libraries pre-built for your platform from [ffmpeg.org](https://ffmpeg.org/download.html) (ensure they are shared/dynamic libraries) and use `-o base_decoder=manual` in your conan install and `-DVN_SDK_FFMPEG_LIBS_PACKAGE=path/to/downloaded/libav*` in the cmake generation.
+Please note that the conan create step builds ffmpeg from source which is non-trivial, please see the [ffmpeg compilation guide](https://trac.ffmpeg.org/wiki/CompilationGuide) for tips. Alternatively you can download these libraries pre-built for your platform from [ffmpeg.org](https://ffmpeg.org/download.html) (ensure they are shared/dynamic libraries) and use `-o base_decoder=manual` in your conan install and `-DVN_SDK_FFMPEG_LIBS_PACKAGE=path/to/downloaded/libav*` in the cmake generation.
 
 ## Building for Android - cross compiled from Linux
 

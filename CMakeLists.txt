@@ -34,6 +34,8 @@ option(VN_SDK_JSON_CONFIG "Allow decoder to be configured with JSON, requires nl
 option(VN_SDK_DOCS "Build Doxygen and Sphinx documentation" OFF)
 option(VN_SDK_COVERAGE "Generate gcov statistics for coverage" OFF)
 option(VN_SDK_WARNINGS_FAIL "Compiler warnings will cause a build to fail" OFF)
+option(VN_SDK_BUILD_DETAILS "Include build time and origin in libraries - non-reproducible build"
+       OFF)
 
 # cmake-format: off
 set(VN_SDK_FFMPEG_LIBS_PACKAGE "" CACHE STRING
@@ -70,10 +72,9 @@ option(VN_CORE_FORCE_OVERLAY "Core: Enable forced overlay" OFF)
 option(VN_CORE_BENCHMARK "Core: Build benchmark tool" OFF)
 
 # Binary destination
-set(MONOLITHIC_BUILD_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${MONOLITHIC_BUILD_OUTPUT_DIR})
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${MONOLITHIC_BUILD_OUTPUT_DIR})
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${MONOLITHIC_BUILD_OUTPUT_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/)
 
 # Decoder components
 #
@@ -124,17 +125,18 @@ configure_file("cmake/templates/lcevc_dec.pc.in" "generated/lcevc_dec.pc" @ONLY)
 
 # Top level install
 #
-install(FILES "COPYING" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES "COPYING" DESTINATION "licenses")
 install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_dec.pc"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
-install(DIRECTORY "licenses" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
-install(FILES "LICENSE.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses/LCEVCdec")
+install(DIRECTORY "licenses" DESTINATION "./")
+install(FILES "LICENSE.md" DESTINATION "licenses/LCEVCdec")
 
 #
 if (NOT CMAKE_INSTALL_INCLUDEDIR)
     set(CMAKE_INSTALL_INCLUDEDIR include)
 endif ()
+install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_config.h" DESTINATION "include")
 install(FILES "include/LCEVC/lcevc.h" DESTINATION "include/LCEVC")
 
 #
@@ -145,14 +147,14 @@ if (VN_SDK_EXECUTABLES)
             OPTIONAL
             DESTINATION "bin"
             FILES_MATCHING
-            PATTERN "*.dll")
+            PATTERN "liblcevc*.dll")
     else ()
         install(
             DIRECTORY "${CMAKE_BINARY_DIR}/lib/"
             OPTIONAL
             DESTINATION "lib"
             FILES_MATCHING
-            PATTERN "*")
+            PATTERN "liblcevc*")
     endif ()
 endif ()
 

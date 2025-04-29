@@ -32,7 +32,8 @@ target_link_libraries(
     GTest::gtest_main
     fmt::fmt
     CLI11::CLI11
-    xxHash::xxHash)
+    $<TARGET_NAME_IF_EXISTS:xxHash::xxHash>
+    $<TARGET_NAME_IF_EXISTS:xxhash::xxhash>)
 
 # Tests can include internal headers from helper sources
 target_include_directories(lcevc_dec_utility_test_unit PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../../src")
