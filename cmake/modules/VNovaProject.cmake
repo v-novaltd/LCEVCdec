@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -14,13 +14,6 @@
 
 # Target specific configuration - included automatically after project()
 #
-
-# Default install dir is <build>/install
-if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX
-        "install"
-        CACHE PATH "Install directory" FORCE)
-endif ()
 
 # Architecture
 #
