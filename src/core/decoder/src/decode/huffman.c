@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -19,6 +19,7 @@
 #include "common/platform.h"
 #include "common/types.h"
 #include "decode/deserialiser.h"
+#include "lcevc_config.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -30,7 +31,7 @@
 
 static inline uint8_t clz(uint32_t streamData, uint8_t numBits)
 {
-#if defined WIN32
+#if VN_COMPILER(MSVC)
     return (uint8_t)(_lzcnt_u32(streamData) + numBits - 32);
 #elif VN_COMPILER(GCC) && (__GNUC__ >= 14)
     /* Annoyingly, it's undefined behaviour if you provide 0 to __builtin_clz. To match the Windows

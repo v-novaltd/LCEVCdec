@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -56,7 +56,7 @@
 /*------------------------------------------------------------------------------
  * Thread local storage.
  *-----------------------------------------------------------------------------*/
-#if VN_OS(WINDOWS)
+#if VN_COMPILER(MSVC)
 #define VN_THREADLOCAL() __declspec(thread)
 #else
 #define VN_THREADLOCAL() __thread
@@ -70,7 +70,7 @@
  *
  * This would align some_array to a 16 byte boundary and default it to 0.
  *-----------------------------------------------------------------------------*/
-#if VN_OS(WINDOWS)
+#if VN_COMPILER(MSVC)
 #define VN_ALIGN(v, a) __declspec(align(a)) v
 #else
 #define VN_ALIGN(v, a) v __attribute__((aligned(a)))
