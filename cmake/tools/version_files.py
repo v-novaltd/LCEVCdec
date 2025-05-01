@@ -189,7 +189,7 @@ class ComponentGenerator:
             return "unknown"
 
     def __init__(self, component, name, git_version, git_hash, git_date, output_src, output_h,
-                 output_rc, binary_name, binary_type, description, build_details):
+                 output_rc, binary_name, binary_type, description):
 
         # Fill in instance variable for use by template formatting
         self.component = component
@@ -205,13 +205,12 @@ class ComponentGenerator:
         self.description = description
 
         # Parse 'git describe' output into parts
-        if self.git_version != "Unknown":
-            m = re.match(self.version_re, self.git_version)
-            if not m:
-                raise RuntimeError("Incorrect version string format")
-            self.version = m.groupdict()
-        else:
-            self.version = self.git_version
+        assert self.git_version and self.git_version != 'Unknown', \
+            "Cannot find version - build from a git clone or disable VN_SDK_BUILD_DETAILS"
+        m = re.match(self.version_re, self.git_version)
+        if not m:
+            raise RuntimeError("Incorrect version string format")
+        self.version = m.groupdict()
 
         # Parse date into parts
         if self.git_date != "Unknown":
@@ -223,19 +222,10 @@ class ComponentGenerator:
             self.date = self.git_date
 
         # Build details
-        self.build = {'dirty': self.version['dirty'] and 1 or 0}
-        if build_details:
-            self.build.update({
-                'date': datetime.datetime.now().strftime("%a %d %b %Y"),
-                'machine': platform.node(),
-                'user': self._getuser(),
-            })
-        else:
-            self.build.update({
-                'date': 'NotSpecified',
-                'machine': 'NotSpecified',
-                'user': 'NotSpecified',
-            })
+        self.build = {'date': datetime.datetime.now().strftime("%a %d %b %Y"),
+                      'machine': platform.node(),
+                      'user': self._getuser(),
+                      'dirty': self.version['dirty'] and 1 or 0}
 
         self.rc_file_type = "VFT_DLL" if (
             self.binary_type == "dll") else "VFT_STATIC_LIB" if (
@@ -260,7 +250,6 @@ if __name__ == "__main__":
     parser.add_argument('--binary_name')
     parser.add_argument('--binary_type')
     parser.add_argument('--description')
-    parser.add_argument('--build_details', action="store_true")
     parser.add_argument('--git_version')
     parser.add_argument('--git_hash')
     parser.add_argument('--git_date')
@@ -279,7 +268,7 @@ if __name__ == "__main__":
     g = ComponentGenerator(args.component, args.name, git_version, git_hash, git_date,
                            args.output_src, args.output_h, args.output_rc,
                            args.binary_name, args.binary_type,
-                           args.description, args.build_details)
+                           args.description)
 
     # Push through each required output file
     if args.output_src:

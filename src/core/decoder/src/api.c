@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -149,7 +149,14 @@ static inline bool bitdepthMatchesExpected(Logger_t log, const BitDepth_t expect
 }
 /*-----------------------------------------------------------------------------*/
 
-VN_DEC_CORE_API const char* perseus_get_version(void) { return CoreVersionFull(); }
+VN_DEC_CORE_API const char* perseus_get_version(void)
+{
+#if VN_SDK_FEATURE(BUILD_DETAILS)
+    return CoreVersionFull();
+#else
+    return "Unknown";
+#endif
+}
 
 VN_DEC_CORE_API int VN_CALLCONV perseus_decoder_config_init(perseus_decoder_config* cfg)
 {

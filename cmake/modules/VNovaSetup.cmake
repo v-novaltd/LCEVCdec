@@ -119,12 +119,6 @@ function (
     set(PATH_SRC "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}.${SRC_SUFFIX}")
     file(TOUCH "${PATH_SRC}")
 
-    if (EXISTS "${CMAKE_SOURCE_DIR}/.githash")
-        set(OPT_GIT_VERSION "--git_version=${GIT_VERSION}")
-        set(OPT_GIT_HASH "--git_hash=${GIT_HASH}")
-        set(OPT_GIT_DATE "--git_date=${GIT_DATE}")
-    endif ()
-
     set(PATH_H "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}.h")
     file(TOUCH "${PATH_H}")
 
@@ -137,28 +131,34 @@ function (
         list(APPEND TARGET_SOURCES "${PATH_RC}")
     endif ()
 
-    # Custom target
-    source_group("version_info" FILES ${TARGET_SOURCES})
-
-    add_custom_target(
-        ${TARGET}_generate
-        DEPENDS "${CMAKE_SOURCE_DIR}/cmake/tools/version_files.py"
-        SOURCES "${CMAKE_SOURCE_DIR}/cmake/tools/version_files.py"
-        COMMAND
-            Python3::Interpreter "${CMAKE_SOURCE_DIR}/cmake/tools/version_files.py" --component
-            "${COMPONENT}" --name "${NAME}" --output_src "${PATH_SRC}" --output_h "${PATH_H}"
-            --binary_name "${BINARY}" --binary_type "${TYPE}" --description "${DESC}" "${OPT_RC}"
-            "${OPT_GIT_VERSION}" "${OPT_GIT_HASH}" "${OPT_GIT_DATE}"
-            $<$<BOOL:${VN_SDK_BUILD_DETAILS}>:--build_details>
-        BYPRODUCTS ${TARGET_SOURCES})
-    set_target_properties(${TARGET}_generate PROPERTIES FOLDER "Version Files")
-
     # Target for dependants
     add_library(${TARGET} INTERFACE)
     target_sources(${TARGET} INTERFACE ${TARGET_SOURCES})
     target_include_directories(${TARGET} INTERFACE "${CMAKE_CURRENT_BINARY_DIR}")
-    add_dependencies(${TARGET} ${TARGET}_generate)
-    set_target_properties(${TARGET} PROPERTIES FOLDER "Version Files")
+
+    if (VN_SDK_BUILD_DETAILS)
+        # Add build details to the target
+        if (EXISTS "${CMAKE_SOURCE_DIR}/.githash")
+            set(OPT_GIT_VERSION "--git_version=${GIT_VERSION}")
+            set(OPT_GIT_HASH "--git_hash=${GIT_HASH}")
+            set(OPT_GIT_DATE "--git_date=${GIT_DATE}")
+        endif ()
+
+        source_group("version_info" FILES ${TARGET_SOURCES})
+        add_custom_target(
+            ${TARGET}_generate
+            DEPENDS "${CMAKE_SOURCE_DIR}/cmake/tools/version_files.py"
+            SOURCES "${CMAKE_SOURCE_DIR}/cmake/tools/version_files.py"
+            COMMAND
+                Python3::Interpreter "${CMAKE_SOURCE_DIR}/cmake/tools/version_files.py" --component
+                "${COMPONENT}" --name "${NAME}" --output_src "${PATH_SRC}" --output_h "${PATH_H}"
+                --binary_name "${BINARY}" --binary_type "${TYPE}" --description "${DESC}"
+                "${OPT_RC}" "${OPT_GIT_VERSION}" "${OPT_GIT_HASH}" "${OPT_GIT_DATE}"
+            BYPRODUCTS ${TARGET_SOURCES})
+        set_target_properties(${TARGET}_generate PROPERTIES FOLDER "Version Files")
+        add_dependencies(${TARGET} ${TARGET}_generate)
+        set_target_properties(${TARGET} PROPERTIES FOLDER "Version Files")
+    endif ()
 
     add_library(lcevc_dec::${TARGET} ALIAS ${TARGET})
 

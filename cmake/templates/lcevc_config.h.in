@@ -59,6 +59,7 @@
 
     Available `VN_SDK_FEATURE` values:
         BASE_DECODER
+        BUILD_DETAILS
 
     Available `VN_CORE_FEATURE` values:
         DEBUG_SYNTAX
@@ -351,6 +352,7 @@
 
 /* General SDK features */
 #define VN_SDK_FEATURE_PRIVATE_DEF_BASE_DECODER() VN_@VN_SDK_BASE_DECODER@
+#define VN_SDK_FEATURE_PRIVATE_DEF_BUILD_DETAILS() VN_@VN_SDK_BUILD_DETAILS@
 
 /* clang-format on */
 
