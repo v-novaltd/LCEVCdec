@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -699,21 +699,6 @@ FixedPointDemotionFunction_t fixedPointGetDemotionFunction(FixedPoint_t unsigned
 }
 
 /*------------------------------------------------------------------------------*/
-
-size_t bitScanReverse(size_t value)
-{
-#if VN_OS(WINDOWS)
-    unsigned long result = 0;
-    _BitScanReverse64(&result, value);
-    return (size_t)result;
-#else
-    if (value == 0) {
-        return 0;
-    }
-
-    return 63 - __builtin_clzll((unsigned long long)value);
-#endif
-}
 
 bool isPow2(uint32_t value) { return (value & (value - 1)) == 0; }
 

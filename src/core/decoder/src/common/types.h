@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -514,14 +514,6 @@ static inline int32_t divideCeilS32(int32_t numerator, int32_t denominator)
 
     return (numerator + denominator - 1) / denominator;
 }
-
-/* Determines the bit index of the first non-zero bit from MSB to LSB.
- *
- * E.g. if value == 1 return 0.
- *      if value == 10 return 3.
- *
- * If the  value is 0 then 0 is returned. */
-size_t bitScanReverse(size_t value);
 
 /* Determines if a 32-bit unsigned value is a power of 2.
  *
