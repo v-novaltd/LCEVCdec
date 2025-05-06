@@ -14,7 +14,7 @@
 
 include("Sources.cmake")
 
-add_library(lcevc_dec_core_sequencing STATIC)
+add_library(lcevc_dec_core_sequencing OBJECT)
 add_library(lcevc_dec::sequencing ALIAS lcevc_dec_core_sequencing)
 lcevc_set_properties(lcevc_dec_core_sequencing)
 

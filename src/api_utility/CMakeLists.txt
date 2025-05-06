@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -14,7 +14,7 @@
 
 include("Sources.cmake")
 
-add_library(lcevc_dec_api_utility STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
+add_library(lcevc_dec_api_utility OBJECT ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_api_utility)
 
 target_include_directories(lcevc_dec_api_utility PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
