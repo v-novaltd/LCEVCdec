@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -125,12 +125,11 @@ configure_file("cmake/templates/lcevc_dec.pc.in" "generated/lcevc_dec.pc" @ONLY)
 
 # Top level install
 #
-install(FILES "COPYING" DESTINATION "licenses")
+install(FILES "COPYING" DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses")
 install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_dec.pc"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
-install(DIRECTORY "licenses" DESTINATION "./")
-install(FILES "LICENSE.md" DESTINATION "licenses/LCEVCdec")
+install(FILES "LICENSE.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses")
 
 #
 if (NOT CMAKE_INSTALL_INCLUDEDIR)
