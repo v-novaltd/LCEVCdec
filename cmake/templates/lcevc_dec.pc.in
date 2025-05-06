@@ -6,5 +6,5 @@ Name: lcevc_dec
 Description: LCEVC Decoder SDK
 Version: @GIT_SHORT_VERSION@
 Libs: -L"${libdir}" -llcevc_dec_api
-Libs.private: -lpthread -llcevc_dec_core
+Libs.private: -lpthread
 Cflags: -I"${includedir}"
