@@ -333,7 +333,7 @@ def main():
                   f"{process.stdout.decode('utf-8')}")
             errors += 1
     else:
-        autopep_exe = find_formatter('autopep8', '2.3.1')
+        autopep_exe = find_formatter('autopep8', '2.3')
         python_files = get_paths(PYTHON_TYPES, changed_files)
         if python_files:
             process = run_cmd([autopep_exe, '-i', '--global-config', '.flake8'] + python_files)
