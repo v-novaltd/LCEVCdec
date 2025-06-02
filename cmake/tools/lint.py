@@ -65,7 +65,7 @@ def get_changed_files(diff_master=False):
         target_branch = os.environ.get('TARGET_BRANCH', 'master')
         print(f'Getting file diff from "{current_branch}" to "{target_branch}"')
         process = run_cmd(['git', 'diff', '--name-only', '--diff-filter=ACMRTUX',
-                           f'origin/{current_branch}', f'origin/{target_branch}'])
+                           f'{current_branch}', f'origin/{target_branch}'])
         changed_files = process.stdout.decode('utf-8').splitlines()
     else:
         process = run_cmd(['git', 'ls-files', '--modified'])
