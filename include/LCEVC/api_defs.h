@@ -12,8 +12,8 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#ifndef LCEVC_H
-#define LCEVC_H
+#ifndef API_DEFS_H
+#define API_DEFS_H
 
 #include <stdint.h>
 
@@ -24,7 +24,7 @@
 #endif
 
 #ifdef _WIN32
-#ifdef VNDisablePublicAPI
+#if defined(VNDisablePublicAPI) || defined(__MINGW32__)
 #define VN_LCEVC_PublicAPI LCEVC_EXTERN_C
 #else
 #ifdef VNEnablePublicAPIExport
@@ -44,4 +44,4 @@
 #define VN_LCEVC_Concat_Do(a, version) a##version
 #define VN_LCEVC_Concat(a, version) VN_LCEVC_Concat_Do(a, version)
 
-#endif // LCEVC_H
+#endif // API_DEFS_H

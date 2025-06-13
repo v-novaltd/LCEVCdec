@@ -124,7 +124,7 @@ function (
 
     set(TARGET_SOURCES "${PATH_H}" "${PATH_SRC}")
 
-    if (WIN32)
+    if (MSVC)
         set(PATH_RC "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}.rc")
         file(TOUCH "${PATH_RC}")
         set(OPT_RC "--output_rc=${PATH_RC}")

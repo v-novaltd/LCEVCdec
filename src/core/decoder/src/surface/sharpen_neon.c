@@ -13,7 +13,7 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "common/types.h"
-#include "lcevc_config.h"
+#include "LCEVC/build_config.h"
 #include "surface/sharpen_common.h"
 
 #include <stddef.h>

@@ -36,6 +36,7 @@ option(VN_SDK_COVERAGE "Generate gcov statistics for coverage" OFF)
 option(VN_SDK_WARNINGS_FAIL "Compiler warnings will cause a build to fail" OFF)
 option(VN_SDK_BUILD_DETAILS "Include build time and origin in libraries - non-reproducible build"
        OFF)
+option(VN_SDK_SYSTEM_INSTALL "Install licences and docs to the system or to a package" ON)
 
 # cmake-format: off
 set(VN_SDK_FFMPEG_LIBS_PACKAGE "" CACHE STRING
@@ -119,25 +120,30 @@ endif ()
 include(GNUInstallDirs)
 
 # Record configuration - header and README
-configure_file("cmake/templates/lcevc_config.h.in" "generated/lcevc_config.h")
+configure_file("cmake/templates/build_config.h.in" "generated/LCEVC/build_config.h")
 configure_file("cmake/templates/README.md.in" "install_config/README.md")
 configure_file("cmake/templates/lcevc_dec.pc.in" "generated/lcevc_dec.pc" @ONLY)
 
 # Top level install
 #
-install(FILES "COPYING" DESTINATION "licenses")
 install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_dec.pc"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
-install(DIRECTORY "licenses" DESTINATION "./")
-install(FILES "LICENSE.md" DESTINATION "licenses/LCEVCdec")
+if (VN_SDK_SYSTEM_INSTALL)
+    install(FILES "COPYING" DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses")
+    install(FILES "LICENSE.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses")
+else ()
+    install(FILES "COPYING" DESTINATION "licenses")
+    install(DIRECTORY "licenses" DESTINATION ".")
+    install(FILES "LICENSE.md" DESTINATION "licenses/LCEVCdec")
+endif ()
 
 #
 if (NOT CMAKE_INSTALL_INCLUDEDIR)
     set(CMAKE_INSTALL_INCLUDEDIR include)
 endif ()
-install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_config.h" DESTINATION "include")
-install(FILES "include/LCEVC/lcevc.h" DESTINATION "include/LCEVC")
+install(FILES "${CMAKE_BINARY_DIR}/generated/LCEVC/build_config.h" DESTINATION "include/LCEVC")
+install(FILES "include/LCEVC/api_defs.h" DESTINATION "include/LCEVC")
 
 #
 if (VN_SDK_EXECUTABLES)

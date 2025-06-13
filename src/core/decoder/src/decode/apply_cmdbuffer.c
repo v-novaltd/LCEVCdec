@@ -21,7 +21,7 @@
 #include "common/types.h"
 #include "context.h"
 #include "decode/apply_cmdbuffer_common.h"
-#include "lcevc_config.h"
+#include "LCEVC/build_config.h"
 #include "surface/surface.h"
 
 #include <stdbool.h>

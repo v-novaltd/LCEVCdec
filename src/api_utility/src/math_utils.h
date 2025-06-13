@@ -17,13 +17,15 @@
 #ifndef VN_LCEVC_UTILITY_MATH_UTILS_H
 #define VN_LCEVC_UTILITY_MATH_UTILS_H
 
+#include <LCEVC/build_config.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#if defined WIN32
+#if VN_COMPILER(MSVC)
 #include <intrin.h>
 #endif
 
@@ -33,9 +35,9 @@ namespace lcevc_dec::utility {
 //
 static inline uint8_t clz(uint32_t n)
 {
-#if defined WIN32
+#if VN_COMPILER(MSVC)
     return (uint8_t)(_lzcnt_u32(n));
-#elif defined __linux__ && (__GNUC__ >= 14)
+#elif defined(__GNUC__) && (__GNUC__ >= 14)
     return (uint8_t)(__builtin_clzg(n, (int)(8 * sizeof(n))));
 #else
     if (n == 0) {

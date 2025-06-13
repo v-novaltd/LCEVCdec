@@ -700,21 +700,6 @@ FixedPointDemotionFunction_t fixedPointGetDemotionFunction(FixedPoint_t unsigned
 
 /*------------------------------------------------------------------------------*/
 
-size_t bitScanReverse(size_t value)
-{
-#if VN_OS(WINDOWS)
-    unsigned long result = 0;
-    _BitScanReverse64(&result, value);
-    return (size_t)result;
-#else
-    if (value == 0) {
-        return 0;
-    }
-
-    return 63 - __builtin_clzll((unsigned long long)value);
-#endif
-}
-
 bool isPow2(uint32_t value) { return (value & (value - 1)) == 0; }
 
 uint32_t alignTruncU32(uint32_t value, uint32_t alignment)

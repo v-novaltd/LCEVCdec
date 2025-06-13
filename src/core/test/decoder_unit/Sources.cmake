@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -12,7 +12,7 @@
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
-set(CONFIG ${CMAKE_BINARY_DIR}/generated/lcevc_config.h)
+set(CONFIG ${CMAKE_BINARY_DIR}/generated/LCEVC/build_config.h)
 
 set(SOURCE_ROOT
     "src/unit_api.cpp"

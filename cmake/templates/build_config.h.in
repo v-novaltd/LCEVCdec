@@ -12,8 +12,8 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#ifndef VN_LCEVC_CONFIG_H_
-#define VN_LCEVC_CONFIG_H_
+#ifndef VN_BUILD_CONFIG_H
+#define VN_BUILD_CONFIG_H
 
 /*
     Use the below macros for compile time testing for conditional code compilation
@@ -356,4 +356,4 @@
 
 /* clang-format on */
 
-#endif /* VN_LCEVC_CONFIG_H_ */
+#endif /* VN_BUILD_CONFIG_H */

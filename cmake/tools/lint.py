@@ -34,7 +34,7 @@ ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, RE
 THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.'''
 THIS_YEAR = str(datetime.datetime.now().year)
 COPYRIGHT_TYPES = ('*.cpp', '*.c', '*.h', '*.py', '*.js',
-                   '*.cmake', 'CMakeLists.txt', 'lcevc_config.h.in', '*.yml')
+                   '*.cmake', 'CMakeLists.txt', 'build_config.h.in', '*.yml')
 CLANG_FORMAT_TYPES = ('*.cpp', '*.c', '*.h')
 CMAKE_TYPES = ('*.cmake', 'CMakeLists.txt')
 PYTHON_TYPES = ('*.py',)
@@ -65,7 +65,7 @@ def get_changed_files(diff_master=False):
         target_branch = os.environ.get('TARGET_BRANCH', 'master')
         print(f'Getting file diff from "{current_branch}" to "{target_branch}"')
         process = run_cmd(['git', 'diff', '--name-only', '--diff-filter=ACMRTUX',
-                           f'origin/{current_branch}', f'origin/{target_branch}'])
+                           f'{current_branch}', f'origin/{target_branch}'])
         changed_files = process.stdout.decode('utf-8').splitlines()
     else:
         process = run_cmd(['git', 'ls-files', '--modified'])
@@ -333,7 +333,7 @@ def main():
                   f"{process.stdout.decode('utf-8')}")
             errors += 1
     else:
-        autopep_exe = find_formatter('autopep8', '2.3.1')
+        autopep_exe = find_formatter('autopep8', '2.3')
         python_files = get_paths(PYTHON_TYPES, changed_files)
         if python_files:
             process = run_cmd([autopep_exe, '-i', '--global-config', '.flake8'] + python_files)

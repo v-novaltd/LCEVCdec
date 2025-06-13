@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -15,10 +15,12 @@
 #ifndef VN_API_THREADING_H_
 #define VN_API_THREADING_H_
 
+#include <LCEVC/build_config.h>
+
 #include <string_view>
 
-#if defined(_WIN32)
-#include <Windows.h>
+#if VN_COMPILER(MSVC)
+#include <windows.h>
 #define VNThreadLocal __declspec(thread)
 #define VN_TO_THREAD_NAME(x) L##x
 #else
@@ -27,7 +29,9 @@
 #endif
 
 namespace lcevc_dec::decoder {
-#if defined(WIN32)
+#ifdef __MINGW32__
+bool setThreadName(const char* name);
+#elif VN_COMPILER(MSVC)
 bool setThreadName(std::wstring_view name);
 #else
 bool setThreadName(std::string_view name);

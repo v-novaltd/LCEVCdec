@@ -40,6 +40,7 @@ class Runner:
         self.args = []
         self._positional_args = {}
         self.env = dict(os.environ)
+        self.is_performance = False
         if env:
             self.env.update(env)
         if platform.system() != "Windows" and 'LD_LIBRARY_PATH' not in self.env:
@@ -101,15 +102,13 @@ class Runner:
         params = list()
         for param, param_value in self._config.items():
             prefix = "-" if len(param) == 1 else "--"
+            if param_value == 'FLAG':
+                params.append(prefix + param)
+                continue
             if separate_param_from_value:
-                params.append(f"{prefix}{param}")
-                if param_value != 'FLAG':
-                    params.append(f"{str(param_value)}")
+                params.extend([prefix + param, str(param_value)])
             else:
-                value = str(param_value) if param_value != 'FLAG' else ""
-                if '=' not in value:
-                    value = " " + value
-                params.append(''.join([f"{prefix}{param}", f"{value}"]))
+                params.append(f"{prefix}{param}={param_value}")
         return params
 
     def get_command_line(self, separate_param_from_value=False, as_string=True):
@@ -120,6 +119,9 @@ class Runner:
         params.append(self._executable)
         params += [value for value in dict(sorted(self._positional_args.items())).values()]
         params += self.command_as_list(separate_param_from_value)
+        if platform.system() == "Linux" and self.is_performance and not config.getboolean('ENABLE_VALGRIND'):
+            time_cmd = ['/usr/bin/time', '-f', '%M', '-o', 'memory.log']
+            params = time_cmd + params
         if as_string:
             return ' '.join(params)
         return params
@@ -137,6 +139,7 @@ class Runner:
             raise RuntimeError(f"Command did not exit within {self._timeout}s")
 
     def call_subprocess(self, kwargs):
+        self.is_performance = kwargs.pop('is_performance', False)
         return subprocess.run(self.get_command_line(separate_param_from_value=True, as_string=False), cwd=self._cwd, **kwargs, timeout=self._timeout,
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 

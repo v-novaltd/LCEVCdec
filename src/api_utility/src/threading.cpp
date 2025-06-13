@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,17 +12,16 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include "LCEVC/api_utility/threading.h"
-
+#include <LCEVC/api_utility/threading.h>
 #include <sys/stat.h>
 
 #include <string_view>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <direct.h>
 #include <io.h>
 #include <processthreadsapi.h>
-#include <Windows.h>
+#include <windows.h>
 #define stat _stat
 #else
 #ifdef __ANDROID__
@@ -36,7 +35,19 @@
 
 namespace lcevc_dec::decoder {
 
-#if defined(WIN32)
+#ifdef __MINGW32__
+bool setThreadName(const char* name)
+{
+    int bufsize = MultiByteToWideChar(CP_UTF8, 0, name, -1, NULL, 0);
+    WCHAR buf[bufsize];
+    bufsize = MultiByteToWideChar(CP_UTF8, 0, name, -1, buf, bufsize);
+    const HRESULT hr = SetThreadDescription(GetCurrentThread(), buf);
+    if (FAILED(hr)) {
+        return false;
+    }
+    return true;
+}
+#elif VN_COMPILER(MSVC)
 bool setThreadName(std::wstring_view name)
 {
     if (!name.empty()) {

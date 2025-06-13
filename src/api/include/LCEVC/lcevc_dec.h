@@ -23,7 +23,7 @@
 
 /* clang-format off */
 
-#include "LCEVC/lcevc.h"
+#include <LCEVC/api_defs.h>
 
 #ifdef __cplusplus
 extern "C" {

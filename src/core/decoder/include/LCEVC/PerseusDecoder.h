@@ -41,7 +41,7 @@
 
 /* clang-format off */
 
-#include <LCEVC/lcevc.h>
+#include <LCEVC/api_defs.h>
 #include <stddef.h>
 
 #ifdef __cplusplus

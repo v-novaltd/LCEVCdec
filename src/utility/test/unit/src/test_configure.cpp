@@ -12,8 +12,8 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include "LCEVC/build_config.h"
 #include "LCEVC/utility/configure.h"
-#include "lcevc_config.h"
 #include "mock_api.h"
 
 #include <gtest/gtest.h>

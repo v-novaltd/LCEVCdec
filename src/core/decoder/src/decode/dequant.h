@@ -16,7 +16,7 @@
 #define VN_DEC_CORE_DEQUANT_H_
 
 #include "common/types.h"
-#include "lcevc_config.h"
+#include "LCEVC/build_config.h"
 
 #if VN_CORE_FEATURE(SSE)
 #include "common/sse.h"

@@ -15,7 +15,7 @@
 #include "surface/upscale_sse.h"
 
 #include "common/types.h"
-#include "lcevc_config.h"
+#include "LCEVC/build_config.h"
 #include "surface/upscale_common.h"
 
 #include <stddef.h>

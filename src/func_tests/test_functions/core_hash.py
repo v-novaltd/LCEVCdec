@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -43,7 +43,8 @@ class Test(BaseTest):
         runner.set_param('--output-hash', hash_file)
         self.record_cmd('dec_test_harness', runner.get_command_line())
         logger.debug(f"Running test harness: {runner.get_command_line()}")
-        output = runner.run(assert_rc=True)
+        is_performance = test["group"] == "performance"
+        output = runner.run(assert_rc=True, is_performance=is_performance)
 
         with open(os.path.join(test_dir, hash_file), 'r') as json_file:
             generated_hashes = json.load(json_file)

@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -11,7 +11,7 @@
 # licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
-
+import os.path
 import re
 
 from test_functions.core_hash import Test as CoreTest
@@ -49,3 +49,10 @@ class Test(CoreTest):
             self.record_result('post_test_frequency', frequency)
             temperature = self.get_device_temperature()
             self.record_result('post_test_temperature', temperature)
+        peak_memory_file = os.path.abspath(os.path.join(test_dir, 'memory.log'))
+        file_exists = os.path.exists(peak_memory_file)
+        if file_exists:
+            with open(peak_memory_file, 'r') as mem_file:
+                peak_memory = mem_file.read().strip()
+                if peak_memory.isdigit():
+                    self.record_result('peak_memory', int(peak_memory))

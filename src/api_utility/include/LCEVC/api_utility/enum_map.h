@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -15,7 +15,7 @@
 #ifndef VN_API_ENUM_MAP_H_
 #define VN_API_ENUM_MAP_H_
 
-#include "lcevc_config.h"
+#include <LCEVC/build_config.h>
 
 #include <cstddef>
 #include <cstring>
