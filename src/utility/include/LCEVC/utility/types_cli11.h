@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -19,9 +19,8 @@
 #ifndef VN_LCEVC_UTILITY_TYPES_CLI11_H
 #define VN_LCEVC_UTILITY_TYPES_CLI11_H
 
-#include "LCEVC/lcevc_dec.h"
-
 #include <CLI/CLI.hpp>
+#include <LCEVC/lcevc_dec.h>
 
 // NB: The operator>>() declarations for enum types do not work with CLI11, as its
 // own specialisation of lexical_cast for enum overrides them, so this works at that level.
@@ -88,4 +87,4 @@ constexpr const char* type_name<LCEVC_Event>()
 
 } // namespace CLI::detail
 
-#endif
+#endif // VN_LCEVC_UTILITY_TYPES_CLI11_H

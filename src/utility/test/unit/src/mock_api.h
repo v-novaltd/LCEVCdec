@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,8 +14,8 @@
 
 // Link time replacement for LCEVC_DEC API - captures calls and arguments for some entry points
 //
-#ifndef LCEVC_TEST_MOCK_API_H
-#define LCEVC_TEST_MOCK_API_H
+#ifndef VN_LCEVC_UTILITY_MOCK_API_H
+#define VN_LCEVC_UTILITY_MOCK_API_H
 
 #include <iostream>
 
@@ -23,4 +23,4 @@
 //
 void mockApiSetStream(std::ostream* os);
 
-#endif
+#endif // VN_LCEVC_UTILITY_MOCK_API_H

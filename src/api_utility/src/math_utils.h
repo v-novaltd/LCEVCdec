@@ -14,8 +14,8 @@
 
 // Miscellaneous simple numeric functions
 //
-#ifndef VN_LCEVC_UTILITY_MATH_UTILS_H
-#define VN_LCEVC_UTILITY_MATH_UTILS_H
+#ifndef VN_LCEVC_API_UTILITY_MATH_UTILS_H
+#define VN_LCEVC_API_UTILITY_MATH_UTILS_H
 
 #include <LCEVC/build_config.h>
 
@@ -56,4 +56,4 @@ inline uint32_t nextPow2(uint32_t n)
 }
 
 } // namespace lcevc_dec::utility
-#endif
+#endif // VN_LCEVC_API_UTILITY_MATH_UTILS_H

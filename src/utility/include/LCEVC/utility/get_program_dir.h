@@ -44,4 +44,4 @@ std::string getProgramDirectory(std::string_view file = "");
 
 } // namespace lcevc_dec::utility
 
-#endif
+#endif // VN_LCEVC_UTILITY_GET_PROGRAM_DIR_H

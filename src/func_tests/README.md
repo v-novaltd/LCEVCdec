@@ -124,5 +124,5 @@ disk so use with care
 ## Content attribution
 The functional tests use a modified version of the 'ElFuenteTunnel' clip, which is part of Netflix's Open Content and is
 licensed under the [Creative Commons Attribution 4.0 International License (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
-The clip has been trimmed and re-encoded. All rights are retained by [Netflix](https://opencontent.netflix.com/). The
+The clip has been trimmed from frame 18061 and re-encoded. All rights are retained by [Netflix](https://opencontent.netflix.com/). The
 performance test group uses the 'Performance' clip. Copyright © V-Nova International Limited 2025. All rights reserved.

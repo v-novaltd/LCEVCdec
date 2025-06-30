@@ -11,6 +11,7 @@ Release |release|
    overview
    api
    example_code
+   enhancement
 
 Indices and tables
 ==================

@@ -14,14 +14,12 @@
 
 // Class for writing raw image files to streams or filesystem.
 //
-#include "LCEVC/utility/raw_writer.h"
-
-#include "LCEVC/lcevc_dec.h"
-#include "LCEVC/utility/check.h"
-#include "LCEVC/utility/picture_lock.h"
-#include "LCEVC/utility/string_utils.h"
-
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/lcevc_dec.h>
+#include <LCEVC/utility/check.h>
+#include <LCEVC/utility/picture_lock.h>
+#include <LCEVC/utility/raw_writer.h>
+#include <LCEVC/utility/string_utils.h>
 
 #include <fstream>
 #include <ios>

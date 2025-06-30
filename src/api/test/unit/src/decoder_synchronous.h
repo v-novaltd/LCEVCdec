@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,8 +12,8 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#ifndef VN_API_TEST_UNIT_DECODER_SYNCHRONOUS_H_
-#define VN_API_TEST_UNIT_DECODER_SYNCHRONOUS_H_
+#ifndef VN_LCEVC_API_DECODER_SYNCHRONOUS_H
+#define VN_LCEVC_API_DECODER_SYNCHRONOUS_H
 
 #include "event_tester.h"
 
@@ -44,4 +44,4 @@ private:
     std::mutex m_doneFlagsMutex;
 };
 
-#endif // VN_API_TEST_UNIT_DECODER_SYNCHRONOUS_H_
+#endif // VN_LCEVC_API_DECODER_SYNCHRONOUS_H

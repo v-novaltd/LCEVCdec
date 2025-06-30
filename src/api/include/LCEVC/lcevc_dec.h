@@ -104,7 +104,7 @@ typedef enum LCEVC_ReturnCode
 {
     LCEVC_Success       =  0,  /**< The API call completed successfully */
 
-    LCEVC_Again         = -1,  /**< Not an error - the requested operation can't be performed, try again later. Only returned by LCEC_Send... and LCEVC_Receive... functions */
+    LCEVC_Again         = -1,  /**< Not an error - the requested operation can't be performed, try again later. */
     LCEVC_NotFound      = -2,  /**< Not an error - A query call failed to find the item by name */
 
     LCEVC_Error         = -3,  /**< A generic catch all error */
@@ -176,10 +176,10 @@ typedef enum LCEVC_ColorPrimaries
  */
 typedef enum LCEVC_TransferCharacteristics
 {
-    LCEVC_TransferCharacteristics_Reserved_0     =  0,  /*  Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_TransferCharacteristics_Reserved_0     =  0,  /**< Reserved For future use by ITU-T | ISO/IEC */
     LCEVC_TransferCharacteristics_BT709          =  1,  /**< Rec. ITU-R BT.709-6, Rec. ITU-R BT.1361-0 conventional colour gamut system (historical), functionally the same as the values 6, 14 and 15 */
     LCEVC_TransferCharacteristics_Unspecified    =  2,  /**< Image characteristics are unknown or are determined by the application */
-    LCEVC_TransferCharacteristics_Reserved_3     =  3,  /*  Reserved For future use by ITU-T | ISO/IEC */
+    LCEVC_TransferCharacteristics_Reserved_3     =  3,  /**< Reserved For future use by ITU-T | ISO/IEC */
     LCEVC_TransferCharacteristics_GAMMA22        =  4,  /**< Assumed display gamma 2.2: Rec. ITU-R BT.470-6 System M (historical), USNTSC 1953 USFCC Title 47 Code of Federal Regulations 73.682 (a) (20), Rec. ITU-R BT.1700-0 625 PAL and 625 SECAM */
     LCEVC_TransferCharacteristics_GAMMA28        =  5,  /**< Assumed display gamma 2.8: Rec. ITU-R BT.470-6 System B, G (historical) */
     LCEVC_TransferCharacteristics_BT601          =  6,  /**< Rec. ITU-R BT.601-7 525 or 625, Rec. ITU-R BT.1358-1 525 or 625 (historical), Rec. ITU-R BT.1700-0 NTSC, SMPTE ST 170 (2004) */
@@ -260,7 +260,7 @@ typedef enum LCEVC_PictureFlag {
 /*!
  * This struct represents the Static Metadata Descriptor payload, excluding the descriptor ID, of a Dynamic Range and Mastering InfoFrame as defined by CTA-861.3.
  *
- * The descriptor payload has a fixed size of 24 bytes. Display primaries describe the chromaticity of the Red, Green and Blue color primaries of the mastering display.
+ * The descriptor payload has a fixed size of 24 bytes. Display primaries describe the chromaticity of the Red, Green and Blue color primaries of the mastering display
  * The correspondence between Red, Green and Blue color primaries and indices 0, 1, or 2 is determined by the following relationship:
  * The Red color primary corresponds to the index of the largest display_primaries_x[] value.
  * The Green color primary corresponds to the index of the largest display_primaries_y[] value.
@@ -289,7 +289,7 @@ typedef struct LCEVC_HDRStaticInfo
  */
 typedef struct LCEVC_DecodeInformation
 {
-    int64_t   timestamp;          /**< Presentation timestamp of picture */
+    uint64_t  timestamp;          /**< Presentation timestamp of picture */
     bool      hasBase;            /**< Base data is available for this picture */
     bool      hasEnhancement;     /**< Enhancement data is available for this picture */
     bool      skipped;            /**< LCEVC_SkipDecoder was requested for this timestamp */
@@ -413,7 +413,7 @@ typedef struct LCEVC_PicturePlaneDesc
 } LCEVC_PicturePlaneDesc;
 
 /*!
- * Get an initialised LCEVC_PictureDesc with default values, only basic size and color
+ * Get an initialized LCEVC_PictureDesc with default values, only basic size and color
  * format parameters are required.
  *
  * @param[in]    format              An LCEVC_ColorFormat enum
@@ -719,7 +719,7 @@ LCEVC_API LCEVC_ReturnCode LCEVC_ConfigureDecoderStringArray( LCEVC_DecoderHandl
  *
  * @param[in]    decHandle           Decoder handle instance returned by CreateDecoder
  * @return                           Returns LCEVC_Success or an appropriate error status
- *                                   if unable to lock and initialise the given instance
+ *                                   if unable to lock and initialize the given instance
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_InitializeDecoder( LCEVC_DecoderHandle decHandle );
@@ -742,8 +742,6 @@ void LCEVC_DestroyDecoder( LCEVC_DecoderHandle decHandle );
  *
  * @param[in]    decHandle           LCEVC Decoder instance
  * @param[in]    timestamp           Timestamp for the passed LCEVC data
- * @param[in]    discontinuity       Set true if enhancement is not continuous with the last sent
- *                                   enhancement
  * @param[in]    data                pointer to the LCEVC enhancement data buffer
  * @param[in]    byteSize            size of the LCEVC enhancement data buffer
  * @return                           LCEVC_Again if the decoder cannot consume the enhancement
@@ -754,8 +752,7 @@ void LCEVC_DestroyDecoder( LCEVC_DecoderHandle decHandle );
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_SendDecoderEnhancementData( LCEVC_DecoderHandle decHandle,
-                                                   int64_t timestamp,
-                                                   bool discontinuity,
+                                                   uint64_t timestamp,
                                                    const uint8_t* data,
                                                    uint32_t byteSize );
 
@@ -764,7 +761,6 @@ LCEVC_ReturnCode LCEVC_SendDecoderEnhancementData( LCEVC_DecoderHandle decHandle
  *
  * @param[in]    decHandle           LCEVC Decoder instance
  * @param[in]    timestamp           Timestamp for the base picture
- * @param[in]    discontinuity       Set true if base frames are not continuous
  * @param[in]    base                Decoded base picture. This should not be used again by the
  *                                   client until it has been sent back via
  *                                   LCEVC_ReceiveDecoderBase.
@@ -775,13 +771,11 @@ LCEVC_ReturnCode LCEVC_SendDecoderEnhancementData( LCEVC_DecoderHandle decHandle
  * @return                           LCEVC_Again if the decoder cannot consume the base data in
  *                                   its current state, but may be able to later (typically this
  *                                   means receiving decoded pictures). If LCEVC_Again is returned,
- *                                   then the decoder state has not changed, EXCEPT to accommodate
- *                                   discontinuities.
+ *                                   then the decoder state has not changed.
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_SendDecoderBase( LCEVC_DecoderHandle decHandle,
-                                        int64_t timestamp,
-                                        bool discontinuity,
+                                        uint64_t timestamp,
                                         LCEVC_PictureHandle base,
                                         uint32_t timeoutUs,
                                         void* userData );
@@ -857,7 +851,8 @@ LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture( LCEVC_DecoderHandle decHandle,
  * @param[out]   width               Pointer to width, as output
  * @param[out]   height              Pointer to height, as output
  * @return                           LCEVC_NotFound if this timestamp hasn't been sent, or has
- *                                   already been returned to the user.
+ *                                   already been returned to the user. Returns LCEVC_Again if the
+ *                                   frame has not yet been parsed for width and height.
  *                                   Otherwise, the decoder will use the information that it has
  *                                   about this timestamp to predict the return code that will be
  *                                   produced by LCEVC_ReceiveDecoderPicture when the decode is
@@ -865,7 +860,7 @@ LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture( LCEVC_DecoderHandle decHandle,
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_PeekDecoder( LCEVC_DecoderHandle decHandle,
-                                    int64_t timestamp,
+                                    uint64_t timestamp,
                                     uint32_t* width,
                                     uint32_t* height );
 
@@ -882,12 +877,12 @@ LCEVC_ReturnCode LCEVC_PeekDecoder( LCEVC_DecoderHandle decHandle,
  * @param[in]    decHandle           LCEVC Decoder instance
  * @param[in]    timestamp           time reference for the Access Unit to be skipped
  * @return                           LCEVC_InvalidParam if the handle is invalid,
- *                                   LCEVC_Uninitialised if the decoder isn't initialised,
+ *                                   LCEVC_Uninitialized if the decoder isn't initialized,
  *                                   otherwise LCEVC_Success.
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_SkipDecoder( LCEVC_DecoderHandle decHandle,
-                                    int64_t timestamp );
+                                    uint64_t timestamp );
 
 /*!
  * Synchronize client and LCEVC Decoder.
@@ -899,7 +894,7 @@ LCEVC_ReturnCode LCEVC_SkipDecoder( LCEVC_DecoderHandle decHandle,
  * @param[in]    decHandle           LCEVC Decoder instance
  * @param[in]    dropPending         Discard any pending frames
  * @return                           LCEVC_InvalidParam if the handle is invalid,
- *                                   LCEVC_Uninitialised if the decoder isn't initialised,
+ *                                   LCEVC_Uninitialized if the decoder isn't initialized,
  *                                   otherwise LCEVC_Success.
  */
 LCEVC_API
@@ -925,7 +920,7 @@ LCEVC_ReturnCode LCEVC_FlushDecoder( LCEVC_DecoderHandle decHandle );
  *
  * Parameters to the callback are used to associate data with events:
  * - LCEVC_Log: 'data' and 'data_size' describe a printable string.
- * - LCEVC_OutputPictureDone: 'picture' is a handle to the picture that the event refers to.
+ * - LCEVC_OutputPictureDone: 'picture' is a handle to the picture that the event refers to
  * 'decode_information' is a pointer to the decode information for the relevant frame -
  * it is only valid for duration of event callback.
  */
@@ -986,4 +981,4 @@ LCEVC_ReturnCode LCEVC_SetDecoderEventCallback( LCEVC_DecoderHandle decHandle,
 /* NOLINTEND(modernize-deprecated-headers) */
 /* NOLINTEND(modernize-use-using) */
 
-#endif
+#endif // LCEVC_DEC_H

@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -13,7 +13,8 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "base_decoder_bin.h"
-#include "LCEVC/utility/base_decoder.h"
+
+#include <LCEVC/utility/base_decoder.h>
 
 #include <cstdint>
 #include <memory>
@@ -121,7 +122,7 @@ bool BaseDecoderBinNonLinear::update()
             // Mark enhancement parts as available
             m_enhancementData.ptr = m_enhancement.data();
             m_enhancementData.size = static_cast<uint32_t>(m_enhancement.size());
-            m_enhancementData.timestamp = presentationIndex;
+            m_enhancementData.pts = presentationIndex;
             m_enhancementData.baseDecodeStart = std::chrono::high_resolution_clock::now();
         } else {
             setBinGood(false);
@@ -133,7 +134,7 @@ bool BaseDecoderBinNonLinear::update()
         if (rawRead(m_image)) {
             m_imageData.ptr = m_image.data();
             m_imageData.size = static_cast<uint32_t>(m_image.size());
-            m_imageData.timestamp = getLastBaseTimestamp();
+            m_imageData.pts = getLastBaseTimestamp();
             // Remove decoded timestamp from pending set
             m_pendingBase.erase(m_pendingBase.begin());
 
@@ -151,7 +152,7 @@ bool BaseDecoderBinNonLinear::update()
 std::unique_ptr<BaseDecoder> createBaseDecoderBinNonLinear(std::string_view rawFile, std::string_view binFile)
 {
     auto decoder = std::make_unique<BaseDecoderBinNonLinear>(rawFile, binFile);
-    if (!decoder || !decoder->isInitialised()) {
+    if (!decoder || !decoder->isInitialized()) {
         return nullptr;
     }
     return decoder;

@@ -12,9 +12,8 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include "LCEVC/utility/get_program_dir.h"
-
 #include <gtest/gtest.h>
+#include <LCEVC/utility/get_program_dir.h>
 
 #include <filesystem>
 

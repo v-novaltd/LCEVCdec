@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -16,8 +16,7 @@
 //
 // Note: These tests focus on MACROSCOPIC bitstream damage. They DO NOT test that INDIVIDUAL parts
 // of the stream are correctly rejected when invalid (e.g. invalid payload type, wrong country
-// code, incompatible dimensions). Those sorts of tests are best handled by unit tests of the Core
-// deserialiser itself.
+// code, incompatible dimensions).
 
 // Define this to use the interface of the API (which normally would be in a dll).
 #define VNDisablePublicAPI
@@ -163,8 +162,16 @@ public:
         ASSERT_EQ(LCEVC_CreateDecoder(&m_decHdl, {}), LCEVC_Success);
 
         // Disable logging so we don't get spammed with "bad stream" messages.
-        ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_decHdl, "log_level", 0), LCEVC_Success);
-        ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_decHdl, "core_threads", 1), LCEVC_Success);
+        ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_decHdl, "log_level", 1), LCEVC_Success);
+
+        // Make pipeline deterministic
+        ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_decHdl, "threads", 1), LCEVC_Success);
+
+        ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_decHdl, "passthrough_mode", 0), LCEVC_Success);
+        // Stuffing LOTS of frames in out of order - need a lot of latency in new pipeline
+        // NB: this is not checked as it does not exist in legacy pipeline.
+        LCEVC_ConfigureDecoderInt(m_decHdl, "max_latency", 110);
+
         ASSERT_EQ(LCEVC_InitializeDecoder(m_decHdl), LCEVC_Success);
 
         LCEVC_DefaultPictureDesc(&m_inputDesc, LCEVC_I420_8, 960, 540);
@@ -187,6 +194,7 @@ private:
 INSTANTIATE_TEST_SUITE_P(
     VariousEnhancements, APIBadStreamsFixture,
     testing::Values(std::make_shared<NormalEnhancementGetter>(kValidEnhancements),
+
                     std::make_shared<NormalEnhancementGetter>(kEnhancementsBadStartCodes),
                     std::make_shared<NormalEnhancementGetter>(kEnhancementsMessedUp),
                     std::make_shared<ReverseEnhancementGetter>(kValidEnhancements),
@@ -202,21 +210,32 @@ TEST_P(APIBadStreamsFixture, Test)
     const EnhancementGetter& getter = *GetParam();
 
     std::queue<LCEVC_PictureHandle> outputs = {};
-    std::queue<int64_t> baseTimehandles = {};
+    std::queue<uint64_t> baseTimestamps = {};
     uint32_t numReceived = 0;
 
     // Send data for each timestamp and try to receive outputs as you go. At the end, we'll flush.
-    for (int64_t pts = 0; pts < kEndPTS; pts++) {
-        LCEVC_PictureHandle baseHdl = {};
-        ASSERT_EQ(LCEVC_AllocPicture(getHdl(), &getInputDesc(), &baseHdl), LCEVC_Success);
-        ASSERT_EQ(LCEVC_SendDecoderBase(getHdl(), pts, false, baseHdl, UINT32_MAX, nullptr), LCEVC_Success);
-        baseTimehandles.push(pts);
-
+    for (uint64_t pts = 0; pts < kEndPTS; pts++) {
         // Note that insertion should be fine. It's just that the output should be un-enhanced
         const EnhancementWithData enhancement = getter.getEnhancement(pts);
-        ASSERT_EQ(LCEVC_SendDecoderEnhancementData(getHdl(), pts, false, enhancement.first,
-                                                   enhancement.second),
+        ASSERT_EQ(LCEVC_SendDecoderEnhancementData(getHdl(), pts, enhancement.first, enhancement.second),
                   LCEVC_Success);
+
+        LCEVC_PictureHandle baseHdl = {};
+        ASSERT_EQ(LCEVC_AllocPicture(getHdl(), &getInputDesc(), &baseHdl), LCEVC_Success);
+
+        LCEVC_PictureLockHandle lock = {};
+        ASSERT_EQ(LCEVC_LockPicture(getHdl(), baseHdl, LCEVC_Access_Write, &lock), LCEVC_Success);
+
+        LCEVC_PictureBufferDesc bufferDesc = {};
+        ASSERT_EQ(LCEVC_GetPictureLockBufferDesc(getHdl(), lock, &bufferDesc), LCEVC_Success);
+
+        ASSERT_NE(bufferDesc.data, nullptr);
+        memset(bufferDesc.data, 0, bufferDesc.byteSize);
+
+        ASSERT_EQ(LCEVC_UnlockPicture(getHdl(), lock), LCEVC_Success);
+
+        ASSERT_EQ(LCEVC_SendDecoderBase(getHdl(), pts, baseHdl, UINT32_MAX, nullptr), LCEVC_Success);
+        baseTimestamps.push(pts);
 
         LCEVC_PictureHandle outputHdl = {};
         ASSERT_EQ(LCEVC_AllocPicture(getHdl(), &getOutputDesc(), &outputHdl), LCEVC_Success);
@@ -228,13 +247,14 @@ TEST_P(APIBadStreamsFixture, Test)
         if (res != LCEVC_Again) {
             // Check for normal success:
             EXPECT_EQ(info.skipped, false);
-            EXPECT_EQ(info.timestamp, baseTimehandles.front());
-            ASSERT_FALSE(baseTimehandles.empty());
-            baseTimehandles.pop();
+            EXPECT_EQ(info.timestamp, baseTimestamps.front());
+            ASSERT_FALSE(baseTimestamps.empty());
+            baseTimestamps.pop();
 
             // Check that bad enhancement was handled correctly: not enhanced, and size equals base
             LCEVC_PictureDesc returnedDesc = {};
             LCEVC_GetPictureDesc(getHdl(), outputs.front(), &returnedDesc);
+
             EXPECT_EQ(info.enhanced, getter.frameShouldBeEnhanced(info.timestamp));
             EXPECT_EQ(info.hasEnhancement, getter.frameShouldBeEnhanced(info.timestamp));
             if (getter.frameShouldBeEnhanced(info.timestamp)) {
@@ -258,9 +278,9 @@ TEST_P(APIBadStreamsFixture, Test)
         if (res != LCEVC_Again) {
             // Check for normal success:
             EXPECT_EQ(info.skipped, false);
-            EXPECT_EQ(info.timestamp, baseTimehandles.front());
-            ASSERT_FALSE(baseTimehandles.empty());
-            baseTimehandles.pop();
+            EXPECT_EQ(info.timestamp, baseTimestamps.front());
+            ASSERT_FALSE(baseTimestamps.empty());
+            baseTimestamps.pop();
 
             // Check that bad enhancement was handled correctly: not enhanced, and size equals base
             LCEVC_PictureDesc descThatWeActuallyGot = {};

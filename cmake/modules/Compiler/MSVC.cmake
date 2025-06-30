@@ -27,6 +27,8 @@ target_compile_options(
     INTERFACE /nologo
               /Zc:wchar_t
               /Zc:forScope
+              /Zc:preprocessor
+              /experimental:c11atomics
               /GF
               $<$<BOOL:${VN_SDK_WARNINGS_FAIL}>:/WX>
               /W3

@@ -12,10 +12,10 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include "LCEVC/utility/types_convert.h"
+#include "enum_map.h"
 
-#include <LCEVC/api_utility/enum_map.h>
 #include <LCEVC/lcevc_dec.h>
+#include <LCEVC/utility/types_convert.h>
 
 #include <string_view>
 

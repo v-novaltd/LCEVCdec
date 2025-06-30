@@ -16,9 +16,8 @@
 //
 #include "find_assets_dir.h"
 
-#include "LCEVC/utility/get_program_dir.h"
-
 #include <fmt/core.h>
+#include <LCEVC/utility/get_program_dir.h>
 
 #include <filesystem>
 #include <string>

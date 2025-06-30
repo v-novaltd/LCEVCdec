@@ -96,29 +96,24 @@ class Runner:
     def get_param(self, param, default=None):
         return self._config[param] if param in self._config else default
 
-    # separate_param_from_value is necessary for some command-running interfaces, but it will mess
-    # up parameters that are formatted as '--param=value' as opposed to '--param value'
-    def command_as_list(self, separate_param_from_value=False):
+    def command_as_list(self):
         params = list()
         for param, param_value in self._config.items():
             prefix = "-" if len(param) == 1 else "--"
             if param_value == 'FLAG':
                 params.append(prefix + param)
                 continue
-            if separate_param_from_value:
-                params.extend([prefix + param, str(param_value)])
-            else:
-                params.append(f"{prefix}{param}={param_value}")
+            params.extend([prefix + param, str(param_value)])
         return params
 
-    def get_command_line(self, separate_param_from_value=False, as_string=True):
+    def get_command_line(self, as_string=True):
         params = list()
         if config.getboolean('ENABLE_VALGRIND'):
             params = ['valgrind', '--error-exitcode=1', '--trace-children=yes',
                       '--leak-check=full', '--leak-resolution=med']
         params.append(self._executable)
         params += [value for value in dict(sorted(self._positional_args.items())).values()]
-        params += self.command_as_list(separate_param_from_value)
+        params += self.command_as_list()
         if platform.system() == "Linux" and self.is_performance and not config.getboolean('ENABLE_VALGRIND'):
             time_cmd = ['/usr/bin/time', '-f', '%M', '-o', 'memory.log']
             params = time_cmd + params
@@ -140,7 +135,7 @@ class Runner:
 
     def call_subprocess(self, kwargs):
         self.is_performance = kwargs.pop('is_performance', False)
-        return subprocess.run(self.get_command_line(separate_param_from_value=True, as_string=False), cwd=self._cwd, **kwargs, timeout=self._timeout,
+        return subprocess.run(self.get_command_line(as_string=False), cwd=self._cwd, **kwargs, timeout=self._timeout,
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
@@ -168,7 +163,7 @@ class ADBRunner(Runner):
     def run(self, **kwargs):
         ret = self.run_adb(['shell', f'cd {self.workdir} '
                             f'&& export LD_LIBRARY_PATH={self.BUILD_DIR}/lib/:{self.BUILD_DIR}/bin/:{self.BUILD_DIR}/:{self.BUILD_DIR}/3rdparty/FFmpeg '
-                            f'&& {" ".join(self.get_command_line(separate_param_from_value=True, as_string=False))}'])
+                            f'&& {" ".join(self.get_command_line(as_string=False))}'])
         self._copy_back_results()
         return ret
 

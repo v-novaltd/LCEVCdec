@@ -24,5 +24,5 @@ target_link_libraries(lcevc_dec_overlay_images PUBLIC lcevc_dec::platform lcevc_
 add_library(lcevc_dec::overlay_images ALIAS lcevc_dec_overlay_images)
 
 if (NOT BUILD_SHARED_LIBS)
-    install(TARGETS lcevc_dec_overlay_images DESTINATION lib)
+    install(TARGETS lcevc_dec_overlay_images)
 endif ()

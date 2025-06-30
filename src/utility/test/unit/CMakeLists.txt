@@ -25,6 +25,7 @@ lcevc_set_properties(lcevc_dec_utility_test_unit)
 target_link_libraries(
     lcevc_dec_utility_test_unit
     lcevc_dec::utility
+    lcevc_dec::extract
     lcevc_dec::api_utility
     lcevc_dec::unit_test_utilities
     lcevc_dec::api
@@ -40,4 +41,4 @@ target_include_directories(lcevc_dec_utility_test_unit PUBLIC "${CMAKE_CURRENT_L
 
 add_executable(lcevc_dec::utility_test_unit ALIAS lcevc_dec_utility_test_unit)
 
-install(TARGETS lcevc_dec_utility_test_unit DESTINATION bin)
+install(TARGETS lcevc_dec_utility_test_unit)

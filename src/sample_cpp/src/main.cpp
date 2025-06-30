@@ -19,8 +19,7 @@
 #include <LCEVC/utility/check.h>
 #include <LCEVC/utility/configure.h>
 #include <LCEVC/utility/picture_functions.h>
-#include <LCEVC/utility/types.h>
-#include <LCEVC/utility/types_cli11.h>
+#include <LCEVC/utility/timestamp.h>
 //
 #include <CLI/CLI.hpp>
 #include <fmt/core.h>
@@ -45,13 +44,15 @@ int main(int argc, char** argv)
     std::string inputFormat;
     bool verbose{false};
     LCEVC_ColorFormat baseFormat{};
+    uint32_t pendingLimit{0};
 
-    CLI::App app{"LCEVC_DEC C++ Sample"};
+    CLI::App app{"LCEVCdec C++ Sample"};
     app.add_option("input", inputFile, "Input stream")->required();
     app.add_option("output", outputFile, "Output YUV")->required();
     app.add_option("configuration", configurationFile, "JSON configuration");
     app.add_option("--input-format", inputFormat, "Input stream format");
     app.add_option("-b,--base-format", baseFormat, "Base format")->default_val(LCEVC_ColorFormat_Unknown);
+    app.add_option("--pending-limit", pendingLimit, "Maximum number of frames to keep pending.");
     app.add_flag("-v,--verbose", verbose, "Verbose output");
 
     try {
@@ -105,18 +106,30 @@ int main(int argc, char** argv)
     // Output frame counter
     uint32_t outputFrame{0};
 
+    uint32_t pendingCount{0};
+    bool synchronized{false};
+
     // Frame loop - consume data from base
-    while (baseDecoder->update()) {
+    while (true) {
+        bool baseRunning = baseDecoder->update();
+
+        // Stop at end of stream
+        if (!baseRunning && pendingCount == 0) {
+            break;
+        }
+
         // Make sure LCEVC data is sent before base frame
         if (baseDecoder->hasEnhancement()) {
             // Fetch encoded enhancement data from base decoder
-            BaseDecoder::Data enhancementData = {};
+            BaseDecoder::Data enhancementData;
             baseDecoder->getEnhancement(enhancementData);
+            uint64_t enhancementTimestamp =
+                getUniqueTimestamp(enhancementData.discontinuityCount, enhancementData.pts);
 
             // Try to send enhancement data into decoder.
             if (VN_LCEVC_AGAIN(LCEVC_SendDecoderEnhancementData(
-                    decoder, enhancementData.timestamp, false, enhancementData.ptr, enhancementData.size))) {
-                fmt::print("SendDecoderEnhancementData: {:#08x} {}\n", enhancementData.timestamp,
+                    decoder, enhancementTimestamp, enhancementData.ptr, enhancementData.size))) {
+                fmt::print("SendDecoderEnhancementData: {:#08x} {}\n", enhancementData.pts,
                            enhancementData.size);
                 baseDecoder->clearEnhancement();
             }
@@ -125,18 +138,19 @@ int main(int argc, char** argv)
         if (baseDecoder->hasImage()) {
             // Fetch raw image data from base decoder
             LCEVC_PictureHandle basePicture{};
-            BaseDecoder::Data baseImage = {};
+            BaseDecoder::Data baseImage;
             baseDecoder->getImage(baseImage);
+            uint64_t baseTimestamp = getUniqueTimestamp(baseImage.discontinuityCount, baseImage.pts);
 
             VN_LCEVC_CHECK(LCEVC_AllocPicture(decoder, &baseDecoder->description(), &basePicture));
 
             copyPictureFromMemory(decoder, basePicture, baseImage.ptr, baseImage.size);
 
             // Try to end base picture into LCEVC decoder
-            if (VN_LCEVC_AGAIN(LCEVC_SendDecoderBase(decoder, baseImage.timestamp, false,
-                                                     basePicture, 1000000, nullptr))) {
-                fmt::print("SendDecoderBase: {:#08x} {}\n", baseImage.timestamp, basePicture);
+            if (VN_LCEVC_AGAIN(LCEVC_SendDecoderBase(decoder, baseTimestamp, basePicture, 1000000, nullptr))) {
+                fmt::print("SendDecoderBase: {:#08x} {}\n", baseTimestamp, basePicture.hdl);
                 baseDecoder->clearImage();
+                ++pendingCount;
             }
         }
 
@@ -144,7 +158,7 @@ int main(int argc, char** argv)
             // Has decoder finished with a base picture?
             LCEVC_PictureHandle doneBasePicture;
             if (VN_LCEVC_AGAIN(LCEVC_ReceiveDecoderBase(decoder, &doneBasePicture))) {
-                fmt::print("ReceiveDecoderBase: {}\n", doneBasePicture);
+                fmt::print("ReceiveDecoderBase: {}\n", doneBasePicture.hdl);
                 VN_LCEVC_CHECK(LCEVC_FreePicture(decoder, doneBasePicture));
             }
         }
@@ -152,22 +166,29 @@ int main(int argc, char** argv)
         if (!isNull(outputPicture)) {
             // Send destination picture into LCEVC decoder
             if (VN_LCEVC_AGAIN(LCEVC_SendDecoderPicture(decoder, outputPicture))) {
-                fmt::print("SendDecoderPicture: {}\n", outputPicture);
+                fmt::print("SendDecoderPicture: {}\n", outputPicture.hdl);
                 // Allocate next output
                 VN_LCEVC_CHECK(LCEVC_AllocPicture(decoder, &outputDesc, &outputPicture));
             }
         }
 
-        {
+        // Sync. LCEVC decoder if base is exhausted
+        if (!synchronized && !baseRunning) {
+            VN_LCEVC_CHECK(LCEVC_SynchronizeDecoder(decoder, false));
+            synchronized = true;
+        }
+
+        if (synchronized || pendingCount >= pendingLimit) {
             // Has decoder produced a picture?
             LCEVC_PictureHandle decodedPicture;
             LCEVC_DecodeInformation decodeInformation;
             if (VN_LCEVC_AGAIN(LCEVC_ReceiveDecoderPicture(decoder, &decodedPicture, &decodeInformation))) {
+                --pendingCount;
                 LCEVC_PictureDesc desc = {0};
                 VN_LCEVC_CHECK(LCEVC_GetPictureDesc(decoder, decodedPicture, &desc));
                 // got output picture - write to YUV file
                 fmt::print("ReceiveDecoderPicture {}: {:#08x} {} {}x{}\n", outputFrame,
-                           decodeInformation.timestamp, decodedPicture, desc.width, desc.height);
+                           decodeInformation.timestamp, decodedPicture.hdl, desc.width, desc.height);
 
                 uint32_t planeCount = 0;
                 VN_LCEVC_CHECK(LCEVC_GetPicturePlaneCount(decoder, decodedPicture, &planeCount));

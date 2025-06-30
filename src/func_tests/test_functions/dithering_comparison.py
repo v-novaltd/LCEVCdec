@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -21,6 +21,7 @@ from utilities.assets import get_encode
 from utilities.config import logger
 from utilities.histogram import pixel_deviation_histogram
 from utilities.load_tests import csv_json_to_dict
+from math import sqrt
 
 
 class Test(BaseTest):
@@ -31,6 +32,7 @@ class Test(BaseTest):
         dither_strength = int(test['meta']['dither_strength'])
         json_config = csv_json_to_dict(test.get('json', {}))
         histogram_tolerance = float(test['meta']['tolerance'])
+        max_std_dev = float(test['meta']['max_standard_deviation'])
 
         encode_path = get_encode(test['erp'])
         self.log_erp_command(encode_path)
@@ -78,6 +80,9 @@ class Test(BaseTest):
 
         num_buckets = 2 * dither_strength + 1
         expected_bucket_size = 100.0 / num_buckets
+        low_gate = (1 - histogram_tolerance) * expected_bucket_size
+        high_gate = (1 + histogram_tolerance) * expected_bucket_size
+        sum_squared = 0
 
         assert len(y_histo) == num_buckets, f"Expected {num_buckets} dithering buckets and received " \
             f"{len(y_histo)}"
@@ -85,6 +90,11 @@ class Test(BaseTest):
         for bucket, size in y_histo.items():
             assert -dither_strength <= bucket <= dither_strength, f"Unexpected dither value {bucket} for strength " \
                 f"{dither_strength}"
-            assert (1 - histogram_tolerance) * expected_bucket_size < size < \
-                   (1 + histogram_tolerance) * expected_bucket_size, f"Bucket value {bucket} " f"has size {size}, " \
-                                                                     f"expected {expected_bucket_size}"
+            assert low_gate < size < \
+                   high_gate, f"Bucket value {bucket} " f"has size {size}, " \
+                              f"expected tolerance range {low_gate} " f"- {high_gate}"
+
+            sum_squared += pow(size - expected_bucket_size, 2)
+
+        std_dev = sqrt(sum_squared / 100.0)
+        assert std_dev < max_std_dev, f"Standard deviation {std_dev} exceeds maximum allowed value {max_std_dev}"

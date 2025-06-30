@@ -18,7 +18,6 @@ list(
     "src/bin_reader.cpp"
     "src/bin_writer.cpp"
     "src/check.cpp"
-    "src/extract.c"
     "src/get_program_dir.cpp"
     "src/md5.cpp"
     "src/parse_raw_name.cpp"
@@ -45,7 +44,8 @@ if (VN_SDK_JSON_CONFIG)
     list(APPEND SOURCES "src/configure.cpp")
 endif ()
 
-list(APPEND HEADERS "src/bin_writer.h" "src/parse_raw_name.h" "src/base_decoder_bin.h")
+list(APPEND HEADERS "src/bin_writer.h" "src/enum_map.h" "src/parse_raw_name.h"
+     "src/base_decoder_bin.h")
 
 list(
     APPEND
@@ -54,12 +54,12 @@ list(
     "include/LCEVC/utility/bin_reader.h"
     "include/LCEVC/utility/byte_order.h"
     "include/LCEVC/utility/check.h"
-    "include/LCEVC/utility/extract.h"
     "include/LCEVC/utility/get_program_dir.h"
     "include/LCEVC/utility/picture_functions.h"
     "include/LCEVC/utility/raw_reader.h"
     "include/LCEVC/utility/raw_writer.h"
     "include/LCEVC/utility/string_utils.h"
+    "include/LCEVC/utility/timestamp.h"
     "include/LCEVC/utility/types.h"
     "include/LCEVC/utility/types_cli11.h"
     "include/LCEVC/utility/types_convert.h"

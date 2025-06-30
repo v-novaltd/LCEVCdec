@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -221,7 +221,7 @@ inline T toHost(T val)
 #endif
 }
 
-//// Utility functions to read and write multibyte integer types in contorlled endian orders
+//// Utility functions to read and write multibyte integer types in controlled endian orders
 //
 template <typename T>
 bool readBigEndian(std::istream& stream, T& val)
@@ -290,4 +290,4 @@ bool writeLittleEndian(std::ostream& stream, T val)
 }
 
 } // namespace lcevc_dec::utility
-#endif
+#endif // VN_LCEVC_UTILITY_BYTE_ORDER_H

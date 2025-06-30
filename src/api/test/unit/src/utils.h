@@ -12,13 +12,15 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#ifndef VN_API_TEST_UNIT_UTILS_H_
-#define VN_API_TEST_UNIT_UTILS_H_
+#ifndef VN_LCEVC_API_UTILS_H
+#define VN_LCEVC_API_UTILS_H
 
 #include <gtest/gtest.h>
 #include <LCEVC/api_utility/chrono.h>
-#include <LCEVC/api_utility/picture_layout.h>
 #include <LCEVC/lcevc_dec.h>
+#include <LCEVC/pipeline/picture_layout.h>
+#include <LCEVC/pipeline/picture_layout.hpp>
+#include <LCEVC/pipeline/pipeline.h>
 
 #include <array>
 #include <atomic>
@@ -43,7 +45,7 @@ using SmartBuffer = std::shared_ptr<std::vector<uint8_t>>;
 constexpr uint32_t kI420NumPlanes = 3; // i.e. Y, U, and V
 constexpr uint32_t kNV12NumPlanes = 2; // i.e. Y and interleaved UV
 
-static const uint32_t kMaxNumPlanes = lcevc_dec::utility::PictureLayout::kMaxNumPlanes;
+// static const uint32_t kMaxNumPlanes = lcevc_dec::pipeline::LdpPictureLayout::kMaxNumPlanes;
 
 static const std::vector<int32_t> kAllEvents = {
     LCEVC_Log,
@@ -93,11 +95,4 @@ static bool atomicWaitUntil(bool& wasTimeout, Fn pred, Args&&... args)
     return atomicWaitUntilTimeout(wasTimeout, lcevc_dec::utility::MilliSecond(200), pred, args...);
 }
 
-// Helpers for PictureExternal:
-
-void setupPictureExternal(LCEVC_PictureBufferDesc& bufferDescOut, SmartBuffer& bufferOut,
-                          LCEVC_PicturePlaneDesc planeDescArrOut[kMaxNumPlanes],
-                          LCEVC_ColorFormat format, uint32_t width, uint32_t height,
-                          LCEVC_AccelBufferHandle accelBufferHandle, LCEVC_Access access);
-
-#endif // VN_API_TEST_UNIT_UTILS_H_
+#endif // VN_LCEVC_API_UTILS_H

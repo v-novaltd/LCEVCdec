@@ -24,16 +24,9 @@ if (NOT TARGET ffmpeg-libs::ffmpeg-libs)
     find_package("ffmpeg-libs-minimal" QUIET)
     find_package("ffmpeg" QUIET)
     get_cmake_property(PACKAGE_LIST PACKAGES_FOUND)
-    list(
-        APPEND
-        REQUIRED_LIBAV_LIBS
-        "libavcodec"
-        "libavformat"
-        "libavfilter"
-        "libavutil"
-        "libavdevice")
+    list(APPEND REQUIRED_LIBAV_LIBS "libavcodec" "libavformat" "libavfilter" "libavutil")
     if ("ffmpeg" IN_LIST PACKAGE_LIST)
-        message("Found libav packages from conan package 'ffmpeg'")
+        message(STATUS "Found libav packages from conan package 'ffmpeg'")
         target_link_libraries(ffmpeg-libs::ffmpeg-libs INTERFACE ffmpeg::ffmpeg)
         string(TOUPPER ${CMAKE_BUILD_TYPE} UPPER_BUILD_TYPE)
         set(FFMPEG_SHARED_PATH "${ffmpeg_LIB_DIRS_${UPPER_BUILD_TYPE}}")
@@ -41,9 +34,11 @@ if (NOT TARGET ffmpeg-libs::ffmpeg-libs)
             set(FFMPEG_SHARED_PATH "${ffmpeg_LIB_DIRS_${UPPER_BUILD_TYPE}}/../bin")
         endif ()
         file(COPY ${FFMPEG_SHARED_PATH} DESTINATION "${CMAKE_BINARY_DIR}")
-        file(GLOB FFMPEG_LIBS "${FFMPEG_SHARED_PATH}/*")
-        install(FILES ${FFMPEG_LIBS} DESTINATION "3rdparty/FFmpeg")
-        install(DIRECTORY "${CMAKE_SOURCE_DIR}/licenses/FFmpeg" DESTINATION "3rdparty")
+        if (NOT VN_SDK_SYSTEM_INSTALL)
+            file(GLOB FFMPEG_LIBS "${FFMPEG_SHARED_PATH}/*")
+            install(FILES ${FFMPEG_LIBS} DESTINATION "3rdparty/FFmpeg")
+            install(DIRECTORY "${CMAKE_SOURCE_DIR}/licenses/FFmpeg" DESTINATION "3rdparty")
+        endif ()
     else ()
         # Attempt to find via pkgconfig
         find_package(PkgConfig)
@@ -73,7 +68,7 @@ if (NOT TARGET ffmpeg-libs::ffmpeg-libs)
                 AND libavformat_FOUND
                 AND libavutil_FOUND
                 AND libavfilter_FOUND)
-                message("Found libav packages from path: ${VN_SDK_FFMPEG_LIBS_PACKAGE}")
+                message(STATUS "Found libav packages from path: ${VN_SDK_FFMPEG_LIBS_PACKAGE}")
             else ()
                 message(
                     FATAL_ERROR
@@ -81,7 +76,7 @@ if (NOT TARGET ffmpeg-libs::ffmpeg-libs)
                 )
             endif ()
         else ()
-            message("Found libav packages from pkg-config")
+            message(STATUS "Found libav packages from pkg-config")
         endif ()
     endif ()
 endif ()

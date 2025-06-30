@@ -14,39 +14,24 @@
 
 #include "bin_writer.h"
 #include "hash.h"
+#include "trickplay.h"
 
 #include <CLI/CLI.hpp> // NOLINT(misc-include-cleaner)
 #include <fmt/core.h>
 #include <fmt/ostream.h>
 #include <LCEVC/api_utility/chrono.h>
-#include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/common/constants.h>
 #include <LCEVC/lcevc_dec.h>
 #include <LCEVC/utility/base_decoder.h>
 #include <LCEVC/utility/check.h>
 #include <LCEVC/utility/configure.h>
 #include <LCEVC/utility/picture_functions.h>
 #include <LCEVC/utility/raw_writer.h>
+#include <LCEVC/utility/timestamp.h>
 
-#include <cstdint>
 #include <cstdlib>
-#include <cstring>
-#include <exception>
-#include <fstream>
-#include <limits>
-#include <map>
-#include <memory>
-#include <string>
-#include <string_view>
-#include <vector>
 
 using namespace lcevc_dec::utility;
-
-// Check if an LCEVC handle is null
-template <typename H>
-inline bool isNull(H handle)
-{
-    return handle.hdl == 0;
-}
 
 struct Config
 {
@@ -69,10 +54,13 @@ struct Config
     LCEVC_ColorFormat outputColorFormat{LCEVC_ColorFormat_Unknown};
     uint32_t outputFrameLimit{0};
     bool outputExternal{false};
+    uint32_t pendingLimit{0};
     // Decoding config. Avoiding adding direct command-line interface for configs that are already
     // available via the JSON.
     std::string configurationJson;
+    std::string trickplayJson;
     bool verbose{false};
+    bool repeat{false};
 };
 
 struct Stats
@@ -80,8 +68,8 @@ struct Stats
     uint32_t inputEnhancedCount{0};
     uint32_t outputFrameCount{0};
     MilliSecondF64 latencyTotal{0};
-    std::map<int64_t, TimePoint> frameStartMap = {};
-    std::vector<TimePoint> frameEndTimes = {};
+    std::map<uint64_t, TimePoint> frameStartMap;
+    std::vector<TimePoint> frameEndTimes;
 };
 
 struct OutputPicData
@@ -108,8 +96,18 @@ struct OutputPicData
     LCEVC_PictureBufferDesc bufferDesc = {};
     LCEVC_PictureDesc desc{};
     std::unique_ptr<uint8_t[]> extBuffer = nullptr;
+    std::vector<uint64_t> pendingTimestamps;
     bool valid = false;
 };
+
+namespace { // anonymous
+
+// Check if an LCEVC handle is null
+template <typename H>
+inline bool isNull(H handle)
+{
+    return handle.hdl == 0;
+}
 
 int setupConfig(int argc, char** argv, Config& cfgOut)
 {
@@ -143,7 +141,11 @@ int setupConfig(int argc, char** argv, Config& cfgOut)
     // Decoding config
     app.add_option("-c,--configuration", cfgOut.configurationJson,
                    "JSON configuration (Inline json, or json filename)");
+    app.add_option("--trickplay", cfgOut.trickplayJson,
+                   "JSON trickplay configuration (Inline json, or json filename)");
     app.add_flag("-v,--verbose", cfgOut.verbose, "Enable verbose logging");
+    app.add_flag("--repeat", cfgOut.repeat, "Repeat decoding task for ever");
+    app.add_flag("--pending-limit", cfgOut.pendingLimit, "Maximum number of frames to keep pending.");
 
     try {
         app.parse(argc, argv);
@@ -160,7 +162,7 @@ int setupConfig(int argc, char** argv, Config& cfgOut)
     return EXIT_SUCCESS;
 }
 
-std::unique_ptr<BaseDecoder> createBaseDecoder(const Config& cfg)
+static std::unique_ptr<BaseDecoder> createBaseDecoder(const Config& cfg)
 {
     if (!cfg.inputFile.empty()) {
         std::unique_ptr<BaseDecoder> baseDecoderLibAV =
@@ -188,7 +190,8 @@ std::unique_ptr<BaseDecoder> createBaseDecoder(const Config& cfg)
     return nullptr;
 }
 
-int createAndInitDecoder(const std::string_view configurationJson, bool verbose, LCEVC_DecoderHandle& decoderOut)
+static int createAndInitDecoder(const std::string_view configurationJson, bool verbose,
+                                LCEVC_DecoderHandle& decoderOut)
 {
     VN_LCEVC_CHECK(LCEVC_CreateDecoder(&decoderOut, LCEVC_AccelContextHandle{}));
 
@@ -211,32 +214,61 @@ int createAndInitDecoder(const std::string_view configurationJson, bool verbose,
     return EXIT_SUCCESS;
 }
 
-void updateExternalOutputPic(LCEVC_DecoderHandle decoder, uint64_t timestamp, OutputPicData& output)
+static void updateExternalOutputPic(LCEVC_DecoderHandle decoder, OutputPicData& output)
 {
     // Resize output based on enhancement info
     uint32_t newWidth = 0;
     uint32_t newHeight = 0;
-    VN_LCEVC_CHECK(LCEVC_PeekDecoder(decoder, timestamp, &newWidth, &newHeight));
-    if (newWidth != output.desc.width || newHeight != output.desc.height) {
-        output.desc.width = newWidth;
-        output.desc.height = newHeight;
-        const PictureLayout layout(output.desc);
-        output.bufferDesc.byteSize = layout.size();
-        output.extBuffer = std::make_unique<uint8_t[]>(output.bufferDesc.byteSize);
-        output.bufferDesc.data = output.extBuffer.get();
-        VN_LCEVC_CHECK(LCEVC_AllocPictureExternal(decoder, &output.desc, &output.bufferDesc,
-                                                  nullptr, &output.handle));
+    for (size_t i = 0; i < output.pendingTimestamps.size(); i++) {
+        LCEVC_ReturnCode peekRet =
+            LCEVC_PeekDecoder(decoder, output.pendingTimestamps[i], &newWidth, &newHeight);
+        if (peekRet == LCEVC_Again) {
+            continue;
+        } else if (peekRet == LCEVC_Success) {
+            if (newWidth != output.desc.width || newHeight != output.desc.height) {
+                output.desc.width = newWidth;
+                output.desc.height = newHeight;
+                const PictureLayout layout(output.desc);
+                output.bufferDesc.byteSize = layout.size();
+                output.extBuffer = std::make_unique<uint8_t[]>(output.bufferDesc.byteSize);
+                output.bufferDesc.data = output.extBuffer.get();
+                VN_LCEVC_CHECK(LCEVC_AllocPictureExternal(decoder, &output.desc, &output.bufferDesc,
+                                                          nullptr, &output.handle));
+            }
+            output.pendingTimestamps.erase(output.pendingTimestamps.begin() + i);
+            break;
+        }
     }
 }
 
-void receiveDecodedPicture(LCEVC_DecoderHandle decoder, Stats& stats, Hashes& hashes,
-                           std::unique_ptr<RawWriter>& outputRaw, const std::string_view outputRawFile)
+// Given a name - add a 'part number' to it
+//
+// - Strip and count trailing zeros from name (and remember this count as 'minimum width')
+// Append a zero padded decimal number to stripped name using the above width
+//
+static std::string makePartName(const std::string_view name, uint32_t part)
 {
+    uint32_t width = 0;
+    auto end = name.end();
+    for (; end != name.begin() && end[-1] == '0'; end--) {
+        width++;
+    }
+
+    return fmt::format("{}{:0{}}", std::string(name.begin(), end), part, width);
+}
+
+static bool receiveDecodedPicture(LCEVC_DecoderHandle decoder, Stats& stats, Hashes& hashes,
+                                  std::unique_ptr<RawWriter>& outputRaw, const std::string_view outputRawFile,
+                                  uint32_t& part, const Config& cfg, OutputPicData& outputPic)
+{
+    if (cfg.outputExternal) {
+        updateExternalOutputPic(decoder, outputPic);
+    }
     // Has decoder produced a picture?
     LCEVC_PictureHandle decodedPicture;
     LCEVC_DecodeInformation decodeInformation;
     if (!VN_LCEVC_AGAIN(LCEVC_ReceiveDecoderPicture(decoder, &decodedPicture, &decodeInformation))) {
-        return;
+        return false;
     }
 
     LCEVC_PictureDesc desc{};
@@ -249,11 +281,27 @@ void receiveDecodedPicture(LCEVC_DecoderHandle decoder, Stats& stats, Hashes& ha
                desc.width, desc.height);
 
     if (!outputRawFile.empty()) {
-        if (!outputRaw) {
-            outputRaw = createRawWriter(PictureLayout(desc).makeRawFilename(outputRawFile));
+        if (outputRaw && outputRaw->layout().format() != LCEVC_ColorFormat_Unknown &&
+            !outputRaw->layout().isSame(PictureLayout(desc))) {
+            // Change of picture layout - close current output, and bump 'part' in file name
+            outputRaw.release();
+            part++;
+            const std::string partName(makePartName(outputRawFile, part));
+            outputRaw = createRawWriter(PictureLayout(desc).makeRawFilename(partName));
         }
-        VN_UTILITY_CHECK_MSG(outputRaw->write(decoder, decodedPicture),
-                             "Cannot write raw output image, likely a picture format issue");
+
+        if (!outputRaw) {
+            const std::string rawName = PictureLayout(desc).makeRawFilename(outputRawFile);
+            outputRaw = createRawWriter(rawName);
+            if (!outputRaw) {
+                fmt::print("Could not open output raw {}\n", rawName);
+            }
+        }
+
+        if (outputRaw) {
+            VN_UTILITY_CHECK_MSG(outputRaw->write(decoder, decodedPicture),
+                                 "Cannot write raw output image, likely a picture format issue");
+        }
     }
 
     hashes.updateHigh(decoder, decodedPicture);
@@ -261,49 +309,57 @@ void receiveDecodedPicture(LCEVC_DecoderHandle decoder, Stats& stats, Hashes& ha
 
     VN_LCEVC_CHECK(LCEVC_FreePicture(decoder, decodedPicture));
     stats.outputFrameCount++;
+
+    return true;
 }
 
-void sendEnhancement(const LCEVC_DecoderHandle decoder, BaseDecoder& baseDecoder, const Config& cfg,
-                     BinWriter* outputBin, Stats& stats, OutputPicData& outputPic)
+bool sendEnhancement(const LCEVC_DecoderHandle decoder, BaseDecoder& baseDecoder, const Config& cfg,
+                     BinWriter* outputBin, Stats& stats, OutputPicData& outputPic, uint64_t& timestamp)
 {
     // Fetch encoded enhancement data from base decoder
     BaseDecoder::Data enhancementData;
     baseDecoder.getEnhancement(enhancementData);
+    uint64_t enhancementTimestamp =
+        getUniqueTimestamp(enhancementData.discontinuityCount, enhancementData.pts);
 
     // Try to send enhancement data into decoder.
     const TimePoint preSendTime = getTimePoint();
-    if (VN_LCEVC_AGAIN(LCEVC_SendDecoderEnhancementData(decoder, enhancementData.timestamp, false,
+    if (VN_LCEVC_AGAIN(LCEVC_SendDecoderEnhancementData(decoder, enhancementTimestamp,
                                                         enhancementData.ptr, enhancementData.size))) {
         if (baseDecoder.getType() == BaseDecoder::Type::BinLinear) {
             enhancementData.baseDecodeStart = preSendTime;
         }
         if (outputBin) {
-            outputBin->write(stats.inputEnhancedCount, enhancementData.timestamp,
-                             enhancementData.ptr, enhancementData.size);
+            outputBin->write(stats.inputEnhancedCount, enhancementData.pts, enhancementData.ptr,
+                             enhancementData.size);
         }
         baseDecoder.clearEnhancement();
         stats.inputEnhancedCount++;
-        stats.frameStartMap.insert({enhancementData.timestamp, enhancementData.baseDecodeStart});
+        stats.frameStartMap.insert({enhancementTimestamp, enhancementData.baseDecodeStart});
 
         if (cfg.outputExternal) {
-            updateExternalOutputPic(decoder, enhancementData.timestamp, outputPic);
+            outputPic.pendingTimestamps.push_back(enhancementTimestamp);
         }
+
+        // Record the sucessfully written enhancement timestamp
+        timestamp = enhancementTimestamp;
+
+        return true;
     }
+
+    return false;
 }
 
-int main(int argc, char** argv)
-{
-    Config cfg;
-    if (const int res = setupConfig(argc, argv, cfg); res != EXIT_SUCCESS) {
-        return res;
-    }
+} // namespace
 
+static int decode(const Config& cfg)
+{
     std::unique_ptr<BaseDecoder> baseDecoder = createBaseDecoder(cfg);
     if (baseDecoder == nullptr) {
         return EXIT_FAILURE;
     }
 
-    // RAW outputs - initialised once picture layouts are known
+    // RAW outputs - initialized once picture layouts are known
     std::unique_ptr<RawWriter> outputBaseRaw;
     std::unique_ptr<RawWriter> outputRaw;
 
@@ -330,6 +386,11 @@ int main(int argc, char** argv)
         }
     }
 
+    std::vector<Trickplay> trickplays;
+    if (!cfg.trickplayJson.empty()) {
+        trickplays = parseTrickplayJson(cfg.trickplayJson);
+    }
+
     // Create and initialize LCEVC decoder
     LCEVC_DecoderHandle decoder = {};
     if (const int res = createAndInitDecoder(cfg.configurationJson, cfg.verbose, decoder);
@@ -340,28 +401,43 @@ int main(int argc, char** argv)
 
     // Base picture waiting to be sent to decoder
     LCEVC_PictureHandle basePicture{};
-    int64_t basePictureTimestamp{-1};
+    uint64_t baseTimestamp = kInvalidTimestamp;
 
+    LCEVC_ColorFormat outputColorFormat;
     if (cfg.outputColorFormat == LCEVC_ColorFormat_Unknown) {
-        cfg.outputColorFormat = baseDecoder->description().colorFormat;
+        outputColorFormat = baseDecoder->description().colorFormat;
+    } else {
+        outputColorFormat = cfg.outputColorFormat;
     }
 
     // Output picture
-    OutputPicData outputPic(decoder, cfg.outputColorFormat, cfg.outputExternal);
+    OutputPicData outputPic(decoder, outputColorFormat, cfg.outputExternal);
     VN_UTILITY_CHECK(outputPic.valid);
 
     // Counters and timers
     Stats stats;
+    uint32_t pendingCount = 0;
+    uint32_t outputRawPart = 0;
+    uint64_t enhancementTimestamp = 0;
+    bool synchronized = false;
 
-    // Frame loop - consume data from base
-    while (baseDecoder->update()) {
+    // Frame loop - consume data from base, keep going whilst there is unread data, or pending decodes
+    while (true) {
+        bool baseRunning = baseDecoder->update();
+
+        // Stop at end of stream
+        if (!baseRunning && pendingCount == 0) {
+            break;
+        }
+        // Stop if requested number of output frames has been generated
         if (cfg.outputFrameLimit > 0 && stats.outputFrameCount >= cfg.outputFrameLimit) {
             break;
         }
 
         // Make sure LCEVC data is sent before base frame
         if (baseDecoder->hasEnhancement()) {
-            sendEnhancement(decoder, *baseDecoder, cfg, outputBin.get(), stats, outputPic);
+            sendEnhancement(decoder, *baseDecoder, cfg, outputBin.get(), stats, outputPic,
+                            enhancementTimestamp);
         }
 
         if (baseDecoder->hasImage() && isNull(basePicture)) {
@@ -389,7 +465,7 @@ int main(int argc, char** argv)
                 VN_LCEVC_CHECK(LCEVC_AllocPicture(decoder, &baseDecoder->description(), &basePicture));
                 VN_LCEVC_CHECK(copyPictureFromMemory(decoder, basePicture, baseImage.ptr, baseImage.size));
             }
-            basePictureTimestamp = baseImage.timestamp;
+            baseTimestamp = getUniqueTimestamp(baseImage.discontinuityCount, baseImage.pts);
             baseDecoder->clearImage();
 
             // Generate output image and hash from the picture
@@ -406,11 +482,12 @@ int main(int argc, char** argv)
             hashes.updateBase(decoder, basePicture);
         }
 
-        // Try to send base picture into LCEVC decoder (since this is a testing program, don't ever
-        // timeout).
-        if (!isNull(basePicture) &&
-            VN_LCEVC_AGAIN(LCEVC_SendDecoderBase(decoder, basePictureTimestamp, false, basePicture,
+        // Try to send base picture into LCEVC decoder (since this is a testing
+        // program, don't ever timeout).
+        if (!isNull(basePicture) && /* baseTimestamp <= enhancementTimestamp && */
+            VN_LCEVC_AGAIN(LCEVC_SendDecoderBase(decoder, baseTimestamp, basePicture,
                                                  std::numeric_limits<uint32_t>::max(), nullptr))) {
+            pendingCount++;
             basePicture = LCEVC_PictureHandle{};
         }
 
@@ -442,7 +519,41 @@ int main(int argc, char** argv)
             }
         }
 
-        receiveDecodedPicture(decoder, stats, hashes, outputRaw, cfg.outputRawFile);
+        auto frameNum = stats.inputEnhancedCount;
+        auto trickplay =
+            std::find_if(trickplays.begin(), trickplays.end(), [frameNum](const Trickplay& trickplay) {
+                return trickplay.frameNum == frameNum;
+            });
+        if (trickplay != trickplays.end() && !(&*trickplay)->completed) {
+            logTrickplay((&*trickplay));
+            if (trickplay->action == Peek) {
+                uint32_t width = 0;
+                uint32_t height = 0;
+                VN_LCEVC_CHECK(LCEVC_PeekDecoder(decoder, trickplay->timestamp, &width, &height));
+            } else if (trickplay->action == Skip) {
+                VN_LCEVC_CHECK(LCEVC_SkipDecoder(decoder, trickplay->timestamp));
+            } else if (trickplay->action == Synchronize) {
+                VN_LCEVC_CHECK(LCEVC_SynchronizeDecoder(decoder, trickplay->dropPending));
+                pendingCount = 0;
+            } else if (trickplay->action == Flush) {
+                VN_LCEVC_CHECK(LCEVC_FlushDecoder(decoder));
+                pendingCount = 0;
+            }
+            trickplay->completed = true;
+        }
+
+        // Sync. LCEVC decoder if base is exhausted
+        if (!synchronized && !baseRunning) {
+            VN_LCEVC_CHECK(LCEVC_SynchronizeDecoder(decoder, false));
+            synchronized = true;
+        }
+
+        if (synchronized || pendingCount >= cfg.pendingLimit) {
+            if (receiveDecodedPicture(decoder, stats, hashes, outputRaw, cfg.outputRawFile,
+                                      outputRawPart, cfg, outputPic)) {
+                --pendingCount;
+            }
+        }
     }
 
     LCEVC_DestroyDecoder(decoder);
@@ -458,4 +569,18 @@ int main(int argc, char** argv)
     fmt::print("Average frame latency: {:.4}ms, frame time (1 / throughput): {:.4}ms\n", latency, frameTime);
 
     return EXIT_SUCCESS;
+}
+
+int main(int argc, char** argv)
+{
+    Config cfg;
+    if (const int res = setupConfig(argc, argv, cfg); res != EXIT_SUCCESS) {
+        return res;
+    }
+
+    do {
+        if (int ret = decode(cfg); ret != EXIT_SUCCESS) {
+            return ret;
+        }
+    } while (cfg.repeat);
 }

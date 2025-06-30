@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -100,19 +100,23 @@ def save_regenerated_hashes(results, definitions_dir):
 
 
 def get_library_sizes():
+    LIBS = ('api', 'pipeline_cpu', 'pipeline_vulkan', 'pipeline_legacy')
+    PATTERNS = {'Windows': ['lcevc_dec_{lib}.dll'],
+                'Darwin': ['lcevc_dec_{lib}.framework/lcevc_dec_{lib}', 'liblcevc_dec_{lib}.dylib'],
+                'Other': ['liblcevc_dec_{lib}.*']}
+    plat = platform.system() if platform.system() in PATTERNS else 'Other'
+    paths = dict()
+    for lib in LIBS:
+        paths[lib] = [pattern.format(lib=lib) for pattern in PATTERNS[plat]]
+
     ret = dict()
-    if platform.system() == 'Windows':
-        paths = zip(('api', 'core'), ('lcevc_dec_api.dll', 'lcevc_dec_core.dll'))
-    elif platform.system() == 'Darwin':
-        paths = zip(('api', 'core'), ('lcevc_dec_api.framework/lcevc_dec_api',
-                    'lcevc_dec_core.framework/lcevc_dec_core'))
-    else:
-        paths = zip(('api', 'core'), ('liblcevc_dec_api.*', 'liblcevc_dec_core.*'))
-    for name, glob_path in paths:
-        lib_path = glob.glob(os.path.join(config.get('BIN_DIR'), '..', '**', glob_path))
-        if lib_path:
-            lib_path = lib_path[0]
-            lib_size = os.path.getsize(lib_path)
-            ret[name] = lib_size
+    for name, glob_paths in paths.items():
+        for glob_path in glob_paths:
+            lib_path = glob.glob(os.path.join(config.get('BIN_DIR'), '..', '**', glob_path))
+            if lib_path:
+                lib_path = lib_path[0]
+                lib_size = os.path.getsize(lib_path)
+                ret[name] = lib_size
+                break
 
     return ret

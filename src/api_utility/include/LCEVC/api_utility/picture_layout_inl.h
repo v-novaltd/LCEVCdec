@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,8 +14,8 @@
 
 // Inlined methods for PictureLayout
 //
-#ifndef VN_LCEVC_UTILITY_PICTURE_LAYOUT_INL_H
-#define VN_LCEVC_UTILITY_PICTURE_LAYOUT_INL_H
+#ifndef VN_LCEVC_API_UTILITY_PICTURE_LAYOUT_INL_H
+#define VN_LCEVC_API_UTILITY_PICTURE_LAYOUT_INL_H
 
 #include "picture_layout.h"
 
@@ -138,4 +138,4 @@ inline bool PictureLayout::samplesAreContiguous(uint32_t component) const
     return m_layoutInfo->interleave[component] == 1;
 }
 
-#endif
+#endif // VN_LCEVC_API_UTILITY_PICTURE_LAYOUT_INL_H

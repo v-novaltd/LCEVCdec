@@ -1,0 +1,6 @@
+{
+    global:
+        perseus_*;
+    local:
+        *;
+};

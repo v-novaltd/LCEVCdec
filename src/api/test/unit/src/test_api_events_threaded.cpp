@@ -40,15 +40,12 @@ TYPED_TEST_SUITE(APIEventReporting, MyTypes);
 
 TYPED_TEST(APIEventReporting, test)
 {
-    if (std::is_same_v<TypeParam, DecoderAsynchronous>) {
-        GTEST_SKIP() << "DEC-593";
-    }
     TypeParam tester(kNumFrames);
 
     // This will be fully automatic:
     // Test program                    | Decoder fn    | Decoder event
     // --------------------------------------------------------------
-    // setup ->                        | initialise -> | "send" events ->
+    // setup ->                        | initialize -> | "send" events ->
     // send callbacks ->               | decode ->     | "output/base done" events ->
     // "reuse" callbacks, new sends -> | decode ->     | More "done" events, repeat <--
     tester.setup();

@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -65,7 +65,7 @@ std::vector<std::string> split(std::string_view src, std::string_view separators
 
 //! Generate a hex dump from a block of memory
 //!
-std::string hexDump(const uint8_t* data, uint32_t size, uint32_t offset);
+std::string hexDump(const uint8_t* data, uint32_t size, uint32_t offset, bool humanReadable = true);
 
 } // namespace lcevc_dec::utility
-#endif
+#endif // VN_LCEVC_UTILITY_STRING_UTILS_H

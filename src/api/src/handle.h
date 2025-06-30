@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,16 +12,20 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#ifndef VN_API_HANDLE_H_
-#define VN_API_HANDLE_H_
+#ifndef VN_LCEVC_API_HANDLE_H
+#define VN_LCEVC_API_HANDLE_H
 
-#include <mutex>
+#include <algorithm>
+#include <cstdint>
 #include <type_traits>
-#include <variant>
 
 // ------------------------------------------------------------------------------------------------
 
 namespace lcevc_dec::decoder {
+
+// UINTPTR_MAX is a good choice for an invalid handle, because the "index" component of it will be
+// much larger than the maximum capacity of any of our pools (we assert in Pool to guarantee this).
+static const uintptr_t kInvalidHandle = UINTPTR_MAX;
 
 // A Handle is an index, bitwise-or'd with a generation. If a generation is odd, it means an object
 // with that index is currently out there (i.e. allocated). An even generation means "not currently
@@ -44,9 +48,9 @@ struct Handle
     // You can convert between handles precisely when you would be able to convert between pointers
     template <typename TFrom>
     Handle(const Handle<TFrom>& otherH)
+        : handle(otherH.handle)
     {
         static_assert(std::is_convertible<TFrom*, T*>::value);
-        handle = otherH.handle;
     }
     template <typename TFrom>
     Handle<T>& operator=(const Handle<TFrom>& other)
@@ -62,13 +66,14 @@ struct Handle
     Handle(Handle<TFrom>&& other)
     {
         static_assert(std::is_convertible<TFrom*, T*>::value);
-        *this = other;
+        *this = std::move(other);
     }
     template <typename TFrom>
     Handle<T>& operator=(Handle<TFrom>&& other)
     {
         static_assert(std::is_convertible<TFrom*, T*>::value);
-        return *this = other;
+        *this = std::move(other);
+        return *this;
     }
 
     bool operator==(uintptr_t rawHandle) const { return handle == rawHandle; }
@@ -76,13 +81,10 @@ struct Handle
     bool operator==(Handle<T> other) const { return handle == other.handle; }
     bool operator!=(Handle<T> other) const { return handle != other.handle; }
 
-    uintptr_t handle;
+    bool isValid() const { return handle != kInvalidHandle; }
+    uintptr_t handle = 0;
 };
-
-// UINTPTR_MAX is a good choice for an invalid handle, because the "index" component of it will be
-// much larger than the maximum capacity of any of our pools (we assert in Pool to guarantee this).
-static const uintptr_t kInvalidHandle = UINTPTR_MAX;
 
 } // namespace lcevc_dec::decoder
 
-#endif // VN_API_HANDLE_H_
+#endif // VN_LCEVC_API_HANDLE_H

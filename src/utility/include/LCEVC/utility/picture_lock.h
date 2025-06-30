@@ -17,9 +17,8 @@
 #ifndef VN_LCEVC_UTILITY_PICTURE_LOCK_H
 #define VN_LCEVC_UTILITY_PICTURE_LOCK_H
 
-#include "LCEVC/lcevc_dec.h"
-
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/lcevc_dec.h>
 
 #include <cassert>
 #include <memory>
@@ -90,4 +89,4 @@ private:
 
 } // namespace lcevc_dec::utility
 
-#endif
+#endif // VN_LCEVC_UTILITY_PICTURE_LOCK_H

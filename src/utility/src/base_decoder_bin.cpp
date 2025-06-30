@@ -14,11 +14,10 @@
 
 #include "base_decoder_bin.h"
 
-#include "LCEVC/utility/bin_reader.h"
-#include "LCEVC/utility/raw_reader.h"
-
 #include <fmt/core.h>
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/utility/bin_reader.h>
+#include <LCEVC/utility/raw_reader.h>
 
 #include <cstdint>
 #include <iterator>
@@ -29,7 +28,7 @@
 
 namespace lcevc_dec::utility {
 
-bool BaseDecoderBin::isInitialised() const { return m_rawReader && m_binReader; }
+bool BaseDecoderBin::isInitialized() const { return m_rawReader && m_binReader; }
 
 // Work out starting PTS and PTS increment - by looking at up to first 100 frames
 //

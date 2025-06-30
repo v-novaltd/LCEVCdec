@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -25,14 +25,14 @@
 
 // Convert types to and from strings
 //
-#include "LCEVC/utility/types_convert.h"
+#include <LCEVC/utility/types_convert.h>
 
 // Implementations of operator<<() and operator>>() for use with streams and packages like CLI11 and cxxopts
 //
-#include "LCEVC/utility/types_stream.h"
+#include <LCEVC/utility/types_stream.h>
 
 // Implementations of {fmt} specific formatters for types
 //
-#include "LCEVC/utility/types_fmt.h"
+#include <LCEVC/utility/types_fmt.h>
 
-#endif
+#endif // VN_LCEVC_UTILITY_TYPES_H

@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -13,20 +13,18 @@
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
 set(SOURCES
+    "src/test_pool.cpp"
     "src/event_tester.cpp"
     "src/decoder_asynchronous.cpp"
     "src/decoder_synchronous.cpp"
     "src/test_api_bad_streams.cpp"
     "src/test_api_events_threaded.cpp"
-    "src/test_decoder.cpp"
-    "src/test_event_manager.cpp"
-    "src/test_misc.cpp"
-    "src/test_picture.cpp"
-    "src/test_pool.cpp"
+    "src/test_event_dispatcher.cpp"
+    "src/test_pipeline_types.cpp"
     "src/utils.cpp")
 
 set(HEADERS "src/event_tester.h" "src/decoder_asynchronous.h" "src/decoder_synchronous.h"
-            "src/data.h" "src/test_decoder.h" "src/utils.h")
+            "src/data.h" "src/utils.h")
 
 # Convenience
 set(ALL_FILES "CMakeLists.txt" "Sources.cmake" ${HEADERS} ${SOURCES} ${CONFIG})

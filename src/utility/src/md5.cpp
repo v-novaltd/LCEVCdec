@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -16,7 +16,7 @@
 //
 // See https://en.wikipedia.org/wiki/MD5
 //
-#include "LCEVC/utility/md5.h"
+#include <LCEVC/utility/md5.h>
 
 #include <algorithm>
 #include <cassert>
@@ -126,7 +126,7 @@ void MD5::chunk(const uint8_t* data)
     m_d0 += D;
 }
 
-void MD5::update(const uint8_t* data, uint32_t size)
+void MD5::update(const uint8_t* data, size_t size)
 {
     assert(!m_finished);
 
@@ -138,7 +138,7 @@ void MD5::update(const uint8_t* data, uint32_t size)
 
     // If there is buffered message data, accumulate from front of this message data
     if (m_chunkSize > 0) {
-        uint32_t sz = std::min(size, kChunkSize - m_chunkSize);
+        size_t sz = std::min(size, kChunkSize - m_chunkSize);
         memcpy(m_chunk + m_chunkSize, data, sz);
         m_chunkSize += sz;
         size -= sz;

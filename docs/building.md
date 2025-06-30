@@ -4,17 +4,27 @@ This repository contains two main libraries `core` and `api` as well as a suite 
 
 ## Build Options
 
-| Name                       | Default | Dependencies                         | Description                                                                                                                                   |
-|----------------------------|---------|--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| BUILD_SHARED_LIBS          | ON      | -                                    | Builds `core` and `api` libraries as shared libraries, else static                                                                            |
-| VN_SDK_SAMPLE_SOURCE       | ON      | -                                    | Install option for packaging the sample code and standalone CMakeLists                                                                        |
-| VN_SDK_API_LAYER           | ON      | -                                    | Some integrations only require the core functionality or cannot use the C++ API                                                               |
-| VN_SDK_EXECUTABLES         | OFF     | ffmpeg libraries, xxhash, cli11, fmt | Builds the test harness and sample code executables requiring a base decoder. Use this option to enable standalone decoding of LCEVC streams. |
-| VN_SDK_UNIT_TESTS          | OFF     | gtest, range-v3                      | Build the google test unit test executables for each target, for development purposes only                                                    |
-| VN_SDK_JSON_CONFIG         | OFF     | nlohmann_json                        | Allow the API to be configured with a JSON string, required for `VN_SDK_EXECUTABLES`                                                          |
-| VN_SDK_DOCS                | OFF     | doxygen, sphinx, plantuml            | Builds formatted HTML documentation for API integration                                                                                       |
-| VN_SDK_COVERAGE            | OFF     | -                                    | Generate gcov statistics for use in a second PGO build                                                                                        |
-| VN_SDK_FFMPEG_LIBS_PACKAGE | ''      | -                                    | Specify a local path to ffmpeg libraries if they cannot be found via a package manager                                                        |
+| Name                       | Default | Dependencies                          | Description                                                                                                                                   |
+|----------------------------|---------|---------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| BUILD_SHARED_LIBS          | ON      | -                                     | Builds `api` and pipeline libraries as shared libraries, else static                                                                          |
+| VN_SDK_SAMPLE_SOURCE       | ON      | -                                     | Install option for packaging the sample code and standalone CMakeLists                                                                        |
+| VN_SDK_API_LAYER           | ON      | -                                     | Some integrations only require the core functionality or cannot use the C++ API                                                               |
+| VN_SDK_EXECUTABLES         | OFF     | ffmpeg libraries, xxhash, cli11, fmt  | Builds the test harness and sample code executables requiring a base decoder. Use this option to enable standalone decoding of LCEVC streams. |
+| VN_SDK_UNIT_TESTS          | OFF     | gtest, range-v3                       | Build the google test unit test executables for each target, for development purposes only                                                    |
+| VN_SDK_JSON_CONFIG         | OFF     | nlohmann_json                         | Allow the API to be configured with a JSON string, required for `VN_SDK_EXECUTABLES`                                                          |
+| VN_SDK_PIPELINE_CPU        | ON      | -                                     | Build the default CPU pipeline                                                                                                                |
+| VN_SDK_PIPELINE_LEGACY     | ON      | -                                     | Build the deprecated legacy pipeline                                                                                                          |
+| VN_SDK_PIPELINE_VULKAN     | OFF     | vulkan-loader, vulkan-header, glslang | Build the experimental Vulkan GPU pipeline                                                                                                    |
+| VN_SDK_DOCS                | OFF     | doxygen, sphinx, plantuml             | Builds formatted HTML documentation for API integration                                                                                       |
+| VN_SDK_COVERAGE            | OFF     | -                                     | Generate gcov code coverage statistics                                                                                                        |
+| VN_SDK_TRACING             | ON      | -                                     | Configurable tracing information recorder for function entry/exit in perfetto format. Required for `trace_file` - CPU pipeline only           |
+| VN_SDK_METRICS             | ON      | -                                     | Configurable metrics recording in perfetto format - CPU pipeline only                                                                         |
+| VN_SDK_DIAGNOSTICS_ASYNC   | ON      | -                                     | Enable asynchronous output of logging, tracing and metrics - CPU pipeline only                                                                |
+| VN_SDK_MAXIMUM_LOG_LEVEL   | VERBOSE | -                                     | Allow log levels down to this level, increase to reduce library sizes significantly                                                           |
+| VN_SDK_WARNINGS_FAIL       | OFF     | -                                     | Enable build flags such as `Werror`, use for development and CI to maintain clean builds                                                      |
+| VN_SDK_BUILD_DETAILS       | OFF     | -                                     | Include build time and origin in libraries - non-reproducible build                                                                           |
+| VN_SDK_SYSTEM_INSTALL      | ON      | -                                     | Gives correct install paths for a Linux system, disable for installing to a portable package                                                  |
+| VN_SDK_FFMPEG_LIBS_PACKAGE | ''      | external ffmpeg package path          | Specify a local path to ffmpeg libraries if they cannot be found via a package manager                                                        |
 
 All build options can be added to the cmake generation step eg. `-DVN_SDK_EXECUTABLES=ON`
 
@@ -50,7 +60,7 @@ cmake --build . --config Release
 cmake --install .
 ```
 
-Libraries, headers and licenses will be packaged in `LCEVCdec/build/install`. A .pc pkg-config file is also installed to `LCEVCdec/build/install/lib/pkgconfig` to use LCEVCdec as a dependency in downstream projects.
+Libraries, headers and licenses will be installed to the system unless `CMAKE_INSTALL_PREFIX` is specified. A .pc pkg-config file is also installed to `<install_prefix>/lib/pkgconfig` to use LCEVCdec as a dependency in downstream projects.
 
 ## Building with executables and unit tests - native
 
@@ -93,6 +103,14 @@ conan install -r conan-center -u --build=missing --settings=build_type=Release .
 cmake -DVN_SDK_EXECUTABLES=ON -DVN_SDK_UNIT_TESTS=ON -DCMAKE_BUILD_TYPE=Release ..
 cmake --build . --config Release
 cmake --install .
+```
+
+## Building with Vulkan
+
+Vulkan is currently an experimental pipeline with limited bitstream support and unoptimised performance however it can easily be built by installing the following APT packages and adding the `-DVN_SDK_PIPELINE_VULKAN=ON` CMake flag to any of the previous instructions.
+
+```shell
+sudo apt-get install -y libvulkan-dev glslang-tools
 ```
 
 Please note that the conan create step builds ffmpeg from source which is non-trivial, please see the [ffmpeg compilation guide](https://trac.ffmpeg.org/wiki/CompilationGuide) for tips. Alternatively you can download these libraries pre-built for your platform from [ffmpeg.org](https://ffmpeg.org/download.html) (ensure they are shared/dynamic libraries) and use `-o base_decoder=manual` in your conan install and `-DVN_SDK_FFMPEG_LIBS_PACKAGE=path/to/downloaded/libav*` in the cmake generation.

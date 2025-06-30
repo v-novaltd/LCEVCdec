@@ -28,4 +28,5 @@ target_compile_options(
               -Wstrict-prototypes
               -Wwrite-strings
               -Wpointer-arith
-              -Wtautological-unsigned-zero-compare)
+              -Wtautological-unsigned-zero-compare
+              -fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.)

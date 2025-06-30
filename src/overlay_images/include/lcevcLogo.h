@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -25,8 +25,8 @@
 
 /* clang-format off */
 
-#ifndef _lcevcLogo_H_
-#define _lcevcLogo_H_
+#ifndef VN_LCEVC_OVERLAY_IMAGES_LCEVCLOGO_H
+#define VN_LCEVC_OVERLAY_IMAGES_LCEVCLOGO_H
 #include "images.h"
 
 #ifdef __cplusplus
@@ -56,6 +56,5 @@ extern "C"
 }
 #endif
 
-#endif /* _lcevcLogo_H_ */
-
 /* clang-format on */
+#endif // VN_LCEVC_OVERLAY_IMAGES_LCEVCLOGO_H

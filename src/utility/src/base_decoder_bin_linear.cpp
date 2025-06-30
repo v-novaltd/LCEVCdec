@@ -13,12 +13,12 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "base_decoder_bin.h"
-#include "LCEVC/lcevc_dec.h"
-#include "LCEVC/utility/base_decoder.h"
-#include "LCEVC/utility/bin_reader.h"
-#include "LCEVC/utility/raw_reader.h"
 
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/lcevc_dec.h>
+#include <LCEVC/utility/base_decoder.h>
+#include <LCEVC/utility/bin_reader.h>
+#include <LCEVC/utility/raw_reader.h>
 
 #include <cstdint>
 #include <map>
@@ -153,7 +153,7 @@ bool BaseDecoderBinLinear::update()
 std::unique_ptr<BaseDecoder> createBaseDecoderBinLinear(std::string_view rawFile, std::string_view binFile)
 {
     auto decoder = std::make_unique<BaseDecoderBinLinear>(rawFile, binFile);
-    if (!decoder || !decoder->isInitialised()) {
+    if (!decoder || !decoder->isInitialized()) {
         return nullptr;
     }
     return decoder;

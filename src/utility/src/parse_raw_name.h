@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -17,7 +17,7 @@
 #ifndef VN_LCEVC_UTILITY_PARSE_RAW_NAME_H
 #define VN_LCEVC_UTILITY_PARSE_RAW_NAME_H
 
-#include "LCEVC/lcevc_dec.h"
+#include <LCEVC/lcevc_dec.h>
 
 #include <string_view>
 
@@ -28,4 +28,4 @@ LCEVC_PictureDesc parseRawName(std::string_view name, float& rate);
 
 } // namespace lcevc_dec::utility
 
-#endif
+#endif // VN_LCEVC_UTILITY_PARSE_RAW_NAME_H

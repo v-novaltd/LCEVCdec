@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -13,33 +13,21 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 // This file primarily serves as a way to convert between public-facing API constants/types and
-// internal ones. Consequently, do NOT add `#include "lcevc_dec.h"` to this header: the idea is
-// that other files access lcevc_dec.h THROUGH these functions, enums, etc.
-
-#ifndef VN_API_INTERFACE_H_
-#define VN_API_INTERFACE_H_
-
-#include "handle.h"
+// internal pipeline ones.
+//
+#ifndef VN_LCEVC_API_INTERFACE_H
+#define VN_LCEVC_API_INTERFACE_H
 
 #include <LCEVC/lcevc_dec.h>
-
-#include <cstdint>
-
-// - Forward declarations (external) --------------------------------------------------------------
-
-struct LCEVC_DecodeInformation;
-struct LCEVC_HDRStaticInfo;
-struct LCEVC_PictureDesc;
-struct LCEVC_PictureBufferDesc;
-struct LCEVC_PicturePlaneDesc;
+#include <LCEVC/pipeline/picture.h>
+#include <LCEVC/pipeline/types.h>
+//
 
 struct perseus_decoder_stream;
 
 // - Forward declarations (internal) --------------------------------------------------------------
 
 namespace lcevc_dec::decoder {
-
-class AccelBuffer;
 class Decoder;
 class Picture;
 } // namespace lcevc_dec::decoder
@@ -48,87 +36,72 @@ class Picture;
 
 namespace lcevc_dec::decoder {
 
-bool equals(const LCEVC_HDRStaticInfo& lhs, const LCEVC_HDRStaticInfo& rhs);
-
-// Replicates LCEVC_DecodeInformation
-struct DecodeInformation
+// LCEVC_ struct helpers
+//
+// These deliberately cast between two compatible C structures (API and internal pipeline).
+// The tests  in`test_pipeline_types.cpp` makes sure these stay in line.
+//
+// It is expected that the internal structures and enums will gain trailing memebers as the code evolves.
+//
+static inline LdpPictureDesc* toLdpPictureDescPtr(LCEVC_PictureDesc* ptr)
 {
-    explicit constexpr DecodeInformation(int64_t timestampIn, bool skippedIn)
-        : timestamp(timestampIn)
-        , skipped(skippedIn)
-    {}
-    DecodeInformation(const Picture& base, bool lcevcAvailable, bool shouldPassthrough, bool shouldFail);
-    int64_t timestamp;
-    bool hasBase = false;
-    bool hasEnhancement = false;
-    bool skipped;
-    bool enhanced = false;
+    return reinterpret_cast<LdpPictureDesc*>(ptr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+}
 
-    uint32_t baseWidth = 0;
-    uint32_t baseHeight = 0;
-    uint8_t baseBitdepth = 0;
-
-    void* userData = nullptr;
-};
-
-// To store sample_aspect_ratio_num and sample_aspect_ratio_den
-struct AspectRatio
+static inline const LdpPictureDesc* toLdpPictureDescPtr(const LCEVC_PictureDesc* ptr)
 {
-    uint32_t numerator;
-    uint32_t denominator;
-};
+    return reinterpret_cast<const LdpPictureDesc*>(ptr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+}
 
-// Bitdepth is "bits per channel" where R, G, and B are channels, and so are Y, U, and V.
-uint32_t bitdepthFromLCEVCDescColorFormat(int32_t descColorFormat);
-
-// Helpers for LCEVC_PictureDesc
-bool equals(const LCEVC_PictureDesc& lhs, const LCEVC_PictureDesc& rhs);
-bool coreFormatToLCEVCPictureDesc(const perseus_decoder_stream& coreFormat, LCEVC_PictureDesc& picDescOut);
-
-// Replicates LCEVC_Access
-enum class Access
+static inline LdpPictureBufferDesc* toLdpPictureBufferDescPtr(LCEVC_PictureBufferDesc* ptr)
 {
-    Unknown = 0,
-    Read = 1,
-    Modify = 2,
-    Write = 3,
-};
+    return reinterpret_cast<LdpPictureBufferDesc*>(ptr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+}
 
-// Replicates LCEVC_PictureBufferDesc
-struct PictureBufferDesc
+static inline const LdpPictureBufferDesc* toLdpPictureBufferDescPtr(const LCEVC_PictureBufferDesc* ptr)
 {
-    uint8_t* data = nullptr;
-    uint32_t byteSize = 0;
-    Handle<AccelBuffer> accelBuffer = kInvalidHandle;
-    int32_t access = 0;
-};
-bool equals(const LCEVC_PictureBufferDesc& lhs, const LCEVC_PictureBufferDesc& rhs);
-void fromLCEVCPictureBufferDesc(const LCEVC_PictureBufferDesc& lcevcPictureBufferDesc,
-                                PictureBufferDesc& pictureBufferDescOut);
-void toLCEVCPictureBufferDesc(const PictureBufferDesc& pictureBufferDesc,
-                              LCEVC_PictureBufferDesc& lcevcPictureBufferDescOut);
+    return reinterpret_cast<const LdpPictureBufferDesc*>(ptr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+}
 
-// Replicates LCEVC_PicturePlaneDesc
-struct PicturePlaneDesc
+static inline LdpPicturePlaneDesc* toLdpPicturePlaneDescPtr(LCEVC_PicturePlaneDesc* ptr)
 {
-    uint8_t* firstSample = nullptr;
-    uint32_t rowByteStride = 0;
-};
-bool equals(const LCEVC_PicturePlaneDesc& lhs, const LCEVC_PicturePlaneDesc& rhs);
-void fromLCEVCPicturePlaneDesc(const LCEVC_PicturePlaneDesc& lcevcPicturePlaneDesc,
-                               PicturePlaneDesc& picturePlaneDescOut);
-void toLCEVCPicturePlaneDesc(const PicturePlaneDesc& picturePlaneDesc,
-                             LCEVC_PicturePlaneDesc& lcevcPicturePlaneDescOut);
+    return reinterpret_cast<LdpPicturePlaneDesc*>(ptr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+}
 
-// Helpers for perseus_interleaving and perseus_bitdepth
-bool toCoreInterleaving(const LCEVC_ColorFormat format, bool interleaved, int32_t& interleavingOut);
-bool toCoreBitdepth(uint8_t val, int32_t& out);
-bool fromCoreBitdepth(const int32_t& val, uint8_t& out);
+static inline const LdpPicturePlaneDesc* toLdpPicturePlaneDescPtr(const LCEVC_PicturePlaneDesc* ptr)
+{
+    return reinterpret_cast<const LdpPicturePlaneDesc*>(ptr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+}
 
-// Closely mirrors LCEVC_EventCallback (though not exactly: enums are replaced with ints)
-using EventCallback = void (*)(Handle<Decoder>, int32_t, Handle<Picture>,
-                               const LCEVC_DecodeInformation*, const uint8_t*, uint32_t, void*);
+static inline LdpDecodeInformation* toLdpDecodeInformationPtr(LCEVC_DecodeInformation* ptr)
+{
+    return reinterpret_cast<LdpDecodeInformation*>(ptr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+}
+
+static inline LCEVC_DecodeInformation* fromLdpDecodeInformationPtr(LdpDecodeInformation* ptr)
+{
+    return reinterpret_cast<LCEVC_DecodeInformation*>(ptr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+}
+
+static inline const LdpDecodeInformation* toLdpDecodeInformationPtr(const LCEVC_DecodeInformation* ptr)
+{
+    return reinterpret_cast<const LdpDecodeInformation*>(ptr); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+}
+
+// LCEVC_ enum helpers
+//
+// Not strictly necessary, but makes is clear what is going on.
+//
+static inline LdpColorFormat toLdpColorFormat(LCEVC_ColorFormat format)
+{
+    return static_cast<LdpColorFormat>(format);
+}
+static inline LCEVC_ReturnCode fromLdcReturnCode(LdcReturnCode returnCode)
+{
+    return static_cast<LCEVC_ReturnCode>(returnCode);
+}
+static inline LdpAccess toLdpAccess(LCEVC_Access access) { return static_cast<LdpAccess>(access); }
 
 } // namespace lcevc_dec::decoder
 
-#endif // VN_API_INTERFACE_H_
+#endif // VN_LCEVC_API_INTERFACE_H

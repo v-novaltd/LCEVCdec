@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -16,21 +16,15 @@
 //
 #include "hash.h"
 //
-#include "LCEVC/lcevc_dec.h"
-#include "LCEVC/utility/check.h"
-#include "LCEVC/utility/md5.h"
-#include "LCEVC/utility/picture_lock.h"
+#include <LCEVC/utility/check.h>
+#include <LCEVC/utility/md5.h>
+#include <LCEVC/utility/picture_lock.h>
 //
 #include <fmt/core.h>
 #include <fmt/ostream.h>
 #include <xxhash.h>
 //
-#include <cstdio>
-#include <cstdlib>
-#include <exception>
 #include <memory>
-#include <string>
-#include <string_view>
 
 // ------------------------------------------------------------------------------------------------
 
@@ -125,7 +119,7 @@ Hashes::~Hashes()
             fmt::print(*m_fileOut, "{{\n    \"base\":\"{}\",\n    \"high\":\"{}\"\n}}\n",
                        m_base->hexDigest(), m_high->hexDigest());
         } catch (const std::exception&) {
-            printf("Failed to write out hashes\n");
+            fmt::print(stderr, "Failed to write out hashes\n");
         }
     }
 }

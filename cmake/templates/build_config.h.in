@@ -20,12 +20,13 @@
 
     ----------------------------------------------------------------------------
 
-    VN_OS:                  Use for target OS testing
-    VN_ARCH:                Use for target architecture testing
-    VN_COMPILER:            Use for host compiler testing
-    VN_VARIANT:             Use for build variant testing
-    VN_CORE_FEATURE:        Use for core codec specific feature testing
-    VN_SDK_FEATURE:         Use for general SDK feature testing
+    VN_OS:                  Target OS testing
+    VN_ARCH:                Target architecture testing
+    VN_COMPILER:            Host compiler testing
+    VN_CONFIG:              Build configuration testing
+    VN_SDK_FEATURE:         General SDK feature testing
+    VN_SDK_PIPELINE:        SDK pipeline toggles
+    VN_CORE_FEATURE:        Legacy core codec specific feature testing
 
     ----------------------------------------------------------------------------
 
@@ -36,6 +37,7 @@
         IOS
         TVOS
         MACOS
+        APPLE - Set for any Apple target
         BROWSER
 
     Available `VN_ARCH` values:
@@ -53,13 +55,23 @@
         GCC
         MSVC
 
-    Available `VN_VARIANT` values:
+    Available `VN_CONFIG` values:
         DEBUG
         RELEASE
 
     Available `VN_SDK_FEATURE` values:
         BASE_DECODER
+        TRACING
+        METRICS
+        DIAGNOSTICS_ASYNC
+        THREADS_CUSTOM
+        MAXIMUM_LOG_LEVEL
         BUILD_DETAILS
+
+    Available `VN_SDK_PIPELINE` values:
+        CPU
+        VULKAN
+        LEGACY
 
     Available `VN_CORE_FEATURE` values:
         DEBUG_SYNTAX
@@ -73,10 +85,6 @@
         WINTHREADS
         EMSCRIPTEN_TRACING
         EMSCRIPTEN_PTHREADS
-
-    Available `VN_INTEGRATION_FEATURE` values:
-        OPENGL
-        WEBM
 
     ----------------------------------------------------------------------------
 
@@ -175,9 +183,9 @@
 #define VN_ARCH(x)                  VN_ARCH_PRIVATE_DEF_##x()
 #define VN_COMPILER(x)              VN_COMPILER_PRIVATE_DEF_##x()
 #define VN_VARIANT(x)               VN_VARIANT_PRIVATE_DEF_##x()
-#define VN_CORE_FEATURE(x)          VN_CORE_FEATURE_PRIVATE_DEF_##x()
-#define VN_INTEGRATION_FEATURE(x)   VN_INTEGRATION_FEATURE_PRIVATE_DEF_##x()
 #define VN_SDK_FEATURE(x)           VN_SDK_FEATURE_PRIVATE_DEF_##x()
+#define VN_SDK_PIPELINE(x)          VN_SDK_PIPELINE_PRIVATE_DEF_##x()
+#define VN_CORE_FEATURE(x)          VN_CORE_FEATURE_PRIVATE_DEF_##x()
 
 /* Universal utility macro */
 #define VN_UNUSED(x) (void)(x)
@@ -202,8 +210,8 @@
 #endif
 
 #if defined(__APPLE__) && defined(__MACH__)
-//#include <TargetConditionals.h>
 
+#define VN_OS_PRIVATE_DEF_APPLE() 1
 #if __is_target_os(ios)
     #define VN_OS_PRIVATE_DEF_IOS() 1
 #else
@@ -222,7 +230,8 @@
     #define VN_OS_PRIVATE_DEF_MACOS() 0
 #endif
 #else
-#define VN_OS_PRIVATE_DEF_TVOS()   0
+#define VN_OS_PRIVATE_DEF_APPLE() 0
+#define VN_OS_PRIVATE_DEF_TVOS()  0
 #define VN_OS_PRIVATE_DEF_IOS()   0
 #define VN_OS_PRIVATE_DEF_MACOS() 0
 #endif
@@ -303,25 +312,31 @@
 
 /* Core library feature values */
 #define VN_CORE_FEATURE_PRIVATE_DEF_OVERLAY_IMAGE() VN_@VN_CORE_OVERLAY_IMAGE@
-#define VN_CORE_FEATURE_PRIVATE_DEF_FORCE_OVERLAY() VN_@VN_CORE_FORCE_OVERLAY@
-#define VN_CORE_FEATURE_PRIVATE_DEF_SIMD() VN_@VN_CORE_SIMD@
+#define VN_CORE_FEATURE_PRIVATE_DEF_FORCE_OVERLAY() VN_@VN_SDK_FORCE_OVERLAY@
+#define VN_CORE_FEATURE_PRIVATE_DEF_SIMD() VN_@VN_SDK_SIMD@
 
 #if (VN_CORE_FEATURE(SIMD) && (defined(__SSE__) || _M_IX86_FP > 0 || (VN_COMPILER(MSVC) && VN_ARCH(X64))))
-#define VN_CORE_FEATURE_PRIVATE_DEF_SSE() VN_@VN_CORE_SSE@
+#define VN_CORE_FEATURE_PRIVATE_DEF_SSE() VN_@VN_SDK_SSE@
+#define VN_SDK_FEATURE_PRIVATE_DEF_SSE() VN_@VN_SDK_SSE@
 #else
 #define VN_CORE_FEATURE_PRIVATE_DEF_SSE() 0
+#define VN_SDK_FEATURE_PRIVATE_DEF_SSE() 0
 #endif
 
 #if (VN_CORE_FEATURE(SIMD) && defined(__AVX2__))
-#define VN_CORE_FEATURE_PRIVATE_DEF_AVX2() VN_@VN_CORE_AVX2@
+#define VN_CORE_FEATURE_PRIVATE_DEF_AVX2() VN_@VN_SDK_AVX2@
+#define VN_SDK_FEATURE_PRIVATE_DEF_AVX2() VN_@VN_SDK_AVX2@
 #else
 #define VN_CORE_FEATURE_PRIVATE_DEF_AVX2() 0
+#define VN_SDK_FEATURE_PRIVATE_DEF_AVX2() 0
 #endif
 
 #if (VN_CORE_FEATURE(SIMD) && defined(__ARM_NEON))
-#define VN_CORE_FEATURE_PRIVATE_DEF_NEON() VN_@VN_CORE_NEON@
+#define VN_CORE_FEATURE_PRIVATE_DEF_NEON() VN_@VN_SDK_NEON@
+#define VN_SDK_FEATURE_PRIVATE_DEF_NEON() VN_@VN_SDK_NEON@
 #else
 #define VN_CORE_FEATURE_PRIVATE_DEF_NEON() 0
+#define VN_SDK_FEATURE_PRIVATE_DEF_NEON() 0
 #endif
 
 #if (VN_OS(BROWSER) && defined(__EMSCRIPTEN_TRACING__))
@@ -330,7 +345,7 @@
 #define VN_CORE_FEATURE_PRIVATE_DEF_EMSCRIPTEN_TRACING() 0
 #endif
 
-#define VN_CORE_FEATURE_PRIVATE_DEF_THREADING() VN_@VN_CORE_THREADING@
+#define VN_CORE_FEATURE_PRIVATE_DEF_THREADING() VN_@VN_SDK_THREADING@
 
 #if (VN_OS(BROWSER) && defined(__EMSCRIPTEN_PTHREADS__))
 #define VN_CORE_FEATURE_PRIVATE_DEF_EMSCRIPTEN_PTHREADS() 1
@@ -350,9 +365,38 @@
 #define VN_CORE_FEATURE_PRIVATE_DEF_WINTHREADS() 0
 #endif
 
+/* Pipelines */
+#define VN_SDK_PIPELINE_PRIVATE_DEF_CPU() VN_@VN_SDK_PIPELINE_CPU@
+#define VN_SDK_PIPELINE_PRIVATE_DEF_LEGACY() VN_@VN_SDK_PIPELINE_LEGACY@
+#define VN_SDK_PIPELINE_PRIVATE_DEF_VULKAN() VN_@VN_SDK_PIPELINE_VULKAN@
+
 /* General SDK features */
 #define VN_SDK_FEATURE_PRIVATE_DEF_BASE_DECODER() VN_@VN_SDK_BASE_DECODER@
+#define VN_SDK_FEATURE_PRIVATE_DEF_TRACING() VN_@VN_SDK_TRACING@
+#define VN_SDK_FEATURE_PRIVATE_DEF_METRICS() VN_@VN_SDK_METRICS@
+#define VN_SDK_FEATURE_PRIVATE_DEF_DIAGNOSTICS_ASYNC()  VN_@VN_SDK_DIAGNOSTICS_ASYNC@
+#define VN_SDK_FEATURE_PRIVATE_DEF_THREADS_CUSTOM()  VN_@VN_SDK_THREADS_CUSTOM@
 #define VN_SDK_FEATURE_PRIVATE_DEF_BUILD_DETAILS() VN_@VN_SDK_BUILD_DETAILS@
+
+/* Logging */
+#define VN_SDK_LOG_ENABLE_@VN_SDK_MAXIMUM_LOG_LEVEL@ 1
+
+/* Make sure all log levels below highest are enabled */
+#ifdef VN_SDK_LOG_ENABLE_VERBOSE
+#define VN_SDK_LOG_ENABLE_DEBUG
+#endif
+#ifdef VN_SDK_LOG_ENABLE_DEBUG
+#define VN_SDK_LOG_ENABLE_INFO
+#endif
+#ifdef VN_SDK_LOG_ENABLE_INFO
+#define VN_SDK_LOG_ENABLE_WARNING
+#endif
+#ifdef VN_SDK_LOG_ENABLE_WARNING
+#define VN_SDK_LOG_ENABLE_ERROR
+#endif
+#ifdef VN_SDK_LOG_ENABLE_ERROR
+#define VN_SDK_LOG_ENABLE_FATAL
+#endif
 
 /* clang-format on */
 

@@ -24,8 +24,5 @@ target_link_libraries(lcevc_dec_api_utility PUBLIC lcevc_dec::platform lcevc_dec
 
 add_library(lcevc_dec::api_utility ALIAS lcevc_dec_api_utility)
 
-include(GNUInstallDirs)
-
-install(TARGETS lcevc_dec_api_utility DESTINATION lib)
-install(FILES ${INTERFACES} DESTINATION include/LCEVC/api_utility)
-install(FILES ${SOURCES} ${HEADERS} DESTINATION ${CMAKE_INSTALL_DOCDIR}/src/api_utility)
+lcevc_install(lcevc_dec_api_utility)
+install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/api_utility")

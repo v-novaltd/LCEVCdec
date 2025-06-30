@@ -25,7 +25,7 @@ target_link_libraries(lcevc_dec_sample lcevc_dec::api lcevc_dec::api_utility lce
 
 add_executable(lcevc_dec::sample ALIAS lcevc_dec_sample)
 
-install(TARGETS "lcevc_dec_sample" DESTINATION "bin")
+install(TARGETS "lcevc_dec_sample")
 
 if (VN_SDK_SAMPLE_SOURCE)
     include(GNUInstallDirs)

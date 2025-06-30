@@ -14,9 +14,12 @@
 import os.path
 import re
 
-from test_functions.core_hash import Test as CoreTest
+from test_functions.harness_hash import Test as CoreTest
 from utilities.config import logger, config
 from utilities.runner import ADB_PLATFORMS
+from utilities.assets import get_encode
+
+CONTENT_FRAME_RATE = 30
 
 
 class Test(CoreTest):
@@ -28,9 +31,19 @@ class Test(CoreTest):
             temperature = self.get_device_temperature()
             self.record_result('pre_test_temperature', temperature)
 
-        test['cli']['--read-bin-linearly'] = 'FLAG'
+        if test['cli'].get('--base'):
+            test['cli']['--read-bin-linearly'] = 'FLAG'
         process = super().test(test, test_dir)
         output = process.stdout.decode('utf-8')
+
+        # Extract bitrate
+        encode_path = get_encode(test['erp'])
+        file_size = os.path.getsize(encode_path)
+        if test['erp'].get('--input'):
+            get_frame_number_match = re.search(r'_(\d+)f\.yuv$', test['erp'].get('--input'))
+            total_frames = int(get_frame_number_match.group(1))
+            bitrate = (file_size * CONTENT_FRAME_RATE * 8) / (total_frames * 1024)
+            self.record_result('bitrate', bitrate)
 
         # Extracting latency and throughput from the output from core
         logger.debug("Extracting Avg latency and throughput")

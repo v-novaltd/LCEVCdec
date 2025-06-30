@@ -1,9 +1,9 @@
-# Minimised Doxygen config for LCEVC_DEC Sphinx documentation
+# Minimized Doxygen config for LCEVCdec Sphinx documentation
 # Generated for Doxygen version 1.9.6
 
-PROJECT_NAME           = "LCEVC_DEC"
-OUTPUT_DIRECTORY       = "@DOXYGEN_OUTPUT_DIR@"
-INPUT                  = "@DOXYGEN_INPUT@"
+PROJECT_NAME           = LCEVCdec
+OUTPUT_DIRECTORY       = @DOXYGEN_OUTPUT_DIR@
+INPUT                  = @DOXYGEN_INPUT@
 
 # Turn off ugly HTML and enable XML as required for Sphinx
 GENERATE_XML           = YES

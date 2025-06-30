@@ -3,6 +3,7 @@
 *.cmake text eol=lf
 *.cpp text eol=lf
 *.glsl text eol=lf
+*.comp text eol=lf
 *.h text eol=lf
 *.ini text eol=lf
 *.js text eol=lf

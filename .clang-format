@@ -1,3 +1,6 @@
+# (c) 2025 V-Nova International. All rights reserved.  
+# Licensed under the Creative Commons Attribution 4.0 International (CC BY 4.0).
+
 Standard: c++17
 
 ColumnLimit: 100
@@ -15,22 +18,22 @@ ReflowComments: true
 BreakBeforeBraces: Custom
 BreakBeforeBinaryOperators: false
 BraceWrapping:
-    AfterCaseLabel: false
-    AfterClass: true
-    AfterControlStatement: false
-    AfterEnum: true
-    AfterExternBlock: true
-    AfterFunction: true
-    AfterNamespace: false
-    AfterStruct: true
-    AfterUnion: true
-    BeforeCatch: false
-    BeforeElse: false
-    BeforeLambdaBody: false
-    BeforeWhile: false
-    IndentBraces: false
-    SplitEmptyFunction: false
-    SplitEmptyRecord: false
+  AfterCaseLabel: false
+  AfterClass: true
+  AfterControlStatement: false
+  AfterEnum: true
+  AfterExternBlock: true
+  AfterFunction: true
+  AfterNamespace: false
+  AfterStruct: true
+  AfterUnion: true
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
 
 # InsertBraces: true
 LambdaBodyIndentation: Signature

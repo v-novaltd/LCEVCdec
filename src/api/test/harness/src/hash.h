@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,10 +14,10 @@
 
 // Abstract base class and factory for hash mechanisms.
 //
-#ifndef VN_LCEVC_TEST_HARNESS_HASH_H
-#define VN_LCEVC_TEST_HARNESS_HASH_H
+#ifndef VN_LCEVC_API_HASH_H
+#define VN_LCEVC_API_HASH_H
 
-#include "LCEVC/lcevc_dec.h"
+#include <LCEVC/lcevc_dec.h>
 
 #include <cstdint>
 #include <fstream>
@@ -56,6 +56,11 @@ public:
     {}
     ~Hashes();
 
+    Hashes(const Hashes&) = delete;
+    Hashes& operator=(const Hashes&) = delete;
+    Hashes(Hashes&&) = delete;
+    Hashes& operator=(Hashes&&) = delete;
+
     int initBaseAndHigh(std::string_view outputHashFilename);
     void initOpl(std::string_view outputOplFile);
 
@@ -72,4 +77,4 @@ private:
     std::unique_ptr<std::ofstream> m_oplFileOut;
 };
 
-#endif
+#endif // VN_LCEVC_API_HASH_H

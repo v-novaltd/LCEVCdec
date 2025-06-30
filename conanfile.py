@@ -32,6 +32,7 @@ class LCEVCDecoderSDK(ConanFile):
         "shared": [True, False],
         "executables": [True, False],
         "unit_tests": [True, False],
+        "vulkan": [True, False],
         "utility": [True, False],
         "benchmark": [True, False],
         "simd": [True, False],
@@ -87,6 +88,14 @@ class LCEVCDecoderSDK(ConanFile):
             else:
                 self.options.base_decoder = "none"
 
+        if self.options.vulkan == None:
+            if self.settings.os in ["Windows", "Linux"]:
+                self.options.vulkan = True
+            elif self.settings.os == "Android" and int(self.settings.os.api_level.value) >= 28:
+                self.options.vulkan = True
+            else:
+                self.options.vulkan = False
+
         # Install test dependencies if installing in dev dir
         if self.options.unit_tests == None:
             self.options.unit_tests = not self.in_local_cache and self.can_have_executables()
@@ -127,8 +136,7 @@ class LCEVCDecoderSDK(ConanFile):
             self.options['ffmpeg'].with_programs = False
 
     def requirements(self):
-        """ Add build requirements based on options and settings.
-        """
+        # Add requirements based on options and settings
         reqs = list()
 
         if self.options.benchmark:
@@ -150,19 +158,24 @@ class LCEVCDecoderSDK(ConanFile):
             if self.options.unit_tests:
                 reqs.extend(['gtest/1.12.1', 'range-v3/0.12.0'])
 
+        if self.options.vulkan and self.settings.os != "Android":
+            reqs.extend(['vulkan-loader/1.3.255', 'vulkan-headers/1.3.255'])
+
         for package in reqs:
             self.requires(package)
 
+    def build_requirements(self):
+        if self.options.vulkan:
+            self.tool_requires('glslang/11.7.0')
+
     def set_version(self):
-        """ Extract version from git
-        """
+        # Extract version from git
         self._get_git_info()
         self.version = self.git_short_version
 
     def _get_git_info(self):
-        """Add git info to exported sources.
-        Will be picked up by version file generation tools instead of running git.
-        """
+        # Add git info to exported sources.
+        # Will be picked up by version file generation tools instead of running git.
         if os.path.exists(os.path.join(self.recipe_folder, '.git')):
             git = Git(self)
             # Only consider tags of form [dev]<digits>.<digits>.<digits>...
@@ -217,6 +230,7 @@ class LCEVCDecoderSDK(ConanFile):
         cmake.variables["VN_SDK_SAMPLE_SOURCE"] = False
         cmake.variables["VN_SDK_UNIT_TESTS"] = self.options.unit_tests
         cmake.variables["VN_SDK_EXECUTABLES"] = self.options.executables
+        cmake.variables["VN_SDK_PIPELINE_VULKAN"] = self.options.vulkan
         cmake.variables["VN_SDK_API_LAYER"] = self.options.api_layer
         cmake.variables["VN_CORE_BENCHMARK"] = self.options.benchmark
         cmake.variables["VN_CORE_SIMD"] = self.options.simd
@@ -250,7 +264,6 @@ class LCEVCDecoderSDK(ConanFile):
         cmake.install()
 
     def package_info(self):
-
         # Core
         self.cpp_info.components["core"].libs = ["lcevc_dec_core"]
         if not self.options.shared:
@@ -262,9 +275,14 @@ class LCEVCDecoderSDK(ConanFile):
         # Utilities
         if self.options.api_layer:
             self.cpp_info.components["utility"].libs = ["lcevc_dec_utility"]
+            self.cpp_info.components["api_utility"].libs = ["lcevc_dec_api_utility"]
+
+        # Extract
+        if self.options.api_layer:
+            self.cpp_info.components["extract"].libs = ["lcevc_dec_extract"]
 
         # API
         if self.options.api_layer:
             self.cpp_info.components["api"].libs = ["lcevc_dec_api"]
             if not self.options.shared:
-                self.cpp_info.components["api"].requires = ["utility"]
+                self.cpp_info.components["api"].requires = ["utility", "api_utility", "extract"]

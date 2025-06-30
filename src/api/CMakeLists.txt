@@ -22,7 +22,20 @@ lcevc_version_files(
     cpp)
 include("Sources.cmake")
 
-# lcevc_api (for normal client usage)
+# Required libraries
+# -------------------------------------------------------------------------------------------------
+
+set(PRIVATE_LIBRARIES
+    lcevc_dec::api_utility
+    lcevc_dec::api_version
+    lcevc_dec::common
+    lcevc_dec::pipeline
+    $<$<BOOL:${VN_SDK_PIPELINE_CPU}>:lcevc_dec::pipeline_cpu>
+    $<$<BOOL:${VN_SDK_PIPELINE_LEGACY}>:lcevc_dec::pipeline_legacy>
+    $<$<BOOL:${VN_SDK_PIPELINE_VULKAN}>:lcevc_dec::pipeline_vulkan>)
+
+# Linked lcevc_api (for normal client usage)
+# -------------------------------------------------------------------------------------------------
 
 add_library(lcevc_dec_api ${SOURCES} ${HEADERS} ${INTERFACES})
 add_library(lcevc_dec::api ALIAS lcevc_dec_api)
@@ -33,35 +46,23 @@ target_include_directories(
     PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
     PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
 
-target_link_libraries(
-    lcevc_dec_api
-    PUBLIC lcevc_dec::core lcevc_dec::sequencing
-    PRIVATE lcevc_dec::api_utility lcevc_dec::api_version)
+target_link_libraries(lcevc_dec_api PRIVATE "${PRIVATE_LIBRARIES}")
 
-# lcevc_api_static (for unit tests)
+# Static lcevc_api_static (for unit tests)
+# -------------------------------------------------------------------------------------------------
+if (VN_SDK_UNIT_TESTS)
+    add_library(lcevc_dec_api_static STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
+    add_library(lcevc_dec::api_static ALIAS lcevc_dec_api_static)
+    lcevc_set_properties(lcevc_dec_api_static)
 
-add_library(lcevc_dec_api_static STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
-add_library(lcevc_dec::api_static ALIAS lcevc_dec_api_static)
-lcevc_set_properties(lcevc_dec_api_static)
+    target_include_directories(lcevc_dec_api_static PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
+                                                           "${CMAKE_CURRENT_LIST_DIR}/src")
 
-target_include_directories(lcevc_dec_api_static PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
-                                                       "${CMAKE_CURRENT_LIST_DIR}/src")
-
-target_link_libraries(
-    lcevc_dec_api_static
-    PUBLIC lcevc_dec::core lcevc_dec::sequencing
-    PRIVATE lcevc_dec::api_utility lcevc_dec::api_version)
-
-# Installation.
-#
-
-include(GNUInstallDirs)
-
-get_target_property(IS_APPLE_FRAMEWORK lcevc_dec_api FRAMEWORK)
-if (IS_APPLE_FRAMEWORK)
-    install(TARGETS lcevc_dec_api DESTINATION lib)
-else ()
-    install(TARGETS lcevc_dec_api)
+    target_link_libraries(lcevc_dec_api_static PRIVATE "${PRIVATE_LIBRARIES}")
 endif ()
 
-install(FILES ${INTERFACES} DESTINATION "include/LCEVC")
+# Installation
+# -------------------------------------------------------------------------------------------------
+
+lcevc_install(lcevc_dec_api)
+install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC")

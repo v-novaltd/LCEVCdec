@@ -4,6 +4,9 @@ includedir=${prefix}/include
 
 Name: lcevc_dec
 Description: LCEVC Decoder SDK
+URL: https://github.com/v-novaltd/LCEVCdec
 Version: @GIT_SHORT_VERSION@
-Libs: -L"${libdir}" @PC_EXTRA_LIBS@ -llcevc_dec_utility -llcevc_dec_api_utility -llcevc_dec_api -llcevc_dec_core -llcevc_dec_core_sequencing
+Libs: -L"${libdir}" @PC_LIBS@
 Cflags: -I"${includedir}"
+@PC_LIBS_PRIVATE@
+@PC_REQUIRES_PRIVATE@

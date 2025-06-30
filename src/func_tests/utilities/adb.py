@@ -24,7 +24,7 @@ from utilities.config import config, logger
 IP_REGEX = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{3,4}$"
 
 
-def initialise_adb_device():
+def initialize_adb_device():
     logger.info(f"Initialising ADB device {config.get('PLATFORM')}...")
     start_time = time.perf_counter()
     process = run_adb(['devices'])
@@ -71,9 +71,10 @@ def initialise_adb_device():
     for artifact_dir in ('bin', 'lib', '3rdparty'):
         host_dir = os.path.join(host_build_path, artifact_dir)
         if os.path.exists(host_dir):
-            run_adb(['push', host_dir, f'{ADBRunner.BUILD_DIR}/{artifact_dir}'], assert_rc=True, timeout=600)
+            run_adb(
+                ['push', host_dir, f'{ADBRunner.BUILD_DIR}/{artifact_dir}'], assert_rc=True, timeout=600)
     run_adb(['shell', f'chmod +x {ADBRunner.BUILD_DIR}/bin/*'])
-    logger.info(f"Initialised Android device in {time.perf_counter() - start_time:.3f}s")
+    logger.info(f"Initialized Android device in {time.perf_counter() - start_time:.3f}s")
 
 
 def run_adb(cmd, assert_rc=False, timeout=60):

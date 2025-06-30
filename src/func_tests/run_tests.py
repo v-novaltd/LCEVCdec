@@ -19,12 +19,12 @@ import platform
 import multiprocessing as mp
 
 import test_functions
-from utilities.adb import initialise_adb_device
+from utilities.adb import initialize_adb_device
 from utilities.assets import get_bases, herp_is_accessible, download_assets_externally
 from utilities.config import config, logger
 from utilities.load_tests import load_tests
-from utilities.ltm import initialise_ltm
-from utilities.paths import initialise_tempdirs, get_tempdir
+from utilities.ltm import initialize_ltm
+from utilities.paths import initialize_tempdirs, get_tempdir
 from utilities.results import dump_results, save_regenerated_hashes
 from utilities.runner import ADB_PLATFORMS
 
@@ -34,8 +34,8 @@ def setup_tests_get_threads(test_definitions):
         logger.info("No tests are enabled, exiting with success")
         quit(0)
     if config.getboolean('REGEN'):
-        initialise_ltm()
-    initialise_tempdirs()
+        initialize_ltm()
+    initialize_tempdirs()
     assert os.path.exists(config.get('BIN_DIR')), \
         f"Specified binary dir '{config.get('BIN_DIR')}' doesn't exist"
     if config.getboolean('ENABLE_VALGRIND'):
@@ -49,7 +49,7 @@ def setup_tests_get_threads(test_definitions):
     if config.get('PLATFORM') in ADB_PLATFORMS:
         assert not config.getboolean('ENABLE_VALGRIND'), \
             "Valgrind option is not available on Android tests"
-        initialise_adb_device()
+        initialize_adb_device()
         if threads > 1:
             threads = 1
             logger.warning("An Android platform is selected so tests are forced single threaded")

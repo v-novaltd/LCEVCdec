@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,52 +14,79 @@
 
 #define VNEnablePublicAPIExport
 
-#include "accel_context.h"
-#include "decoder.h"
-#include "decoder_pool.h"
-#include "handle.h"
-#include "picture.h"
-#include "picture_lock.h"
-#include "pool.h"
-
+#include <LCEVC/common/acceleration.h>
+#include <LCEVC/common/constants.h>
+#include <LCEVC/common/log.h>
+#include <LCEVC/common/platform.h>
 #include <LCEVC/lcevc_dec.h>
-
+#include <LCEVC/pipeline/picture.h>
+#include <LCEVC/pipeline/types.h>
+//
+#include "decoder_context.h"
+#include "event_dispatcher.h"
+#include "handle.h"
+#include "interface.h"
+#include "pool.h"
+//
+#include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
-// ------------------------------------------------------------------------------------------------
-
 using namespace lcevc_dec::decoder;
+using namespace lcevc_dec;
 
-// - Helper functions -----------------------------------------------------------------------------
+// - API Functions --------------------------------------------------------------------------------
 
-LCEVC_ReturnCode getLockAndCheckDecoder(bool shouldBeInitialised, const Handle<Decoder>& decHandle,
-                                        Decoder*& decoderOut,
-                                        std::unique_ptr<std::lock_guard<std::mutex>>& lockOut)
+// Decoder lifetime
+
+LCEVC_API LCEVC_ReturnCode LCEVC_CreateDecoder(LCEVC_DecoderHandle* decHandle,
+                                               LCEVC_AccelContextHandle accelContext)
 {
-    if (decHandle == kInvalidHandle) {
+    if (decHandle == nullptr) {
         return LCEVC_InvalidParam;
     }
 
-    lockOut = std::make_unique<std::lock_guard<std::mutex>>(DecoderPool::get().lookupMutex(decHandle));
-    decoderOut = DecoderPool::get().lookup(decHandle);
-    if (decoderOut == nullptr) {
-        // If it's null and we expect it to be initialized, report the error as "uninitialized",
-        // although a more accurate error would really be "uncreated".
-        return (shouldBeInitialised ? LCEVC_Uninitialized : LCEVC_InvalidParam);
-    }
+    ldcDiagnosticsInitialize(NULL);
+    ldcAccelerationInitialize(true);
 
-    if (decoderOut->isInitialized() != shouldBeInitialised) {
-        return (shouldBeInitialised ? LCEVC_Uninitialized : LCEVC_Initialized);
+    // Make the new decoder context
+    //
+    std::unique_ptr<DecoderContext> context = std::make_unique<DecoderContext>();
+    // Note: DecoderPool has threadsafe allocation, so handles are guaranteed to be sequential and
+    // valid.
+    Handle<DecoderContext> hdl = DecoderContext::decoderPoolAdd(std::move(context));
+
+    decHandle->hdl = hdl.handle;
+
+    {
+        LockedDecoder lockedDecoder(hdl);
+        lockedDecoder.context()->handleSet(*decHandle);
     }
 
     return LCEVC_Success;
 }
 
-// - API Functions --------------------------------------------------------------------------------
+LCEVC_API void LCEVC_DestroyDecoder(LCEVC_DecoderHandle decHandle)
+{
+    if (decHandle.hdl == kInvalidHandle) {
+        return;
+    }
+
+    std::unique_ptr<DecoderContext> ptr = DecoderContext::decoderPoolRemove(decHandle.hdl);
+
+    // Clear out pools
+    ptr->releasePools();
+
+    // Nobody should be able to get a pointer to this decoder from here on - destroy at our leisure
+    ptr.reset();
+
+    ldcDiagnosticsRelease();
+}
 
 // Picture
+//
 
 LCEVC_API LCEVC_ReturnCode LCEVC_DefaultPictureDesc(LCEVC_PictureDesc* pictureDesc, LCEVC_ColorFormat format,
                                                     uint32_t width, uint32_t height)
@@ -68,20 +95,8 @@ LCEVC_API LCEVC_ReturnCode LCEVC_DefaultPictureDesc(LCEVC_PictureDesc* pictureDe
         return LCEVC_InvalidParam;
     }
 
-    pictureDesc->width = width;
-    pictureDesc->height = height;
-    pictureDesc->colorFormat = format;
-    pictureDesc->colorRange = LCEVC_ColorRange_Unknown;
-    pictureDesc->colorPrimaries = LCEVC_ColorPrimaries_Unspecified;
-    pictureDesc->matrixCoefficients = LCEVC_MatrixCoefficients_Unspecified;
-    pictureDesc->transferCharacteristics = LCEVC_TransferCharacteristics_Unspecified;
-    pictureDesc->hdrStaticInfo = {};
-    pictureDesc->sampleAspectRatioNum = 1;
-    pictureDesc->sampleAspectRatioDen = 1;
-    pictureDesc->cropTop = 0;
-    pictureDesc->cropBottom = 0;
-    pictureDesc->cropLeft = 0;
-    pictureDesc->cropRight = 0;
+    return fromLdcReturnCode(ldpDefaultPictureDesc(toLdpPictureDescPtr(pictureDesc),
+                                                   toLdpColorFormat(format), width, height));
 
     return LCEVC_Success;
 }
@@ -90,48 +105,67 @@ LCEVC_API LCEVC_ReturnCode LCEVC_AllocPicture(LCEVC_DecoderHandle decHandle,
                                               const LCEVC_PictureDesc* pictureDesc,
                                               LCEVC_PictureHandle* picHandle)
 {
-    if (picHandle == nullptr) {
+    if (picHandle == nullptr || pictureDesc == nullptr) {
         return LCEVC_InvalidParam;
     }
+
+    const auto* ldpPictureDesc = toLdpPictureDescPtr(pictureDesc);
+
     picHandle->hdl = 0;
+    return withLockedDecoder(decHandle.hdl, [&ldpPictureDesc, &picHandle,
+                                             functionName = __FUNCTION__](DecoderContext* context) {
+        LdpPicture* picture = context->pipeline()->allocPictureManaged(*ldpPictureDesc);
+        if (!picture) {
+            VNUnused(functionName);
+            VNLogError("Unable to create a managed Picture!");
+            return LCEVC_Error;
+        }
 
-    if (pictureDesc == nullptr) {
-        return LCEVC_InvalidParam;
-    }
+        Handle<LdpPicture> hdl = context->picturePool().add(picture);
+        if (!hdl.isValid()) {
+            return LCEVC_Error;
+        }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return (decoder->allocPictureManaged(*pictureDesc, *picHandle) ? LCEVC_Success : LCEVC_Error);
+        *picHandle = LCEVC_PictureHandle{hdl.handle};
+        return LCEVC_Success;
+    });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_AllocPictureExternal(LCEVC_DecoderHandle decHandle,
                                                       const LCEVC_PictureDesc* pictureDesc,
-                                                      const LCEVC_PictureBufferDesc* buffer,
-                                                      const LCEVC_PicturePlaneDesc* planes,
+                                                      const LCEVC_PictureBufferDesc* pictureBufferDesc,
+                                                      const LCEVC_PicturePlaneDesc* picturePlaneDescs,
                                                       LCEVC_PictureHandle* picHandle)
 {
-    if (picHandle == nullptr) {
+    if (picHandle == nullptr || pictureDesc == nullptr ||
+        (pictureBufferDesc == nullptr && picturePlaneDescs == nullptr)) {
         return LCEVC_InvalidParam;
     }
+
+    const auto* ldpPictureDesc = toLdpPictureDescPtr(pictureDesc);
+    const auto* ldpPictureBufferDesc = toLdpPictureBufferDescPtr(pictureBufferDesc);
+    const auto* ldpPicturePlaneDescs = toLdpPicturePlaneDescPtr(picturePlaneDescs);
+
     picHandle->hdl = 0;
-    if (pictureDesc == nullptr || (buffer == nullptr && planes == nullptr)) {
-        return LCEVC_InvalidParam;
-    }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
+    return withLockedDecoder(decHandle.hdl,
+                             [&ldpPictureDesc, &ldpPictureBufferDesc, &ldpPicturePlaneDescs,
+                              &picHandle, functionName = __FUNCTION__](DecoderContext* context) {
+                                 LdpPicture* picture = context->pipeline()->allocPictureExternal(
+                                     *ldpPictureDesc, ldpPicturePlaneDescs, ldpPictureBufferDesc);
+                                 if (!picture) {
+                                     VNUnused(functionName);
+                                     VNLogError("Unable to create an external Picture!");
+                                     return LCEVC_Error;
+                                 }
+                                 Handle<LdpPicture> hdl = context->picturePool().add(picture);
+                                 if (!hdl.isValid()) {
+                                     return LCEVC_Error;
+                                 }
 
-    return (decoder->allocPictureExternal(*pictureDesc, *picHandle, planes, buffer) ? LCEVC_Success
-                                                                                    : LCEVC_Error);
+                                 *picHandle = LCEVC_PictureHandle{hdl.handle};
+                                 return LCEVC_Success;
+                             });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_FreePicture(LCEVC_DecoderHandle decHandle, LCEVC_PictureHandle picHandle)
@@ -140,14 +174,14 @@ LCEVC_API LCEVC_ReturnCode LCEVC_FreePicture(LCEVC_DecoderHandle decHandle, LCEV
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return (decoder->releasePicture(picHandle.hdl) ? LCEVC_Success : LCEVC_Error);
+    return withLockedDecoder(decHandle.hdl, [&picHandle](DecoderContext* context) {
+        LdpPicture* pic{context->picturePool().remove(picHandle.hdl)};
+        if (!pic) {
+            return LCEVC_Error;
+        }
+        context->pipeline()->freePicture(pic);
+        return LCEVC_Success;
+    });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureBuffer(LCEVC_DecoderHandle decHandle,
@@ -158,19 +192,13 @@ LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureBuffer(LCEVC_DecoderHandle decHandle,
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
+    auto* ldpPictureBufferDesc = toLdpPictureBufferDescPtr(bufferDesc);
 
-    const Picture* pic = decoder->getPicture(picHandle.hdl);
-    if (pic == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-
-    return (pic->getBufferDesc(*bufferDesc) ? LCEVC_Success : LCEVC_Error);
+    return withLockedDecoderAndPicture(
+        decHandle.hdl, picHandle.hdl,
+        [&ldpPictureBufferDesc](const DecoderContext*, const LdpPicture* picture) {
+            return (ldpPictureGetBufferDesc(picture, ldpPictureBufferDesc) ? LCEVC_Success : LCEVC_Error);
+        });
 }
 
 LCEVC_ReturnCode LCEVC_GetPicturePlaneCount(LCEVC_DecoderHandle decHandle,
@@ -180,20 +208,11 @@ LCEVC_ReturnCode LCEVC_GetPicturePlaneCount(LCEVC_DecoderHandle decHandle,
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    const Picture* pic = decoder->getPicture(picHandle.hdl);
-    if (pic == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-
-    *planeCount = pic->getNumPlanes();
-    return LCEVC_Success;
+    return withLockedDecoderAndPicture(decHandle.hdl, picHandle.hdl,
+                                       [&planeCount](const DecoderContext*, const LdpPicture* picture) {
+                                           *planeCount = ldpPictureLayoutPlanes(&picture->layout);
+                                           return LCEVC_Success;
+                                       });
 }
 
 LCEVC_ReturnCode LCEVC_SetPictureUserData(LCEVC_DecoderHandle decHandle,
@@ -203,20 +222,11 @@ LCEVC_ReturnCode LCEVC_SetPictureUserData(LCEVC_DecoderHandle decHandle,
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    Picture* pic = decoder->getPicture(picHandle.hdl);
-    if (pic == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-
-    pic->setUserData(userData);
-    return LCEVC_Success;
+    return withLockedDecoderAndPicture(decHandle.hdl, picHandle.hdl,
+                                       [&userData](const DecoderContext*, LdpPicture* picture) {
+                                           picture->userData = userData;
+                                           return LCEVC_Success;
+                                       });
 }
 
 LCEVC_ReturnCode LCEVC_GetPictureUserData(LCEVC_DecoderHandle decHandle,
@@ -226,20 +236,11 @@ LCEVC_ReturnCode LCEVC_GetPictureUserData(LCEVC_DecoderHandle decHandle,
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    const Picture* pic = decoder->getPicture(picHandle.hdl);
-    if (pic == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-
-    *userData = pic->getUserData();
-    return LCEVC_Success;
+    return withLockedDecoderAndPicture(decHandle.hdl, picHandle.hdl,
+                                       [&userData](const DecoderContext*, const LdpPicture* picture) {
+                                           *userData = picture->userData;
+                                           return LCEVC_Success;
+                                       });
 }
 
 LCEVC_API
@@ -250,20 +251,11 @@ LCEVC_ReturnCode LCEVC_SetPictureFlag(LCEVC_DecoderHandle decHandle, LCEVC_Pictu
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    Picture* pic = decoder->getPicture(picHandle.hdl);
-    if (pic == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-
-    pic->setPublicFlag(flag, value);
-    return LCEVC_Success;
+    return withLockedDecoderAndPicture(
+        decHandle.hdl, picHandle.hdl, [&flag, &value](const DecoderContext*, LdpPicture* picture) {
+            ldpPictureSetFlag(picture, static_cast<uint8_t>(flag), value);
+            return LCEVC_Success;
+        });
 }
 
 LCEVC_API
@@ -274,43 +266,27 @@ LCEVC_ReturnCode LCEVC_GetPictureFlag(LCEVC_DecoderHandle decHandle, LCEVC_Pictu
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    const Picture* pic = decoder->getPicture(picHandle.hdl);
-    if (pic == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-
-    *value = pic->getPublicFlag(flag);
-    return LCEVC_Success;
+    return withLockedDecoderAndPicture(
+        decHandle.hdl, picHandle.hdl, [&flag, &value](const DecoderContext*, const LdpPicture* picture) {
+            *value = ldpPictureGetFlag(picture, static_cast<uint8_t>(flag));
+            return LCEVC_Success;
+        });
 }
 
 LCEVC_API
 LCEVC_ReturnCode LCEVC_SetPictureDesc(LCEVC_DecoderHandle decHandle, LCEVC_PictureHandle picHandle,
-                                      const LCEVC_PictureDesc* desc)
+                                      const LCEVC_PictureDesc* pictureDesc)
 {
-    if ((picHandle.hdl == kInvalidHandle) || (desc == nullptr)) {
+    if ((picHandle.hdl == kInvalidHandle) || (pictureDesc == nullptr)) {
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
+    const auto* ldpPictureDesc = toLdpPictureDescPtr(pictureDesc);
 
-    Picture* pic = decoder->getPicture(picHandle.hdl);
-    if (pic == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-
-    return (pic->setDesc(*desc) ? LCEVC_Success : LCEVC_Error);
+    return withLockedDecoderAndPicture(
+        decHandle.hdl, picHandle.hdl, [&ldpPictureDesc](const DecoderContext*, LdpPicture* picture) {
+            return (ldpPictureSetDesc(picture, ldpPictureDesc) ? LCEVC_Success : LCEVC_Error);
+        });
 }
 
 LCEVC_API
@@ -321,20 +297,13 @@ LCEVC_ReturnCode LCEVC_GetPictureDesc(LCEVC_DecoderHandle decHandle, LCEVC_Pictu
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
+    auto* ldpPictureDesc = toLdpPictureDescPtr(desc);
 
-    const Picture* pic = decoder->getPicture(picHandle.hdl);
-    if (pic == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-
-    pic->getDesc(*desc);
-    return LCEVC_Success;
+    return withLockedDecoderAndPicture(decHandle.hdl, picHandle.hdl,
+                                       [&ldpPictureDesc](const DecoderContext*, const LdpPicture* picture) {
+                                           ldpPictureGetDesc(picture, ldpPictureDesc);
+                                           return LCEVC_Success;
+                                       });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_LockPicture(LCEVC_DecoderHandle decHandle,
@@ -346,45 +315,55 @@ LCEVC_API LCEVC_ReturnCode LCEVC_LockPicture(LCEVC_DecoderHandle decHandle,
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
+    return withLockedDecoderAndPicture(
+        decHandle.hdl, picHandle.hdl,
+        [&access, &pictureLockHandle](DecoderContext* context, LdpPicture* picture) {
+            if (ldpPictureGetLock(picture) != nullptr) {
+                VNLogError("Already have a lock for Picture <%p>.", static_cast<void*>(picture));
+                return LCEVC_Error;
+            }
 
-    Picture* pic = decoder->getPicture(picHandle.hdl);
-    if (pic == nullptr) {
-        return LCEVC_InvalidParam;
-    }
+            LdpPictureLock* pictureLock = nullptr;
+            if (!ldpPictureLock(picture, toLdpAccess(access), &pictureLock)) {
+                *pictureLockHandle = LCEVC_PictureLockHandle{kInvalidHandle};
+                return LCEVC_Error;
+            }
 
-    return (decoder->lockPicture(*pic, static_cast<Access>(access), *pictureLockHandle) ? LCEVC_Success
-                                                                                        : LCEVC_Error);
+            // Map Buffer if present
+            // Allows any hardware API to sort out memory view
+            //
+            if (picture->buffer) {
+                ldpBufferMap(picture->buffer, &pictureLock->mapping, picture->byteOffset,
+                             ldpPictureLayoutSize(&picture->layout), toLdpAccess(access));
+            }
+
+            *pictureLockHandle =
+                LCEVC_PictureLockHandle{context->pictureLockPool().add(pictureLock).handle};
+            return LCEVC_Success;
+        });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureLockBufferDesc(LCEVC_DecoderHandle decHandle,
                                                           LCEVC_PictureLockHandle pictureLockHandle,
-                                                          LCEVC_PictureBufferDesc* bufferDesc)
+                                                          LCEVC_PictureBufferDesc* pictureBufferDesc)
 {
-    if ((pictureLockHandle.hdl == kInvalidHandle) || (bufferDesc == nullptr)) {
+    if ((pictureLockHandle.hdl == kInvalidHandle) || (pictureBufferDesc == nullptr)) {
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
+    auto* ldpPictureBufferDesc = toLdpPictureBufferDescPtr(pictureBufferDesc);
 
-    PictureLock* picLock = decoder->getPictureLock(pictureLockHandle.hdl);
-    if (picLock->getBufferDesc() == nullptr) {
-        return LCEVC_Error;
-    }
-
-    toLCEVCPictureBufferDesc(*(picLock->getBufferDesc()), *bufferDesc);
-
-    return LCEVC_Success;
+    return withLockedDecoder(decHandle.hdl, [&pictureLockHandle,
+                                             &ldpPictureBufferDesc](DecoderContext* context) {
+        const LdpPictureLock* const picLock = context->pictureLockPool().lookup(pictureLockHandle.hdl);
+        if (picLock == nullptr) {
+            return LCEVC_InvalidParam;
+        }
+        if (!ldpPictureLockGetBufferDesc(picLock, ldpPictureBufferDesc)) {
+            return LCEVC_Error;
+        }
+        return LCEVC_Success;
+    });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureLockPlaneDesc(LCEVC_DecoderHandle decHandle,
@@ -396,21 +375,19 @@ LCEVC_API LCEVC_ReturnCode LCEVC_GetPictureLockPlaneDesc(LCEVC_DecoderHandle dec
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
+    auto* ldpPicturePlaneDesc = toLdpPicturePlaneDescPtr(planeDesc);
 
-    PictureLock* picLock = decoder->getPictureLock(pictureLockHandle.hdl);
-    if (picLock->getPlaneDescArr() == nullptr) {
-        return LCEVC_Error;
-    }
-
-    toLCEVCPicturePlaneDesc((*picLock->getPlaneDescArr())[planeIndex], *planeDesc);
-
-    return LCEVC_Success;
+    return withLockedDecoder(decHandle.hdl, [&pictureLockHandle, &planeIndex,
+                                             &ldpPicturePlaneDesc](DecoderContext* context) {
+        const LdpPictureLock* const picLock = context->pictureLockPool().lookup(pictureLockHandle.hdl);
+        if (picLock == nullptr) {
+            return LCEVC_InvalidParam;
+        }
+        if (!ldpPictureLockGetPlaneDesc(picLock, planeIndex, ldpPicturePlaneDesc)) {
+            return LCEVC_Error;
+        }
+        return LCEVC_Success;
+    });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_UnlockPicture(LCEVC_DecoderHandle decHandle,
@@ -420,44 +397,31 @@ LCEVC_API LCEVC_ReturnCode LCEVC_UnlockPicture(LCEVC_DecoderHandle decHandle,
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
+    return withLockedDecoder(decHandle.hdl, [&pictureLockHandle](DecoderContext* context) {
+        LdpPictureLock* const picLock = context->pictureLockPool().remove(pictureLockHandle.hdl);
+        if (picLock == nullptr) {
+            return LCEVC_InvalidParam;
+        }
 
-    return (decoder->unlockPicture(pictureLockHandle.hdl) ? LCEVC_Success : LCEVC_Error);
+        // Unmap the buffer if present
+        //
+        if (picLock->picture->buffer) {
+            ldpBufferUnmap(picLock->picture->buffer, &picLock->mapping);
+        }
+
+        ldpPictureUnlock(picLock->picture, picLock);
+        return LCEVC_Success;
+    });
 }
 
-// Decoder
-
-LCEVC_API LCEVC_ReturnCode LCEVC_CreateDecoder(LCEVC_DecoderHandle* decHandle,
-                                               LCEVC_AccelContextHandle accelContext)
-{
-    if (decHandle == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-
-    // Note: DecoderPool has threadsafe allocation, so handles are guaranteed to be sequential and
-    // valid.
-    std::unique_ptr<Decoder> newDecoder = std::make_unique<Decoder>(accelContext, *decHandle);
-    decHandle->hdl = DecoderPool::get().allocate(std::move(newDecoder)).handle;
-
-    return LCEVC_Success;
-}
+// Configuration
 
 template <typename T>
 static LCEVC_ReturnCode internalConfigure(LCEVC_DecoderHandle& decHandle, const char* name, const T& val)
 {
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(false, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return (decoder->setConfig(name, val) ? LCEVC_Success : LCEVC_Error);
+    return withLockedUninitializedDecoder(decHandle.hdl, [&name, &val](DecoderContext* context) {
+        return context->configure(name, val) ? LCEVC_Success : LCEVC_Error;
+    });
 }
 
 LCEVC_ReturnCode LCEVC_ConfigureDecoderBool(LCEVC_DecoderHandle decHandle, const char* name, bool val)
@@ -507,7 +471,7 @@ LCEVC_ReturnCode LCEVC_ConfigureDecoderFloatArray(LCEVC_DecoderHandle decHandle,
 LCEVC_ReturnCode LCEVC_ConfigureDecoderStringArray(LCEVC_DecoderHandle decHandle, const char* name,
                                                    uint32_t count, const char* const * arr)
 {
-    // Can't use internalConfigureArray: have to convert const char* to string, one at a time.
+    // Can't use internalConfigureArray directly: have to convert const char* to string, one at a time.
     if (arr == nullptr) {
         return LCEVC_InvalidParam;
     }
@@ -518,59 +482,35 @@ LCEVC_ReturnCode LCEVC_ConfigureDecoderStringArray(LCEVC_DecoderHandle decHandle
         stringArr[idx] = std::string(str);
         str++;
     }
+
     return internalConfigure(decHandle, name, stringArr);
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_InitializeDecoder(LCEVC_DecoderHandle decHandle)
 {
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(false, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return (decoder->initialize() ? LCEVC_Success : LCEVC_Error);
+    return withLockedUninitializedDecoder(decHandle.hdl, [](DecoderContext* context) {
+        return context->initialize() ? LCEVC_Success : LCEVC_Error;
+    });
 }
 
-LCEVC_API void LCEVC_DestroyDecoder(LCEVC_DecoderHandle decHandle)
-{
-    if (decHandle.hdl == kInvalidHandle) {
-        return;
-    }
-    DecoderPool::get().release(decHandle.hdl);
-}
-
-LCEVC_API LCEVC_ReturnCode LCEVC_SendDecoderEnhancementData(LCEVC_DecoderHandle decHandle,
-                                                            int64_t timestamp, bool discontinuity,
+// Decoding
+//
+LCEVC_API LCEVC_ReturnCode LCEVC_SendDecoderEnhancementData(LCEVC_DecoderHandle decHandle, uint64_t timestamp,
                                                             const uint8_t* data, uint32_t byteSize)
 {
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return decoder->feedEnhancementData(timestamp, discontinuity, data, byteSize);
+    return withLockedDecoder(decHandle.hdl, [&timestamp, &data, &byteSize](DecoderContext* context) {
+        return fromLdcReturnCode(context->pipeline()->sendEnhancementData(timestamp, data, byteSize));
+    });
 }
 
-LCEVC_API LCEVC_ReturnCode LCEVC_SendDecoderBase(LCEVC_DecoderHandle decHandle, int64_t timestamp,
-                                                 bool discontinuity, LCEVC_PictureHandle base,
-                                                 uint32_t timeoutUs, void* userData)
+LCEVC_API LCEVC_ReturnCode LCEVC_SendDecoderBase(LCEVC_DecoderHandle decHandle, uint64_t timestamp,
+                                                 LCEVC_PictureHandle base, uint32_t timeoutUs, void* userData)
 {
-    if (base.hdl == kInvalidHandle) {
-        return LCEVC_InvalidParam;
-    }
-
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return decoder->feedBase(timestamp, discontinuity, base.hdl, timeoutUs, userData);
+    return withLockedDecoder(decHandle.hdl, [&timestamp, &base, &timeoutUs, &userData](DecoderContext* context) {
+        LdpPicture* basePicture = context->picturePool().lookup(base.hdl);
+        return fromLdcReturnCode(
+            context->pipeline()->sendBasePicture(timestamp, basePicture, timeoutUs, userData));
+    });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_ReceiveDecoderBase(LCEVC_DecoderHandle decHandle, LCEVC_PictureHandle* output)
@@ -579,14 +519,14 @@ LCEVC_API LCEVC_ReturnCode LCEVC_ReceiveDecoderBase(LCEVC_DecoderHandle decHandl
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return decoder->produceFinishedBase(*output);
+    return withLockedDecoder(decHandle.hdl, [&output](DecoderContext* context) {
+        const LdpPicture* const finishedBase = context->pipeline()->receiveFinishedBasePicture();
+        if (finishedBase == nullptr) {
+            return LCEVC_Again;
+        }
+        output->hdl = context->picturePool().reverseLookup(finishedBase).handle;
+        return LCEVC_Success;
+    });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_SendDecoderPicture(LCEVC_DecoderHandle decHandle, LCEVC_PictureHandle output)
@@ -595,14 +535,10 @@ LCEVC_API LCEVC_ReturnCode LCEVC_SendDecoderPicture(LCEVC_DecoderHandle decHandl
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return decoder->feedOutputPicture(output.hdl);
+    return withLockedDecoder(decHandle.hdl, [&output](DecoderContext* context) {
+        LdpPicture* outputPicture = context->picturePool().lookup(output.hdl);
+        return fromLdcReturnCode(context->pipeline()->sendOutputPicture(outputPicture));
+    });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture(LCEVC_DecoderHandle decHandle,
@@ -613,81 +549,63 @@ LCEVC_API LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture(LCEVC_DecoderHandle decHa
         return LCEVC_InvalidParam;
     }
 
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
+    return withLockedDecoder(decHandle.hdl, [&output, &decodeInformation](DecoderContext* context) {
+        LdpDecodeInformation di;
+        const LdpPicture* const outputPicture = context->pipeline()->receiveOutputPicture(di);
+        if (outputPicture == nullptr) {
+            return LCEVC_Again;
+        }
 
-    return decoder->produceOutputPicture(*output, *decodeInformation);
+        // Copy DecodeInformation over to destination
+        *toLdpDecodeInformationPtr(decodeInformation) = di;
+
+        output->hdl = context->picturePool().reverseLookup(outputPicture).handle;
+        return LCEVC_Success;
+    });
 }
 
-LCEVC_API LCEVC_ReturnCode LCEVC_PeekDecoder(LCEVC_DecoderHandle decHandle, int64_t timestamp,
+LCEVC_API LCEVC_ReturnCode LCEVC_PeekDecoder(LCEVC_DecoderHandle decHandle, uint64_t timestamp,
                                              uint32_t* width, uint32_t* height)
 
 {
     if ((width == nullptr) || (height == nullptr)) {
         return LCEVC_InvalidParam;
     }
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-    if (getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
 
-    return decoder->peek(timestamp, *width, *height);
+    return withLockedDecoder(decHandle.hdl, [&timestamp, &width, &height](DecoderContext* context) {
+        return fromLdcReturnCode(context->pipeline()->peek(timestamp, *width, *height));
+    });
 }
 
-LCEVC_API LCEVC_ReturnCode LCEVC_SkipDecoder(LCEVC_DecoderHandle decHandle, int64_t timestamp)
+LCEVC_API LCEVC_ReturnCode LCEVC_SkipDecoder(LCEVC_DecoderHandle decHandle, uint64_t timestamp)
 {
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    if (const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-        getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return decoder->skip(timestamp);
+    return withLockedDecoder(decHandle.hdl, [&timestamp](DecoderContext* context) {
+        return fromLdcReturnCode(context->pipeline()->skip(timestamp));
+    });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_SynchronizeDecoder(LCEVC_DecoderHandle decHandle, bool dropPending)
 {
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    if (const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-        getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return decoder->synchronize(dropPending);
+    return withLockedDecoder(decHandle.hdl, [&dropPending](DecoderContext* context) {
+        return fromLdcReturnCode(context->pipeline()->synchronize(dropPending));
+    });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_FlushDecoder(LCEVC_DecoderHandle decHandle)
 {
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    if (const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(true, decHandle.hdl, decoder, lock);
-        getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    return decoder->flush();
+    return withLockedDecoder(decHandle.hdl, [](DecoderContext* context) {
+        return fromLdcReturnCode(context->pipeline()->flush(kInvalidTimestamp));
+    });
 }
 
+// Events
+//
 LCEVC_API
 LCEVC_ReturnCode LCEVC_SetDecoderEventCallback(LCEVC_DecoderHandle decHandle,
                                                LCEVC_EventCallback callback, void* userData)
 {
-    std::unique_ptr<std::lock_guard<std::mutex>> lock = nullptr;
-    Decoder* decoder = nullptr;
-    if (const LCEVC_ReturnCode getDecResult = getLockAndCheckDecoder(false, decHandle.hdl, decoder, lock);
-        getDecResult != LCEVC_Success) {
-        return getDecResult;
-    }
-
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    decoder->setEventCallback(reinterpret_cast<EventCallback>(callback), userData);
-    return LCEVC_Success;
+    return withLockedUninitializedDecoder(decHandle.hdl, [&callback, &userData](DecoderContext* context) {
+        context->eventDispatcher()->setEventCallback(callback, userData);
+        return LCEVC_Success;
+    });
 }

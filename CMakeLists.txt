@@ -16,9 +16,10 @@ cmake_minimum_required(VERSION 3.19.0 FATAL_ERROR)
 
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(VN_MSVC_RUNTIME_STATIC "Use static multi-threaded runtime for MSVC" ON)
+option(VN_STRIP_RELEASE "Strip any debug information from release binaries" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
-include("VNovaSetup")
+include("CMakeSetup")
 
 project(
     LCEVCdec_SDK
@@ -30,9 +31,19 @@ option(VN_SDK_EXECUTABLES "Include samples and test harness executables in SDK i
 option(VN_SDK_SAMPLE_SOURCE "Include sample sources in SDK installations" ON)
 option(VN_SDK_UNIT_TESTS "Enable unit test executables" OFF)
 option(VN_SDK_API_LAYER "Include API layer library in SDK installations" ON)
+option(VN_SDK_PIPELINE_CPU "Enable the CPU pipeline" ON)
+option(VN_SDK_PIPELINE_LEGACY "Enable the legacy pipeline" ON)
+option(VN_SDK_PIPELINE_VULKAN "Enable the Vulkan pipeline" OFF)
 option(VN_SDK_JSON_CONFIG "Allow decoder to be configured with JSON, requires nlohmann-json" OFF)
 option(VN_SDK_DOCS "Build Doxygen and Sphinx documentation" OFF)
 option(VN_SDK_COVERAGE "Generate gcov statistics for coverage" OFF)
+option(VN_SDK_TRACING
+       "Configurable tracing information recorder for function entry/exit in perfetto format" ON)
+option(VN_SDK_METRICS "Configurable metrics recording" ON)
+option(VN_SDK_DIAGNOSTICS_ASYNC "Enable asynchronous output of logging, tracing and metrics" ON)
+set(VN_SDK_MAXIMUM_LOG_LEVEL
+    "VERBOSE"
+    CACHE STRING "Disable log messages above given level")
 option(VN_SDK_WARNINGS_FAIL "Compiler warnings will cause a build to fail" OFF)
 option(VN_SDK_BUILD_DETAILS "Include build time and origin in libraries - non-reproducible build"
        OFF)
@@ -40,8 +51,7 @@ option(VN_SDK_SYSTEM_INSTALL "Install licences and docs to the system or to a pa
 
 # cmake-format: off
 set(VN_SDK_FFMPEG_LIBS_PACKAGE "" CACHE STRING
-        "Define a path to search for libav packages, conan or pkg-config will be used by default \
-        if not specified")
+        "Define a path to search for libav packages, conan or pkg-config will be used by default if not specified")
 # cmake-format: on
 
 if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
@@ -50,125 +60,117 @@ else ()
     set(VN_SDK_BASE_DECODER OFF)
 endif ()
 
-if (VN_SDK_EXECUTABLES AND NOT VN_SDK_JSON_CONFIG)
-    message(STATUS "Executables enabled, enabling required JSON config")
+if ((VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS) AND NOT VN_SDK_JSON_CONFIG)
+    message(STATUS "Executables or tests enabled, enabling required JSON config")
     set(VN_SDK_JSON_CONFIG ON)
 endif ()
 
-# Core
-option(VN_CORE_THREADING "Core: Enable multithreading" ON)
-option(VN_CORE_SIMD "Core: Enable SIMD for current architecture" ON)
-option(VN_CORE_SSE "Core: Enable SSE for current architecture" ON)
-option(VN_CORE_AVX2 "Core: Enable AVX2 for current architecture" ON)
-option(VN_CORE_NEON "Core: Enable NEON for current architecture" ON)
-option(
-    VN_CORE_GENERATE_PGO
-    "Core: Make an instrumented build (i.e. a profile-generating build), for profile-guided optimization (PGO)."
-    OFF)
-option(
-    VN_CORE_USE_PGO
-    "Core: Use previously-generated PGO profiles (from past runs of an instrumented build) to optimize this build."
-    OFF)
-option(VN_CORE_FORCE_OVERLAY "Core: Enable forced overlay" OFF)
-option(VN_CORE_BENCHMARK "Core: Build benchmark tool" OFF)
+if ((VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS) AND NOT VN_SDK_API_LAYER)
+    message(FATAL_ERROR "API layer required when building executables or unit tests")
+endif ()
 
-# Binary destination
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/)
+if (EMSCRIPTEN)
+    message(STATUS "Detected emscripten build, configuring appropriately")
+    set(BUILD_SHARED_LIBS OFF)
+    set(VN_SDK_API_LAYER OFF)
+    set(VN_SDK_PIPELINE_CPU OFF)
+    set(VN_SDK_PIPELINE_LEGACY OFF)
+endif ()
+
+if (VN_SDK_PIPELINE_VULKAN
+    AND ((CMAKE_SYSTEM_NAME MATCHES "^(Darwin|iOS|macOS|tvOS|watchOS|Emscripten)$")
+         OR (CMAKE_SYSTEM_NAME MATCHES "Android" AND ANDROID_PLATFORM LESS 28)))
+    message(
+        FATAL_ERROR
+            "Target build platform doesn't support Vulkan, please disable VN_SDK_PIPELINE_VULKAN")
+endif ()
+
+# Performance options
+option(VN_SDK_THREADING "Enable multithreading" ON)
+option(VN_SDK_THREADS_CUSTOM "Use a custom threading implementation." OFF)
+option(VN_SDK_SIMD "Enable SIMD for current architecture" ON)
+option(VN_SDK_SSE "Enable SSE for current architecture" ON)
+option(VN_SDK_AVX2 "Enable AVX2 for current architecture" ON)
+option(VN_SDK_NEON "Enable NEON for current architecture" ON)
+option(VN_SDK_GENERATE_PGO "Make an instrumented build for profile-guided optimization (PGO)." OFF)
+option(VN_SDK_USE_PGO "Use previously-generated PGO profiles to optimize this build." OFF)
+option(VN_SDK_BENCHMARK "Build benchmark google benchmark tests" OFF)
+option(VN_SDK_FORCE_OVERLAY "Enable forced overlay" OFF)
 
 # Decoder components
-#
+
+# Common
+lcevc_add_subdirectory(src/common)
+lcevc_add_subdirectory_if(src/common/test/unit VN_SDK_UNIT_TESTS)
+
+# Enhancement
+lcevc_add_subdirectory(src/enhancement)
+lcevc_add_subdirectory_if(src/enhancement/test/unit VN_SDK_UNIT_TESTS)
+lcevc_add_subdirectory_if(src/enhancement/test/sample VN_SDK_EXECUTABLES)
+
+# Pipeline
+lcevc_add_subdirectory(src/pipeline)
+lcevc_add_subdirectory_if(src/pipeline/test/unit VN_SDK_UNIT_TESTS)
+
+# Pixel processing
+lcevc_add_subdirectory(src/pixel_processing)
+lcevc_add_subdirectory_if(src/pixel_processing/test/unit VN_SDK_UNIT_TESTS)
+
+# LCEVC NALU Extract
+lcevc_add_subdirectory(src/extract)
 
 # API Layer
 if (VN_SDK_API_LAYER)
     lcevc_add_subdirectory(src/api)
     lcevc_add_subdirectory(src/api_utility)
-    lcevc_add_subdirectory(src/enhancement_cpu)
-    if (VN_SDK_EXECUTABLES)
-        lcevc_add_subdirectory(src/sample_cpp)
-        lcevc_add_subdirectory(src/api/test/harness)
-    endif ()
-    if (VN_SDK_UNIT_TESTS)
-        lcevc_add_subdirectory(src/api/test/unit)
+    lcevc_add_subdirectory_if(src/api/test/unit VN_SDK_UNIT_TESTS)
+    lcevc_add_subdirectory_if(src/sample_cpp VN_SDK_EXECUTABLES)
+    lcevc_add_subdirectory_if(src/api/test/harness VN_SDK_EXECUTABLES)
+endif ()
+
+# Pipelines
+if (VN_SDK_PIPELINE_CPU)
+    lcevc_add_subdirectory(src/pipeline_cpu)
+    lcevc_add_subdirectory_if(src/pipeline_cpu/test/unit VN_SDK_UNIT_TESTS)
+endif ()
+
+if (VN_SDK_PIPELINE_LEGACY)
+    lcevc_add_subdirectory(src/legacy/decoder)
+    lcevc_add_subdirectory(src/legacy/sequencer)
+    lcevc_add_subdirectory(src/overlay_images)
+    lcevc_add_subdirectory_if(src/legacy/test/decoder_unit VN_SDK_UNIT_TESTS)
+    lcevc_add_subdirectory_if(src/legacy/test/sequencer_unit VN_SDK_UNIT_TESTS)
+    lcevc_add_subdirectory_if(src/legacy/test/sequencing_unit VN_SDK_UNIT_TESTS)
+    lcevc_add_subdirectory_if(src/legacy/test/benchmark VN_SDK_BENCHMARK)
+
+    if (VN_SDK_API_LAYER)
+        lcevc_add_subdirectory(src/color_conversion)
+
+        lcevc_add_subdirectory(src/pipeline_legacy)
+        lcevc_add_subdirectory_if(src/pipeline_legacy/test/unit VN_SDK_UNIT_TESTS)
     endif ()
 endif ()
 
+if (VN_SDK_PIPELINE_VULKAN)
+    lcevc_add_subdirectory(src/pipeline_vulkan)
+    lcevc_add_subdirectory_if(src/pipeline_vulkan/test/unit VN_SDK_UNIT_TESTS)
+endif ()
+
+if (EMSCRIPTEN)
+    lcevc_add_subdirectory(src/emscripten)
+endif ()
+
+# Utility
 if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
     lcevc_add_subdirectory(src/utility)
+    lcevc_add_subdirectory_if(src/utility/test/unit VN_SDK_UNIT_TESTS)
+    lcevc_add_subdirectory_if(src/utility/test/utilities VN_SDK_UNIT_TESTS)
 endif ()
 
-# Core layer
-lcevc_add_subdirectory(src/core/decoder)
-lcevc_add_subdirectory(src/core/sequencing)
-lcevc_add_subdirectory(src/overlay_images)
-if (VN_SDK_UNIT_TESTS)
-    lcevc_add_subdirectory(src/utility/test/unit)
-    lcevc_add_subdirectory(src/utility/test/utilities)
-    lcevc_add_subdirectory(src/core/test/decoder_unit)
-    lcevc_add_subdirectory(src/core/test/sequencing_unit)
-endif ()
-if (VN_CORE_BENCHMARK)
-    lcevc_add_subdirectory(src/core/test/benchmark)
-endif ()
-
-if (VN_SDK_DOCS)
-    lcevc_add_subdirectory(docs/sphinx)
-endif ()
+lcevc_add_subdirectory_if(docs/sphinx VN_SDK_DOCS)
 
 # Define the variables to install files based on the GNU conventions
 include(GNUInstallDirs)
 
-# Record configuration - header and README
-configure_file("cmake/templates/build_config.h.in" "generated/LCEVC/build_config.h")
-configure_file("cmake/templates/README.md.in" "install_config/README.md")
-configure_file("cmake/templates/lcevc_dec.pc.in" "generated/lcevc_dec.pc" @ONLY)
-
-# Top level install
-#
-install(FILES "${CMAKE_BINARY_DIR}/install_config/README.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}")
-install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_dec.pc"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
-if (VN_SDK_SYSTEM_INSTALL)
-    install(FILES "COPYING" DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses")
-    install(FILES "LICENSE.md" DESTINATION "${CMAKE_INSTALL_DOCDIR}/licenses")
-else ()
-    install(FILES "COPYING" DESTINATION "licenses")
-    install(DIRECTORY "licenses" DESTINATION ".")
-    install(FILES "LICENSE.md" DESTINATION "licenses/LCEVCdec")
-endif ()
-
-#
-if (NOT CMAKE_INSTALL_INCLUDEDIR)
-    set(CMAKE_INSTALL_INCLUDEDIR include)
-endif ()
-install(FILES "${CMAKE_BINARY_DIR}/generated/LCEVC/build_config.h" DESTINATION "include/LCEVC")
-install(FILES "include/LCEVC/api_defs.h" DESTINATION "include/LCEVC")
-
-#
-if (VN_SDK_EXECUTABLES)
-    if (WIN32)
-        install(
-            DIRECTORY "${CMAKE_BINARY_DIR}/bin/"
-            OPTIONAL
-            DESTINATION "bin"
-            FILES_MATCHING
-            PATTERN "liblcevc*.dll")
-    else ()
-        install(
-            DIRECTORY "${CMAKE_BINARY_DIR}/lib/"
-            OPTIONAL
-            DESTINATION "lib"
-            FILES_MATCHING
-            PATTERN "liblcevc*")
-    endif ()
-endif ()
-
-# Install dependencies from conan
-enable_testing()
-
-# Package install into a ZIP file
-#
-set(CPACK_PACKAGE_VERSION ${GIT_VERSION})
-set(CPACK_GENERATOR "ZIP")
-include(CPack)
+# Install project specific files and templates
+include("CMakeInstall")

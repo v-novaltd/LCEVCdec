@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -20,7 +20,6 @@ list(
     APPEND
     INTERFACES
     "include/LCEVC/api_utility/chrono.h"
-    "include/LCEVC/api_utility/enum_map.h"
     "include/LCEVC/api_utility/linear_math.h"
     "include/LCEVC/api_utility/picture_layout.h"
     "include/LCEVC/api_utility/picture_layout_inl.h"

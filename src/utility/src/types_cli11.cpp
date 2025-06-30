@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -15,10 +15,9 @@
 // The operator>>() declarations for enum types do not work with CLI11, as its
 // own specialisation of lexical_cast for enum overrides them.
 //
-#include "LCEVC/utility/types_convert.h"
-#include "LCEVC/utility/types_stream.h"
-
 #include <fmt/core.h>
+#include <LCEVC/utility/types_convert.h>
+#include <LCEVC/utility/types_stream.h>
 
 using namespace lcevc_dec::utility;
 

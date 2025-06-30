@@ -14,12 +14,11 @@
 
 // Implementation of base::Decoder that uses libavcodec and libavfilter
 //
-#include "LCEVC/utility/base_decoder.h"
+#include <LCEVC/utility/base_decoder.h>
 //
-#include "LCEVC/utility/extract.h"
-#include "LCEVC/utility/string_utils.h"
-
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/extract/extract.h>
+#include <LCEVC/utility/string_utils.h>
 
 extern "C"
 {
@@ -117,6 +116,7 @@ private:
     }
 
     void copyImage(AVFrame* frame);
+    void updateDescription();
 
     int64_t generateIncreasingPoc(int64_t decodedPoc, bool isIdr);
 
@@ -164,6 +164,12 @@ private:
     // State for generating monotonic Picture Order Count
     int64_t m_pocHighest = 0;
     int64_t m_pocOffset = 0;
+
+    // Store the last PTS extracted for finding discontinuities
+    int64_t m_gopStartPts = INT64_MIN;
+    int64_t m_lastDiscontinuity = INT64_MIN;
+    uint16_t m_imageDiscontinuityCount = 0;
+    uint16_t m_enhancementDiscontinuityCount = 0;
 
     // Format of decoded frames
     AVPixelFormat m_pixelFormat = AV_PIX_FMT_NONE;
@@ -396,6 +402,8 @@ bool BaseDecoderLibAV::getEnhancement(Data& data) const
 
 void BaseDecoderLibAV::clearEnhancement() { m_enhancementData = {}; }
 
+// Copy image pixels from frame into local buffer
+//
 void BaseDecoderLibAV::copyImage(AVFrame* frame)
 {
     if (int r = av_image_copy_to_buffer(m_image.data(), static_cast<int>(m_image.size()),
@@ -409,12 +417,28 @@ void BaseDecoderLibAV::copyImage(AVFrame* frame)
 
     m_imageData.ptr = m_image.data();
     m_imageData.size = static_cast<uint32_t>(m_image.size());
-    m_imageData.timestamp = frame->pts;
+    m_imageData.pts = frame->pts;
+    m_imageData.discontinuityCount = m_imageDiscontinuityCount;
+}
+
+// Update picture description and layout from context
+//
+void BaseDecoderLibAV::updateDescription()
+{
+    if (m_bufferSinkCtx) {
+        m_pictureDesc = lcevcPictureDesc(*m_videoDecCtx, m_bufferSinkCtx->inputs[0]);
+        m_pixelFormat = static_cast<AVPixelFormat>(m_bufferSinkCtx->inputs[0]->format);
+    } else {
+        m_pictureDesc = lcevcPictureDesc(*m_videoDecCtx, nullptr);
+        m_pixelFormat = m_videoDecCtx->pix_fmt;
+    }
+
+    m_pictureLayout = PictureLayout(m_pictureDesc);
 }
 
 bool BaseDecoderLibAV::update()
 {
-    // Loop until something happens ...
+    // Loop around moving decode forward until interesting output appears ...
     for (;;) {
         // Demux a packet from stream
         if (m_demuxPacket->size == 0 && m_state == State::Running) {
@@ -488,15 +512,22 @@ bool BaseDecoderLibAV::update()
             m_enhancement.resize(m_videoPacket->size);
             uint32_t enhancementSize = 0;
             int64_t enhancementPts = m_videoPacket->pts;
+            if (m_gopStartPts != INT64_MIN && enhancementPts < (m_gopStartPts - m_videoPacket->duration)) {
+                m_enhancementDiscontinuityCount++;
+                m_lastDiscontinuity = enhancementPts;
+                m_gopStartPts = INT64_MIN;
+            }
             int32_t extractResult = 0;
 
             if (m_removeEnhanced) {
                 // Extract enhanced data from AU, and remove enhancement NAL units
                 uint32_t nalOutSize = 0;
+                uint32_t nalOutOffset = 0;
                 extractResult = LCEVC_extractAndRemoveEnhancementFromNAL(
                     m_videoPacket->data, m_videoPacket->size, m_nalFormat,
-                    lcevcCodecType(m_videoDecCtx->codec_id), &nalOutSize, m_enhancement.data(),
-                    static_cast<uint32_t>(m_enhancement.size()), &enhancementSize);
+                    lcevcCodecType(m_videoDecCtx->codec_id), m_enhancement.data(),
+                    static_cast<uint32_t>(m_enhancement.size()), &enhancementSize, &nalOutOffset,
+                    &nalOutSize);
                 // Truncate NAL to actual size
                 av_packet_ref(m_basePacket, m_videoPacket);
                 m_basePacket->size = static_cast<int>(nalOutSize);
@@ -522,7 +553,8 @@ bool BaseDecoderLibAV::update()
                 // Got some LCEVC data - return to client
                 m_enhancementData.ptr = m_enhancement.data();
                 m_enhancementData.size = static_cast<uint32_t>(m_enhancement.size());
-                m_enhancementData.timestamp = enhancementPts;
+                m_enhancementData.pts = enhancementPts;
+                m_enhancementData.discontinuityCount = m_enhancementDiscontinuityCount;
                 return true;
             }
         }
@@ -552,10 +584,20 @@ bool BaseDecoderLibAV::update()
                 }
                 if (r != AVERROR(EAGAIN)) {
                     fmt::print(stderr, "avcodec_receive_frame error:  {}\n", libavError(r));
-                    break;
                 }
+                return true;
             } else {
                 // Got a picture from base decoder
+                if (m_frame->pts == m_lastDiscontinuity) {
+                    m_imageDiscontinuityCount++;
+                }
+#if LIBAVUTIL_VERSION_INT < AV_VERSION_INT(58, 7, 100)
+                if ((m_frame->flags & AV_PKT_FLAG_KEY) != 0) {
+#else
+                if ((m_frame->flags & AV_FRAME_FLAG_KEY) != 0) {
+#endif
+                    m_gopStartPts = m_frame->pts;
+                }
                 if (m_bufferSrcCtx) {
                     // Add frame to the filter
                     if (av_buffersrc_add_frame(m_bufferSrcCtx, m_frame) < 0) {
@@ -563,6 +605,16 @@ bool BaseDecoderLibAV::update()
                         break;
                     }
                 } else {
+                    if (const int imageBufferSize =
+                            av_image_get_buffer_size(static_cast<AVPixelFormat>(m_frame->format),
+                                                     m_frame->width, m_frame->height, 1);
+                        static_cast<size_t>(imageBufferSize) != m_image.size()) {
+                        // Resize av output image
+                        m_image.resize(imageBufferSize);
+                        m_imageData.ptr = m_image.data();
+                        m_imageData.size = static_cast<uint32_t>(m_image.size());
+                    }
+                    updateDescription();
                     copyImage(m_frame);
                     av_frame_unref(m_frame);
                     return true;
@@ -584,6 +636,7 @@ bool BaseDecoderLibAV::update()
                     break;
                 }
             } else {
+                updateDescription();
                 copyImage(m_frame);
                 av_frame_unref(m_frame);
                 return true;
@@ -656,17 +709,8 @@ std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view input, std:
         }
     }
 
-    // Generate picture description
-    if (decoder->m_bufferSinkCtx) {
-        decoder->m_pictureDesc =
-            lcevcPictureDesc(*decoder->m_videoDecCtx, decoder->m_bufferSinkCtx->inputs[0]);
-        decoder->m_pixelFormat = static_cast<AVPixelFormat>(decoder->m_bufferSinkCtx->inputs[0]->format);
-    } else {
-        decoder->m_pictureDesc = lcevcPictureDesc(*decoder->m_videoDecCtx, nullptr);
-        decoder->m_pixelFormat = decoder->m_videoDecCtx->pix_fmt;
-    }
-
-    decoder->m_pictureLayout = PictureLayout(decoder->m_pictureDesc);
+    // Generate initial picture description
+    decoder->updateDescription();
 
     // Buffer for output picture
     const int imageBufferSize =

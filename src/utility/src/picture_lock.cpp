@@ -12,11 +12,9 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include "LCEVC/utility/picture_lock.h"
-
-#include "LCEVC/utility/check.h"
-
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/utility/check.h>
+#include <LCEVC/utility/picture_lock.h>
 
 namespace lcevc_dec::utility {
 

@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -38,6 +38,8 @@ void callback(LCEVC_DecoderHandle decHandle, LCEVC_Event event, LCEVC_PictureHan
 }
 } // namespace
 
+using namespace lcevc_dec::decoder;
+
 // EventTester -------------------------------------------------------------------------------------
 
 void EventTester::setup()
@@ -47,8 +49,8 @@ void EventTester::setup()
     ASSERT_EQ(LCEVC_ConfigureDecoderIntArray(m_hdl, "events", static_cast<uint32_t>(kAllEvents.size()),
                                              kAllEvents.data()),
               LCEVC_Success);
-    ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_hdl, "core_threads", 1), LCEVC_Success);
-    ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_hdl, "loq_unprocessed_cap", 10), LCEVC_Success);
+    ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_hdl, "log_level", 4), LCEVC_Success);
+    ASSERT_EQ(LCEVC_ConfigureDecoderInt(m_hdl, "threads", 1), LCEVC_Success);
     ASSERT_EQ(LCEVC_SetDecoderEventCallback(m_hdl, ::callback, static_cast<void*>(this)), LCEVC_Success);
     LCEVC_DefaultPictureDesc(&m_inputDesc, LCEVC_I420_8, 960, 540);
     LCEVC_DefaultPictureDesc(&m_outputDesc, LCEVC_I420_8, 1920, 1080);
@@ -105,6 +107,17 @@ LCEVC_ReturnCode EventTester::sendBase(LCEVC_DecoderHandle decHandle)
     if (m_bases.empty()) {
         LCEVC_PictureHandle newHandle = {};
         LCEVC_AllocPicture(decHandle, &m_inputDesc, &newHandle);
+
+        LCEVC_PictureLockHandle lock = {};
+        LCEVC_LockPicture(decHandle, newHandle, LCEVC_Access_Write, &lock);
+
+        LCEVC_PictureBufferDesc bufferDesc = {};
+        LCEVC_GetPictureLockBufferDesc(decHandle, lock, &bufferDesc);
+
+        memset(bufferDesc.data, 0, bufferDesc.byteSize);
+
+        LCEVC_UnlockPicture(decHandle, lock);
+
         m_bases.insert(newHandle.hdl);
     }
 
@@ -113,7 +126,7 @@ LCEVC_ReturnCode EventTester::sendBase(LCEVC_DecoderHandle decHandle)
     m_bases.erase(baseIter);
 
     // use "this" as arbitrary user data.
-    const LCEVC_ReturnCode res = LCEVC_SendDecoderBase(decHandle, m_basePtsToSend, false, base,
+    const LCEVC_ReturnCode res = LCEVC_SendDecoderBase(decHandle, m_basePtsToSend, base,
                                                        std::numeric_limits<uint32_t>::max(), this);
 
     if (res == LCEVC_Success) {
@@ -121,6 +134,7 @@ LCEVC_ReturnCode EventTester::sendBase(LCEVC_DecoderHandle decHandle)
     }
 
     if (m_basePtsToSend == m_afterTheEndPts) {
+        LCEVC_SynchronizeDecoder(decHandle, false);
         m_basesDone = true;
         return LCEVC_Again;
     }
@@ -164,7 +178,7 @@ LCEVC_ReturnCode EventTester::sendEnhancement(LCEVC_DecoderHandle decHandle)
 
     const auto [data, size] = getEnhancement(m_enhancementPtsToSend, kValidEnhancements);
     const LCEVC_ReturnCode res =
-        LCEVC_SendDecoderEnhancementData(decHandle, m_enhancementPtsToSend, false, data, size);
+        LCEVC_SendDecoderEnhancementData(decHandle, m_enhancementPtsToSend, data, size);
 
     if (res == LCEVC_Success) {
         m_enhancementPtsToSend++;
@@ -206,9 +220,11 @@ LCEVC_ReturnCode EventTester::receiveOutput()
     LCEVC_PictureDesc equivalentDefaultDesc = {};
     LCEVC_DefaultPictureDesc(&equivalentDefaultDesc, descReceived.colorFormat, descReceived.width,
                              descReceived.height);
-    EXPECT_TRUE(lcevc_dec::decoder::equals(equivalentDefaultDesc, m_outputDesc));
+    EXPECT_EQ(*toLdpPictureDescPtr(&equivalentDefaultDesc), *toLdpPictureDescPtr(&m_outputDesc));
 
-    EXPECT_GT(decodeInformation.timestamp, m_latestReceivedPts);
+    if (m_latestReceivedPts != kInvalidTimestamp) {
+        EXPECT_GT(decodeInformation.timestamp, m_latestReceivedPts);
+    }
 
     m_latestReceivedPts = decodeInformation.timestamp;
 

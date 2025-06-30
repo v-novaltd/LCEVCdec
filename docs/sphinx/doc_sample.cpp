@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -105,7 +105,7 @@ int main(int argc, char** argv)
 
         // Try to send any enhancement data
         if (!base.enhancement.empty()) {
-            if (LCEVC_SendDecoderEnhancementData(decoderHandle, base.enhancementTimestamp, false,
+            if (LCEVC_SendDecoderEnhancementData(decoderHandle, base.enhancementTimestamp,
                                                  base.enhancement.data(),
                                                  base.enhancement.size()) == LCEVC_Success) {
                 base.enhancement.clear();
@@ -114,8 +114,8 @@ int main(int argc, char** argv)
 
         // Try to send any base picture
         if (!base.picture.hdl) {
-            if (LCEVC_SendDecoderBase(decoderHandle, base.pictureTimestamp, false, base.picture,
-                                      1000000, nullptr) == LCEVC_Success) {
+            if (LCEVC_SendDecoderBase(decoderHandle, base.pictureTimestamp, base.picture, 1000000,
+                                      nullptr) == LCEVC_Success) {
                 base.picture.hdl = 0;
             }
         }

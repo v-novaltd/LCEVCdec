@@ -113,14 +113,14 @@ A clear & concise longer description of what changed, including why the change w
 Bullet points, indented with one space before and one space after the bullet, indented to have the text aligned.
 
 - Bullet points are separated from surrounding text with blank lines.
-- It is good to use *emphasise*, \_underline\_ or `code` as in Markdown, if necessary, but they shouldn't be overused.
+- It is good to use *emphasize*, \_underline\_ or `code` as in Markdown, if necessary, but they shouldn't be overused.
 - Multi-line code examples are indented with four spaces, as in Markdown syntax
 - Finally list tags with one tag per-line, separated from the commit message body with a blank line before.
 
 Here’s an example of a longer commit message:
 
 ```markdown
-parallel_decode: Fix conformance issues in tiling mode, memory leak and optimise tests
+parallel_decode: Fix conformance issues in tiling mode, memory leak and optimize tests
 - Fixes residual mismatch in clear blocks at the end of a tile
 - Fix memory leak related to tiling mode
 - Add slimmed down parallel-decode func_tests - removed a lot from the serial test set that are related to the upscaler which don't apply to bugs that could come from the parallel-decode loop

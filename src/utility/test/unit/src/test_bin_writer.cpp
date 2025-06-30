@@ -14,10 +14,10 @@
 
 #include "bin_writer.h"
 #include "find_assets_dir.h"
-#include "LCEVC/utility/bin_reader.h"
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <LCEVC/utility/bin_reader.h>
 #include <xxhash.h>
 
 #include <cstdint>

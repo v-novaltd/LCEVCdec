@@ -96,7 +96,8 @@ namespace {
 } // namespace
 
 // LayoutInfo for unknown formats
-const PictureLayout::Info PictureLayout::kPictureLayoutInfoUnknown{LCEVC_ColorFormat_Unknown};
+const PictureLayout::Info PictureLayout::kPictureLayoutInfoUnknown{
+    LCEVC_ColorFormat_Unknown, YUV, 0, 0, 0, {0}, {0}, {0}, {0}, {0}, 0, ".raw"};
 
 // Find the layout info for a given format
 const PictureLayout::Info& PictureLayout::findLayoutInfo(LCEVC_ColorFormat format)
@@ -280,6 +281,11 @@ bool PictureLayout::isCompatible(const PictureLayout& other) const
     // Other differences (e.g. order of color components) don't affect the memory footprint of the
     // actual content of the picture, so are ignored.
     return true;
+}
+
+bool PictureLayout::isSame(const PictureLayout& other) const
+{
+    return m_layoutInfo == other.m_layoutInfo && m_width == other.m_width && m_height == other.m_height;
 }
 
 bool PictureLayout::isInterleaved() const

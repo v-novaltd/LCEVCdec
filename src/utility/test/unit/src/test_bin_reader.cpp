@@ -13,10 +13,10 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "find_assets_dir.h"
-#include "LCEVC/utility/bin_reader.h"
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <LCEVC/utility/bin_reader.h>
 #include <xxhash.h>
 
 #include <filesystem>

@@ -15,8 +15,12 @@
 find_package(Doxygen REQUIRED)
 find_package(Sphinx REQUIRED)
 
-# Doxygen only consumes the lcevc_dec.h header right now
-set(DOXYGEN_INPUT ${PROJECT_SOURCE_DIR}/src/api/include/LCEVC/lcevc_dec.h)
+# Doxygen only consumes selected externally facing headers referenced by the docs
+set(DOXYGEN_INPUTS
+    "${PROJECT_SOURCE_DIR}/src/api/include/LCEVC/lcevc_dec.h"
+    "${PROJECT_SOURCE_DIR}/src/enhancement/include/LCEVC/enhancement"
+    "${PROJECT_SOURCE_DIR}/src/common/include/LCEVC/common")
+string(REPLACE ";" " " DOXYGEN_INPUT "${DOXYGEN_INPUTS}")
 set(DOXYGEN_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/docs)
 set(DOXYGEN_INDEX_FILE ${DOXYGEN_OUTPUT_DIR}/xml/index.xml)
 set(DOXYFILE_IN ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in)
@@ -29,7 +33,7 @@ add_custom_command(
     COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYFILE_OUT}
     MAIN_DEPENDENCY ${DOXYFILE_OUT}
     ${DOXYFILE_IN}
-    DEPENDS ${DOXYGEN_INPUT}
+    DEPENDS ${DOXYGEN_INPUTS}
     COMMENT "Generating docs Doxygen XML")
 
 add_custom_target(doxygen DEPENDS ${DOXYGEN_INDEX_FILE})
@@ -43,6 +47,6 @@ add_custom_target(
     COMMAND
         ${SPHINX_EXECUTABLE} ${SPHINX_SOURCE} ${SPHINX_BUILD} -b html -W -n -a
         -Dversion=${GIT_SHORT_VERSION} -Drelease=${GIT_VERSION}
-        -Dbreathe_projects.LCEVC_DEC=${DOXYGEN_OUTPUT_DIR}/xml
+        -Dbreathe_projects.LCEVCdec=${DOXYGEN_OUTPUT_DIR}/xml
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Generating docs with Sphinx")

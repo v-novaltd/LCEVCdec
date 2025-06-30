@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LCEVCdec WASM Sample</title>
+</head>
+<body>
+<h1>Check the console for the result</h1>
+<script src="liblcevc_dec.js"></script>
+<script>
+    LCEVCdecModule().then((dec) => {
+        const result = dec._demo(5, 9);
+        console.log('Result:', result);
+    });
+</script>
+</body>
+</html>

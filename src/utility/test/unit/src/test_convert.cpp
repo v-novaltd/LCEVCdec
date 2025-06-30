@@ -12,13 +12,12 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include "LCEVC/lcevc_dec.h"
-#include "LCEVC/utility/types.h"
-#include "LCEVC/utility/types_cli11.h"
-
 #include <CLI/CLI.hpp>
 #include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <LCEVC/lcevc_dec.h>
+#include <LCEVC/utility/types.h>
+#include <LCEVC/utility/types_cli11.h>
 
 #include <array>
 #include <sstream>

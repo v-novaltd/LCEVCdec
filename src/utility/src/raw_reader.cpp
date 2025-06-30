@@ -14,17 +14,16 @@
 
 // Class for reading raw image files from streams or filesystem.
 //
-#include "LCEVC/utility/raw_reader.h"
-
-#include "LCEVC/utility/check.h"
-#include "LCEVC/utility/picture_lock.h"
-#include "LCEVC/utility/string_utils.h"
 #include "parse_raw_name.h"
 
+#include <fmt/core.h>
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/utility/check.h>
+#include <LCEVC/utility/picture_lock.h>
+#include <LCEVC/utility/raw_reader.h>
+#include <LCEVC/utility/string_utils.h>
 
 #include <fstream>
-#include <memory>
 
 namespace lcevc_dec::utility {
 
@@ -91,7 +90,9 @@ std::unique_ptr<RawReader> createRawReader(std::string_view filename)
     LCEVC_PictureDesc pictureDescription = parseRawName(filename, rate);
     if (pictureDescription.colorFormat == LCEVC_ColorFormat_Unknown ||
         pictureDescription.width == 0 || pictureDescription.height == 0) {
-        // Could not extract a good format from filename
+        fmt::print(
+            stderr,
+            "Could not extract a format from YUV filename, include dimensions and bitdepth\n");
         return nullptr;
     }
 

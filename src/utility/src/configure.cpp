@@ -12,9 +12,9 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include "LCEVC/utility/configure.h"
-
 #include <fmt/core.h>
+#include <LCEVC/lcevc_dec.h>
+#include <LCEVC/utility/configure.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -48,7 +48,7 @@ ValueType classifyValue(const json::value_t& value)
     }
 }
 
-// Classify type of a json array
+// Classify the type of a json array
 ValueType classifyArray(const json::array_t& array)
 {
     if (array.size() == 0) {
@@ -65,48 +65,16 @@ ValueType classifyArray(const json::array_t& array)
 
     return type;
 }
-} // namespace
 
-namespace lcevc_dec::utility {
-
-LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std::string_view jsonStr)
+LCEVC_ReturnCode configureItems(LCEVC_DecoderHandle decoderHandle, const json& configuration,
+                                const std::function<bool(std::string_view)>& filter)
 {
-    if (jsonStr.empty()) {
-        return LCEVC_Error;
-    }
-
-    //    Document configuration;
-
-    json configuration;
-
-    if (jsonStr[0] != '{') {
-        // File
-        std::ifstream jsonFile(jsonStr.data());
-        if (!jsonFile) {
-            return LCEVC_Error;
-        }
-        std::string str{std::istreambuf_iterator<char>(jsonFile), std::istreambuf_iterator<char>()};
-        try {
-            configuration = json::parse(str.c_str());
-        } catch (const json::parse_error&) {
-            return LCEVC_Error;
-        }
-    } else {
-        // Raw json
-        try {
-            configuration = json::parse(jsonStr);
-        } catch (const json::parse_error&) {
-            return LCEVC_Error;
-        }
-    }
-
-    // Expecting a valid json object
-    if (configuration.is_null()) {
-        return LCEVC_Error;
-    }
-
-    for (auto& item : configuration.items()) {
+    for (const auto& item : configuration.items()) {
         LCEVC_ReturnCode ret = LCEVC_Error;
+
+        if (filter && !filter(item.key())) {
+            continue;
+        }
 
         if (item.value().type() != json::value_t::array) {
             // Scalar value
@@ -179,6 +147,56 @@ LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std
     }
 
     return LCEVC_Success;
+}
+
+} // namespace
+
+namespace lcevc_dec::utility {
+
+LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std::string_view jsonStr)
+{
+    if (jsonStr.empty()) {
+        return LCEVC_Error;
+    }
+
+    // Document configuration;
+    json configuration;
+
+    if (jsonStr[0] != '{') {
+        // File
+        std::ifstream jsonFile(jsonStr.data());
+        if (!jsonFile) {
+            return LCEVC_Error;
+        }
+        std::string str{std::istreambuf_iterator<char>(jsonFile), std::istreambuf_iterator<char>()};
+        try {
+            configuration = json::parse(str.c_str());
+        } catch (const json::parse_error&) {
+            return LCEVC_Error;
+        }
+    } else {
+        // Raw json
+        try {
+            configuration = json::parse(jsonStr);
+        } catch (const json::parse_error&) {
+            return LCEVC_Error;
+        }
+    }
+
+    // Expecting a valid json object
+    if (configuration.is_null()) {
+        return LCEVC_Error;
+    }
+
+    // Two passes - first pass with any pipeline or logging items, second without
+    auto filter = [](std::string_view name) {
+        return name == "pipeline" || name == "log_level" || name == "log_stdout";
+    };
+    if (auto ret = configureItems(decoderHandle, configuration, filter); ret != LCEVC_Success) {
+        return ret;
+    }
+
+    return configureItems(decoderHandle, configuration, std::not_fn(filter));
 }
 
 } // namespace lcevc_dec::utility

@@ -1,5 +1,4 @@
 breathe==4.35.0
-sphinx==6.2.1
-sphinx_rtd_theme==1.2.0
-sphinxcontrib-plantuml==0.25
-snowballstemmer==2.2.0
+sphinx==8.0.2
+sphinx_rtd_theme==3.0.1
+sphinxcontrib-plantuml==0.30

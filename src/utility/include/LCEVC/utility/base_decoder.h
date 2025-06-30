@@ -17,9 +17,8 @@
 #ifndef VN_LCEVC_UTILITY_BASE_DECODER_H
 #define VN_LCEVC_UTILITY_BASE_DECODER_H
 
-#include "LCEVC/lcevc_dec.h"
-
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/lcevc_dec.h>
 
 #include <chrono>
 #include <cstdint>
@@ -62,12 +61,13 @@ public:
         explicit Data(const StampedBuffer& buffer)
             : ptr(buffer.second.data())
             , size(static_cast<uint32_t>(buffer.second.size()))
-            , timestamp(buffer.first)
+            , pts(buffer.first)
         {}
 
         const uint8_t* ptr = nullptr;
         uint32_t size = 0;
-        int64_t timestamp = -1;
+        int64_t pts = -1;
+        uint16_t discontinuityCount = 0;
         std::chrono::high_resolution_clock::time_point baseDecodeStart;
 
         bool empty() const { return ptr == nullptr; }
@@ -75,7 +75,8 @@ public:
         {
             ptr = nullptr;
             size = 0;
-            timestamp = -1;
+            pts = -1;
+            discontinuityCount = 0;
             baseDecodeStart = std::chrono::time_point<std::chrono::high_resolution_clock>();
         }
     };
@@ -150,4 +151,4 @@ std::unique_ptr<BaseDecoder> createBaseDecoderBinNonLinear(std::string_view rawF
 
 } // namespace lcevc_dec::utility
 
-#endif
+#endif // VN_LCEVC_UTILITY_BASE_DECODER_H

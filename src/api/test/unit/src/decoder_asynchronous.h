@@ -12,6 +12,9 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#ifndef VN_LCEVC_API_DECODER_ASYNCHRONOUS_H
+#define VN_LCEVC_API_DECODER_ASYNCHRONOUS_H
+
 #include "event_tester.h"
 
 #include <LCEVC/api_utility/threading.h>
@@ -57,7 +60,7 @@ private:
     uint8_t m_doneTasks = 0;
     const uint8_t m_maxFinishedTasks;
 
-    // Thread must be last memvar, so that all the others are initialised before it starts.
+    // Thread must be last memvar, so that all the others are initialized before it starts.
     std::condition_variable m_cv;
     std::mutex m_mutex;
     std::thread m_thread;
@@ -96,3 +99,5 @@ private:
     // m_latestReceivedPts
     Thread m_outputThread{VN_TO_THREAD_NAME("LCEVC_test_api_threaded_output"), 1};
 };
+
+#endif // VN_LCEVC_API_DECODER_ASYNCHRONOUS_H

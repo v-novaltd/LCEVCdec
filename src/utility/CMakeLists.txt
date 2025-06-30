@@ -31,12 +31,10 @@ target_include_directories(lcevc_dec_utility PUBLIC "${CMAKE_CURRENT_LIST_DIR}/.
 target_link_libraries(
     lcevc_dec_utility
     PUBLIC lcevc_dec::platform lcevc_dec::compiler $<TARGET_NAME_IF_EXISTS:ffmpeg-libs::ffmpeg-libs>
-    PRIVATE lcevc_dec::api_utility fmt::fmt $<TARGET_NAME_IF_EXISTS:nlohmann_json::nlohmann_json>)
+    PRIVATE lcevc_dec::api_utility lcevc_dec::extract fmt::fmt
+            $<TARGET_NAME_IF_EXISTS:nlohmann_json::nlohmann_json>)
 
 add_library(lcevc_dec::utility ALIAS lcevc_dec_utility)
 
-include(GNUInstallDirs)
-
-install(TARGETS lcevc_dec_utility DESTINATION lib)
-install(FILES ${INTERFACES} DESTINATION include/LCEVC/utility)
-install(FILES ${SOURCES} ${HEADERS} DESTINATION ${CMAKE_INSTALL_DOCDIR}/src/utility)
+lcevc_install(lcevc_dec_utility)
+install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/utility")

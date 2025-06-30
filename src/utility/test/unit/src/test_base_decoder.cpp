@@ -13,10 +13,10 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "find_assets_dir.h"
-#include "LCEVC/utility/base_decoder.h"
-#include "LCEVC/utility/bin_reader.h"
 
 #include <gtest/gtest.h>
+#include <LCEVC/utility/base_decoder.h>
+#include <LCEVC/utility/bin_reader.h>
 #include <xxhash.h>
 
 #include <filesystem>
@@ -76,7 +76,6 @@ TEST(BaseDecoder, BinMatchesLibAV)
             int64_t pts = 0;
             std::vector<uint8_t> payload;
             EXPECT_TRUE(binReader->read(dts, pts, payload));
-
             EXPECT_EQ(enhancement.size, payload.size());
 
             EXPECT_EQ(XXH64(enhancement.ptr, enhancement.size, 0),

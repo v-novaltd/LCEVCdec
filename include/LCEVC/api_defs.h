@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -39,9 +39,13 @@
 
 #define LCEVC_API VN_LCEVC_PublicAPI
 
-/*! Helper macros to assist with concatenating inside the pre-processor.
- */
+/** Helper macros to assist with concatenating inside the pre-processor. */
 #define VN_LCEVC_Concat_Do(a, version) a##version
 #define VN_LCEVC_Concat(a, version) VN_LCEVC_Concat_Do(a, version)
+
+/** Define API versioning */
+#define LCEVC_DEC_VERSION_MAJOR 4
+#define LCEVC_DEC_VERSION_MINOR 0
+#define LCEVC_DEC_VERSION_PATCH 0
 
 #endif // API_DEFS_H

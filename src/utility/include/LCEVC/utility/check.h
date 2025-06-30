@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -17,7 +17,7 @@
 #ifndef VN_LCEVC_UTILITY_CHECK_H
 #define VN_LCEVC_UTILITY_CHECK_H
 
-#include "LCEVC/lcevc_dec.h"
+#include <LCEVC/lcevc_dec.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -34,7 +34,7 @@ extern "C"
 #define VN_LCEVC_CHECK(expr) LCEVC_CheckFn(__FILE__, __LINE__, #expr, expr)
 
 /*!
- * \brief Check if an expression returns an LCEVC error other then LCEVC_AGain
+ * \brief Check if an expression returns an LCEVC error other than LCEVC_Again
  *
  * If there is an error prints summary to `stderr` and exits.
  *
@@ -76,4 +76,4 @@ void utilityCheckFn(const char* file, int line, const char* expr, bool r, const 
 }
 #endif
 
-#endif
+#endif // VN_LCEVC_UTILITY_CHECK_H

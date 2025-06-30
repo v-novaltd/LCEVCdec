@@ -1,0 +1,50 @@
+/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
+// Vulkan blit shader
+
+#version 450
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
+
+layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
+    uint samples[];
+} src;
+
+layout(std430, set = 0, binding = 1) buffer restrict writeonly DstImageBuffer {
+    uint samples[];
+} dst;
+
+layout(push_constant) uniform consts {
+    int width;
+    int height;
+    int batchSize; // number of elements to process in each shader invocation
+};
+
+#include "common.glsl"
+
+void main()
+{
+    const uint x = gl_GlobalInvocationID.x;
+    const uint y = gl_GlobalInvocationID.y;
+    const uint index = x + (width / 2) * y;
+    if (index < ((width / 2) * height)) {
+        const ivec2 srcPixels = unpack16bitInternals(src.samples[index]);
+        ivec2 dstPixels = unpack16bitInternals(dst.samples[index]);
+        ivec2 sum;
+        sum.x = saturateS16(dstPixels.x + srcPixels.x);
+        sum.y = saturateS16(dstPixels.y + srcPixels.y);
+        dst.samples[index] = pack16bitInternals(sum);
+    }
+}

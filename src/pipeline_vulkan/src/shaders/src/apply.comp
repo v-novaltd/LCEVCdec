@@ -1,0 +1,181 @@
+/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
+// Vulkan Apply shader
+
+#version 450
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
+
+layout(std430, set = 0, binding = 0) buffer restrict readonly CommandBuffer {
+    uint samples[];
+} cmd;
+
+layout(std430, set = 0, binding = 1) buffer restrict writeonly PlaneBuffer {
+    uint samples[];
+} dst;
+
+layout(push_constant) uniform consts {
+    int srcWidth;
+    int srcHeight;
+    int residualOffset;
+    int stride;
+    int saturate;
+    int testVal;
+    int layerCount;
+};
+
+const uint ADD = 0;
+const uint SET = 1;
+const uint SETZERO = 2;
+const uint CLEARSET = 3;
+const int SATURATION = 32767;
+const uint bit8 = 1;
+
+uint applyCounter = 0;
+
+#include "common.glsl"
+
+void applyTu(uint firstPixelinTu, uint firstResidual, uint operation, uint tuWidth)
+{
+    for (uint j = 0; j < tuWidth; ++j) {
+        for (uint i = 0; i < tuWidth / 2; ++i) {
+            const uint pixelPairIndex = firstPixelinTu + i + j * stride / 2;
+            const uint residualPairIndex = residualOffset / 4 + firstResidual / 2 +
+                                           (applyCounter * tuWidth * tuWidth / 2) + i + j * tuWidth / 2;
+
+            if (pixelPairIndex >= srcWidth * srcHeight / 2) {
+                return;
+            }
+
+            ivec2 pixelPair;
+            if (operation == ADD) {
+                if (saturate == 1) {
+                    pixelPair.x = SATURATION;
+                    pixelPair.y = SATURATION;
+                } else {
+                    pixelPair = unpack16bitInternals(dst.samples[pixelPairIndex]);
+                    const ivec2 residualPair = unpack16bitInternals(cmd.samples[residualPairIndex]);
+                    pixelPair.x += residualPair.x;
+                    pixelPair.y += residualPair.y;
+                }
+            } else if (operation == SET) {
+                if (saturate == 1) {
+                    pixelPair.x = SATURATION;
+                    pixelPair.y = SATURATION;
+                } else {
+                    const ivec2 residualPair = unpack16bitInternals(cmd.samples[residualPairIndex]);
+                    pixelPair.x = residualPair.x;
+                    pixelPair.y = residualPair.y;
+                }
+            } else if (operation == SETZERO) {
+                pixelPair.x = 0;
+                pixelPair.y = 0;
+            }
+            dst.samples[pixelPairIndex] = pack16bitInternals(pixelPair);
+        }
+    }
+    if (operation != SETZERO) {
+        applyCounter++;
+    }
+}
+
+void process64Bitmask(uint bitmaskMost, uint bitmaskLeast, uint operation,
+                      uint startingPixelInBLock, uint tu, uint tuWidth, uint dds)
+{
+    for (uint i = 0; i < 64; ++i) {
+        uint bitSelector;
+        uint willApply;
+        if (i < 32) {
+            bitSelector = 1 << (31 - i);
+            willApply = bitmaskMost & bitSelector;
+        } else {
+            bitSelector = 1 << (63 - i);
+            willApply = bitmaskLeast & bitSelector;
+        }
+
+        const uint tusInRow = (dds == 1) ? 8 : 16;
+        const uint tuX = i % tusInRow;
+        const uint tuY = i / tusInRow;
+
+        const uint index = startingPixelInBLock + tuX * 2 + tuY * tuWidth * stride / 2;
+
+        if (willApply > 0) {
+            if (operation == ADD) {
+                applyTu(index, tu, ADD, tuWidth);
+            } else if (operation == SET) {
+                applyTu(index, tu, SET, tuWidth);
+            } else if (operation == SETZERO) {
+                applyTu(index, tu, SETZERO, tuWidth);
+            } else { // CLEARSET
+                applyTu(index, tu, SET, tuWidth);
+            }
+        } else {
+            if (operation == CLEARSET) {
+                applyTu(index, 0, SETZERO, tuWidth);
+            }
+        }
+    }
+}
+
+void main()
+{
+    const uint CMDSIZE =
+        10; // 4 without DD. The 3 extra (wasted) uint64_t are still part of the command stream in DDS.
+    const uint tuWidth = (layerCount == 16) ? 4 : 2;
+    const uint x = gl_GlobalInvocationID.x;
+    const uint commandIndex = x * CMDSIZE;
+    ivec4 command = ivec4(cmd.samples[commandIndex], cmd.samples[commandIndex + 1],
+                          cmd.samples[commandIndex + 2], cmd.samples[commandIndex + 3]);
+
+    uint operation = command.x & 0x3;        // One of GpuApplyOperation.
+    uint block = (command.x >> 2) & 0x3FFFF; // Number of block within temporal buffer to operate on.
+    uint tu = ((command.x >> 20) & 0xFFF) |
+              ((command.y & 0x7FFF) << 12); // Offset into CommandBuffer of first residual for operation.
+    uint bitStart = (command.y >> 15) & 0xFF;  // First set bit in bitmask.
+    uint bitCount = (command.y >> 23) & 0x1FF; // Number of set bits in bitmask.
+    uint bitmaskLeast = command.z;
+    uint bitmaskMost = command.w;
+
+    // DD
+    uint bitmask2Least = 0;
+    uint bitmask2Most = 0;
+    uint bitmask3Least = 0;
+    uint bitmask3Most = 0;
+    uint bitmask4Least = 0;
+    uint bitmask4Most = 0;
+    if (layerCount == 4) {
+        bitmask2Least = cmd.samples[commandIndex + 4];
+        bitmask2Most = cmd.samples[commandIndex + 5];
+        bitmask3Least = cmd.samples[commandIndex + 6];
+        bitmask3Most = cmd.samples[commandIndex + 7];
+        bitmask4Least = cmd.samples[commandIndex + 8];
+        bitmask4Most = cmd.samples[commandIndex + 9];
+    }
+
+    const uint blocksInRow = (srcWidth % 32 == 0) ? (srcWidth / 32) : (srcWidth / 32) + 1;
+    const uint blocksInColumn = (srcHeight % 32 == 0) ? (srcHeight / (2*32)) : (srcHeight / (2*32)) + 1;
+    const uint blockX = block % blocksInRow;
+    const uint blockY = block / blocksInRow;
+    const uint firstPixelInBLock = blockX * 16 + blockY * (stride / 2) * 32;
+
+    if (layerCount == 16) { // DDS
+        process64Bitmask(bitmaskMost, bitmaskLeast, operation, firstPixelInBLock, tu, tuWidth, 1);
+    } else { // DD
+        process64Bitmask(bitmaskMost, bitmaskLeast, operation, firstPixelInBLock, tu, tuWidth, 0);
+        process64Bitmask(bitmask2Most, bitmask2Least, operation, firstPixelInBLock + 2 * stride, tu, tuWidth, 0);
+        process64Bitmask(bitmask3Most, bitmask3Least, operation, firstPixelInBLock + 2 * 2 * stride, tu, tuWidth, 0);
+        process64Bitmask(bitmask4Most, bitmask4Least, operation, firstPixelInBLock + 3 * 2 * stride, tu, tuWidth, 0);
+    }
+}

@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -12,7 +12,14 @@
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
-list(APPEND SOURCES "src/hash.cpp" "src/hash.h" "src/main.cpp")
+list(
+    APPEND
+    SOURCES
+    "src/hash.cpp"
+    "src/hash.h"
+    "src/trickplay.cpp"
+    "src/trickplay.h"
+    "src/main.cpp")
 
 set(ALL_FILES ${SOURCES} "Sources.cmake")
 

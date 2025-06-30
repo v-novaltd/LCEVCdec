@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -13,11 +13,9 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "pool.h"
-
+//
 #include "accel_context.h"
-#include "decoder.h"
-#include "picture.h"
-#include "picture_lock.h"
+#include "decoder_context.h"
 
 // - Pool -----------------------------------------------------------------------------------------
 
@@ -25,8 +23,8 @@ namespace lcevc_dec::decoder {
 // Declare the pool types. Having this here (rather than in the header) allows us to avoid
 // including every Pool'd type whenever we want to use one Pool.
 template class Pool<AccelContext>;
-template class Pool<Decoder>; // Only used as a base class for DecoderPool
-template class Pool<Picture>;
-template class Pool<PictureLock>;
+template class Pool<DecoderContext>;
+template class Pool<LdpPicture>;
+template class Pool<LdpPictureLock>;
 
 } // namespace lcevc_dec::decoder

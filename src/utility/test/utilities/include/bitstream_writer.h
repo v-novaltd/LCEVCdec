@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,8 +14,10 @@
 
 #pragma once
 
-#include "LCEVC/utility/types.h"
+#ifndef VN_LCEVC_UTILITY_BITSTREAM_WRITER_H
+#define VN_LCEVC_UTILITY_BITSTREAM_WRITER_H
 
+#include <cstdint>
 #include <functional>
 
 namespace lcevc_dec::utility {
@@ -37,13 +39,13 @@ public:
         : m_byteWriter(byteWriter)
     {}
 
-    bool WriteBits(uint8_t numBits, uint32_t value, bool bFinish = false);
-    bool Finish();
+    bool writeBits(uint8_t numBits, uint32_t value, bool bFinish = false);
+    bool finish();
 
-    uint64_t BitSize() const { return m_bitSize; }
-    uint64_t ByteSize() const { return (m_bitSize + 7) >> 3; }
+    uint64_t bitSize() const { return m_bitSize; }
+    uint64_t byteSize() const { return (m_bitSize + 7) >> 3; }
 
-    static BitStreamWriter OfRawMemory(uint8_t* data, uint32_t size);
+    static BitStreamWriter toRawMemory(uint8_t* data, uint32_t size);
 
 private:
     BitStreamByteWriter m_byteWriter;
@@ -72,3 +74,5 @@ private:
 // -------------------------------------------------------------------------
 
 } // namespace lcevc_dec::utility
+
+#endif // VN_LCEVC_UTILITY_BITSTREAM_WRITER_H

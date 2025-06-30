@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,9 +14,8 @@
 
 // Several utility functions that any sane string library would provide.
 //
-#include "LCEVC/utility/string_utils.h"
-
 #include <fmt/core.h>
+#include <LCEVC/utility/string_utils.h>
 
 #include <algorithm>
 #include <cctype>
@@ -86,7 +85,7 @@ std::vector<std::string> split(std::string_view src, std::string_view separators
     return output;
 }
 
-std::string hexDump(const uint8_t* data, uint32_t size, uint32_t offset)
+std::string hexDump(const uint8_t* data, uint32_t size, uint32_t offset, bool humanReadable)
 {
     const int bytesPerLine = 16;
     const int outputCharsPerLine = 13;
@@ -95,23 +94,31 @@ std::string hexDump(const uint8_t* data, uint32_t size, uint32_t offset)
     result.reserve(size * outputCharsByte + (size / bytesPerLine) * outputCharsPerLine);
 
     for (uint64_t line = 0; line < size; line += bytesPerLine) {
-        result += fmt::format("{:#06x} : ", offset + line);
+        if (humanReadable) {
+            result += fmt::format("{:#06x} : ", offset + line);
+        }
         // Bytes
         for (uint64_t byte = 0; byte < bytesPerLine; ++byte) {
             if (line + byte < size) {
-                result += fmt::format("{:02x} ", data[line + byte]);
+                if (humanReadable) {
+                    result += fmt::format("{:02x} ", data[line + byte]);
+                } else {
+                    result += fmt::format("0x{:02x}, ", data[line + byte]);
+                }
             } else {
                 result += "-- ";
             }
         }
 
-        result += " : ";
+        if (humanReadable) {
+            result += " : ";
 
-        // Chars
-        for (uint64_t byte = 0; byte < bytesPerLine; ++byte) {
-            if (line + byte < size) {
-                const char chr = static_cast<char>(data[line + byte]);
-                result.push_back(isprint(chr) ? chr : '.');
+            // Chars
+            for (uint64_t byte = 0; byte < bytesPerLine; ++byte) {
+                if (line + byte < size) {
+                    const char chr = static_cast<char>(data[line + byte]);
+                    result.push_back(isprint(chr) ? chr : '.');
+                }
             }
         }
 

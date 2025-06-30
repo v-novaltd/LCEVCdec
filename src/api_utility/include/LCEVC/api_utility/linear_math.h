@@ -14,8 +14,8 @@
 
 // Vector and matrix multiplication. A substitute for linmath.h. Must be C-compatible.
 //
-#ifndef VN_LCEVC_UTILITY_LINEAR_MATH_H
-#define VN_LCEVC_UTILITY_LINEAR_MATH_H
+#ifndef VN_LCEVC_API_UTILITY_LINEAR_MATH_H
+#define VN_LCEVC_API_UTILITY_LINEAR_MATH_H
 
 #include <math.h>
 #include <stdbool.h>
@@ -132,4 +132,4 @@ LINEAR_MATH_DEFINE_MAT4X4_MULT(DVec4, I16Vec4, int16_t)
 LINEAR_MATH_DEFINE_MAT4X4_MULT(DVec4, DVec4, double)
 LINEAR_MATH_DEFINE_MAT4X4_MULT(I16Vec4, DVec4, double)
 
-#endif // VN_LCEVC_UTILITY_LINEAR_MATH_H
+#endif // VN_LCEVC_API_UTILITY_LINEAR_MATH_H

@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -16,37 +16,19 @@ list(
     APPEND
     SOURCES
     "src/api.cpp"
-    "src/buffer_manager.cpp"
-    "src/decoder.cpp"
-    "src/decoder_config.cpp"
-    "src/decoder_pool.cpp"
-    "src/event_manager.cpp"
+    "src/decoder_context.cpp"
+    "src/event_dispatcher.cpp"
     "src/interface.cpp"
-    "src/lcevc_processor.cpp"
-    "src/log.cpp"
-    "src/picture.cpp"
-    "src/picture_copy.cpp"
-    "src/picture_lock.cpp"
     "src/pool.cpp")
 
 list(
     APPEND
     HEADERS
     "src/accel_context.h"
-    "src/buffer_manager.h"
-    "src/config_map.h"
-    "src/decoder.h"
-    "src/decoder_config.h"
-    "src/decoder_pool.h"
-    "src/enums.h"
-    "src/event_manager.h"
+    "src/event.h"
+    "src/event_dispatcher.h"
     "src/handle.h"
     "src/interface.h"
-    "src/lcevc_processor.h"
-    "src/log.h"
-    "src/picture.h"
-    "src/picture_copy.h"
-    "src/picture_lock.h"
     "src/pool.h")
 
 list(APPEND INTERFACES "include/LCEVC/lcevc_dec.h")

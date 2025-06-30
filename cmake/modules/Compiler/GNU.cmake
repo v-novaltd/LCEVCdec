@@ -25,8 +25,8 @@ target_compile_options(
     lcevc_dec::compiler
     INTERFACE $<$<BOOL:${VN_SDK_WARNINGS_FAIL}>:-Werror>
               -Wall
-              -Wshadow
               -Wwrite-strings
               $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>
               $<$<COMPILE_LANGUAGE:C>:--std=gnu11>
-              $<$<COMPILE_LANGUAGE:CXX>:--std=c++17>)
+              $<$<COMPILE_LANGUAGE:CXX>:--std=c++17>
+              -fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.)

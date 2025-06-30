@@ -40,15 +40,12 @@ void DecoderSynchronous::callback(LCEVC_DecoderHandle decHandle, LCEVC_Event eve
         case LCEVC_BasePictureDone: {
             EXPECT_EQ(getNumUnsentBases(), 0);
             reuseBase(picHandle);
-            EXPECT_EQ(kSuccesses.count(sendEnhancement(decHandle)), 1);
-            EXPECT_EQ(kSuccesses.count(sendBase(decHandle)), 1);
             break;
         }
         case LCEVC_OutputPictureDone: {
             ASSERT_NE(decodeInformation, nullptr);
             checkDecInfo(*decodeInformation);
             reuseOutput(picHandle);
-            EXPECT_EQ(kSuccesses.count(sendOutput(decHandle)), 1);
             break;
         }
 

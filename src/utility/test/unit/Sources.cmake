@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -23,7 +23,6 @@ list(
     "src/test_chrono.cpp"
     "src/test_configure.cpp"
     "src/test_convert.cpp"
-    "src/test_extract.cpp"
     "src/test_get_program_dir.cpp"
     "src/test_md5.cpp"
     "src/test_parse_raw_name.cpp"

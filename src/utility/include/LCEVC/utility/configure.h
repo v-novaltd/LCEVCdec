@@ -17,7 +17,7 @@
 #ifndef VN_LCEVC_UTILITY_CONFIGURE_H
 #define VN_LCEVC_UTILITY_CONFIGURE_H
 
-#include "LCEVC/lcevc_dec.h"
+#include <LCEVC/lcevc_dec.h>
 
 #include <string_view>
 
@@ -39,4 +39,4 @@ LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoder, std::stri
 
 } // namespace lcevc_dec::utility
 
-#endif
+#endif // VN_LCEVC_UTILITY_CONFIGURE_H

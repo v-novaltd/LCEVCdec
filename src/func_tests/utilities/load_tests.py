@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -102,7 +102,7 @@ def auto_gen_names(tests):
         iterated_params = set()
         for param in all_params:
             param_group, param_name = param.split(':')
-            if 'base' not in param_name and 'perseus' not in param_name and \
+            if 'base' not in param_name and 'lcevc' not in param_name and \
                     len(set([test[param_group][param_name] for test in group_tests
                              if test.get(param_group, {}).get(param_name)])) > 1:
                 iterated_params.add(param)
@@ -155,6 +155,8 @@ def csv_json_to_dict(csv_args):
             try:
                 if '.' in value:
                     value = float(value)
+                elif value.startswith('0x'):
+                    value = int(value, 16)
                 else:
                     value = int(value)
             except (TypeError, ValueError):

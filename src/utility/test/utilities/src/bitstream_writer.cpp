@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,19 +14,22 @@
 
 #include "bitstream_writer.h"
 
+#include <algorithm>
+
 namespace lcevc_dec::utility {
 
 // -------------------------------------------------------------------------
 
-bool BitStreamWriter::WriteBits(uint8_t numBits, uint32_t value, bool bFinish)
+bool BitStreamWriter::writeBits(uint8_t numBits, uint32_t value, bool bFinish)
 {
     // Clear high bits of value for safety during the first iteration.
     value &= ((1 << numBits) - 1);
 
     while (numBits) {
         if (m_remainingBits == 0) {
-            if (!m_byteWriter(m_byte))
+            if (!m_byteWriter(m_byte)) {
                 return false;
+            }
 
             m_byte = 0;
             m_remainingBits = 8;
@@ -54,10 +57,10 @@ bool BitStreamWriter::WriteBits(uint8_t numBits, uint32_t value, bool bFinish)
         m_bitSize += writeAmount;
     }
 
-    return bFinish ? Finish() : true;
+    return bFinish ? finish() : true;
 }
 
-bool BitStreamWriter::Finish()
+bool BitStreamWriter::finish()
 {
     // No more bits to write out.
     if (m_remainingBits == 8) {
@@ -72,7 +75,7 @@ bool BitStreamWriter::Finish()
     return m_byteWriter(outputByte);
 }
 
-BitStreamWriter BitStreamWriter::OfRawMemory(uint8_t* data, uint32_t size)
+BitStreamWriter BitStreamWriter::toRawMemory(uint8_t* data, uint32_t size)
 {
     return BitStreamWriter{BitStreamByteWriterRawMemory{data, size}};
 }
@@ -86,8 +89,9 @@ BitStreamByteWriterRawMemory::BitStreamByteWriterRawMemory(uint8_t* data, uint32
 
 bool BitStreamByteWriterRawMemory::operator()(uint8_t byte) noexcept
 {
-    if (m_position >= m_size)
+    if (m_position >= m_size) {
         return false;
+    }
 
     m_data[m_position++] = byte;
     return true;

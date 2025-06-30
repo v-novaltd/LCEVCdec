@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -37,6 +37,8 @@ def is_platform_valid():
         for invalid_arch in INVALID_TARGETS:
             if invalid_arch in os.environ.get('TARGET'):
                 return False
+    if sys.platform == 'darwin':
+        return False
     return True
 
 
@@ -44,7 +46,7 @@ def is_os_valid(unzipped_path):
     return sys.platform in os.listdir(unzipped_path)
 
 
-def initialise_ltm():
+def initialize_ltm():
     if not is_platform_valid():
         logger.error(
             f"Current platform {config.get('PLATFORM')} or target {os.environ.get('TARGET')} is"

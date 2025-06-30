@@ -1,0 +1,116 @@
+/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
+// Vulkan Vertical Upscale shader. Specialised for a 4 tap kernel.
+
+#version 450
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
+
+layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
+    uint samples[];
+} src;
+
+layout(std430, set = 0, binding = 1) buffer restrict writeonly DstImageBuffer {
+    uint samples[];
+} dst;
+
+#include "common.glsl"
+#include "upscale_constants.glsl"
+
+void main()
+{
+    const uint x = gl_GlobalInvocationID.x;
+    const uint y = gl_GlobalInvocationID.y;
+    const uint dstWidth = srcWidth;
+    const uint dstHeight = 2 * srcHeight;
+    const uint packDensity = 2; // two internal format pixels per uint (for now)
+    const uint srcWidthPacked = pixelStrideIn / packDensity;
+    const uint srcWidthPackedReal = srcWidth / packDensity;
+    const uint dstWidthPacked = dstWidth / packDensity;
+    const uint srcOffset = pixelOffsetIn / packDensity;
+    const uint dstOffset = pixelOffsetIn; // 2x for doubling image size
+
+    if (x >= srcWidthPackedReal || y >= srcHeight) {
+        return;
+    }
+
+    if (y == 0) { // first and last pixel in pairs
+        const ivec2 first = unpack16bitInternals(src.samples[srcOffset + x]);
+        const ivec2 second = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked]);
+
+        ivec2 dstFirst;
+        dstFirst.x = clamp_s15(ds + kernel[3] * first.x + kernel[2] * first.x + kernel[1] * first.x + kernel[0] * second.x);
+        dstFirst.y = clamp_s15(ds + kernel[3] * first.y + kernel[2] * first.y + kernel[1] * first.y + kernel[0] * second.y);
+
+        dst.samples[dstOffset + x] = pack16bitInternals(dstFirst);
+
+        const ivec2 last = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (srcHeight - 1)]);
+        const ivec2 secondToLast = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (srcHeight - 2)]);
+
+        ivec2 dstLast;
+        dstLast.x = clamp_s15(ds + kernel[0] * secondToLast.x + kernel[1] * last.x + kernel[2] * last.x + kernel[3] * last.x);
+        dstLast.y = clamp_s15(ds + kernel[0] * secondToLast.y + kernel[1] * last.y + kernel[2] * last.y + kernel[3] * last.y);
+
+        dst.samples[dstOffset + x + dstWidthPacked * (dstHeight - 1)] = pack16bitInternals(dstLast);
+    } else if (y == 1) { // first pair of pixels in pairs
+        const ivec2 first = unpack16bitInternals(src.samples[srcOffset + x]);
+        const ivec2 second = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked]);
+        const ivec2 third = unpack16bitInternals(src.samples[srcOffset + x + 2 * srcWidthPacked]);
+
+        ivec2 dstForwards;
+        dstForwards.x = clamp_s15(ds + kernel[0] * first.x + kernel[1] * first.x + kernel[2] * second.x + kernel[3] * third.x);
+        dstForwards.y = clamp_s15(ds + kernel[0] * first.y + kernel[1] * first.y + kernel[2] * second.y + kernel[3] * third.y);
+
+        ivec2 dstBackwards;
+        dstBackwards.x = clamp_s15(ds + kernel[3] * first.x + kernel[2] * first.x + kernel[1] * second.x + kernel[0] * third.x);
+        dstBackwards.y = clamp_s15(ds + kernel[3] * first.y + kernel[2] * first.y + kernel[1] * second.y + kernel[0] * third.y);
+
+        dst.samples[dstOffset + x + dstWidthPacked] = pack16bitInternals(dstForwards);
+        dst.samples[dstOffset + x + 2 * dstWidthPacked] = pack16bitInternals(dstBackwards);
+    }
+
+    else if (y == 2) { // last pair of pixels in pairs
+        const ivec2 last = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (srcHeight - 1)]);
+        const ivec2 secondToLast = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (srcHeight - 2)]);
+        const ivec2 thirdToLast = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (srcHeight - 3)]);
+
+        ivec2 dstForwards;
+        dstForwards.x = clamp_s15(ds + kernel[0] * thirdToLast.x + kernel[1] * secondToLast.x + kernel[2] * last.x + kernel[3] * last.x);
+        dstForwards.y = clamp_s15(ds + kernel[0] * thirdToLast.y + kernel[1] * secondToLast.y + kernel[2] * last.y + kernel[3] * last.y);
+
+        ivec2 dstBackwards;
+        dstBackwards.x = clamp_s15(ds + kernel[3] * thirdToLast.x + kernel[2] * secondToLast.x + kernel[1] * last.x + kernel[0] * last.x);
+        dstBackwards.y = clamp_s15(ds + kernel[3] * thirdToLast.y + kernel[2] * secondToLast.y + kernel[1] * last.y + kernel[0] * last.y);
+
+        dst.samples[dstOffset + x + dstWidthPacked * (dstHeight - 3)] = pack16bitInternals(dstForwards);
+        dst.samples[dstOffset + x + dstWidthPacked * (dstHeight - 2)] = pack16bitInternals(dstBackwards);
+    } else if (y < srcHeight) { // middle pairs of pixels in pairs
+        const ivec2 first = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (y - 3)]);
+        const ivec2 second = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (y - 2)]);
+        const ivec2 third = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (y - 1)]);
+        const ivec2 fourth = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * y]);
+
+        ivec2 dstForwards;
+        dstForwards.x = clamp_s15(ds + kernel[0] * first.x + kernel[1] * second.x + kernel[2] * third.x + kernel[3] * fourth.x);
+        dstForwards.y = clamp_s15(ds + kernel[0] * first.y + kernel[1] * second.y + kernel[2] * third.y + kernel[3] * fourth.y);
+
+        ivec2 dstBackwards;
+        dstBackwards.x = clamp_s15(ds + kernel[3] * first.x + kernel[2] * second.x + kernel[1] * third.x + kernel[0] * fourth.x);
+        dstBackwards.y = clamp_s15(ds + kernel[3] * first.y + kernel[2] * second.y + kernel[1] * third.y + kernel[0] * fourth.y);
+
+        dst.samples[dstOffset + x + dstWidthPacked * (2 * y - 3)] = pack16bitInternals(dstForwards);
+        dst.samples[dstOffset + x + dstWidthPacked * (2 * y - 2)] = pack16bitInternals(dstBackwards);
+    }
+}

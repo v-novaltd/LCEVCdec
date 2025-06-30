@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,14 +14,12 @@
 
 // Reader for V-Nova internal .bin format.
 //
-#include "LCEVC/utility/bin_reader.h"
-
 #include "bin_format.h"
-#include "LCEVC/utility/byte_order.h"
 
 #include <fmt/core.h>
+#include <LCEVC/utility/bin_reader.h>
+#include <LCEVC/utility/byte_order.h>
 
-#include <algorithm>
 #include <fstream>
 #include <string_view>
 
@@ -109,6 +107,7 @@ std::unique_ptr<BinReader> createBinReader(std::string_view name)
 {
     auto stream = std::make_unique<std::ifstream>(std::string(name), std::ios::binary);
     if (!stream->good()) {
+        fmt::print(stderr, "Cannot open bin file {}\n", name);
         return nullptr;
     }
 

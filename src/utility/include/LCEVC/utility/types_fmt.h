@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -17,10 +17,9 @@
 #ifndef VN_LCEVC_UTILITY_TYPES_FMT_H
 #define VN_LCEVC_UTILITY_TYPES_FMT_H
 
-#include "LCEVC/lcevc_dec.h"
-#include "LCEVC/utility/types_convert.h"
-
 #include <fmt/format.h>
+#include <LCEVC/lcevc_dec.h>
+#include <LCEVC/utility/types_convert.h>
 
 // LCEVC_ColorFormat
 //
@@ -185,4 +184,4 @@ struct fmt::formatter<LCEVC_PictureLockHandle>
     }
 };
 
-#endif
+#endif // VN_LCEVC_UTILITY_TYPES_FMT_H

@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -27,7 +27,7 @@ static bool checkDesc(const LCEVC_PictureDesc& desc, LCEVC_ColorFormat colorForm
 
 TEST(ParseRawName, Test)
 {
-    // To summarise: "rgb[a]" in any order is fine, as is just "y". If not specified, yuv is
+    // To summarize: "rgb[a]" in any order is fine, as is just "y". If not specified, yuv is
     // assumed to be 420
     float rate = 0.0f;
 

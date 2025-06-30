@@ -4,7 +4,7 @@ LCEVC Decoder SDK
 About
 -----
 
-Low Complexity Enhancement Video Codec Decoder (LCEVC_DEC) is the primary MPEG-5 Part 2 decoder SDK repository maintained by V-Nova. To learn what the LCEVC codec is and how it works, please refer to the [V-Nova documentation portal](https://docs.v-nova.com/v-nova/lcevc/lcevc-sdk-overview).
+Low Complexity Enhancement Video Codec Decoder (LCEVC_DEC) is the primary MPEG-5 Part 2 decoder SDK repository maintained by V-Nova. To learn what the LCEVC codec is and how it works, please refer to the `V-Nova documentation portal <https://docs.v-nova.com/v-nova/lcevc/lcevc-sdk-overview>`_.
 
 Features
 --------
@@ -21,5 +21,3 @@ Block Diagram
 -------------
 
 .. image:: ../img/block_diagram.svg
-
-

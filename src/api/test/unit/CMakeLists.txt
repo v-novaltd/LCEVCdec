@@ -21,11 +21,20 @@ add_executable(lcevc_dec::test_unit ALIAS lcevc_dec_test_unit)
 target_sources(lcevc_dec_test_unit PRIVATE ${SOURCES} ${HEADERS})
 lcevc_set_properties(lcevc_dec_test_unit)
 
-target_include_directories(lcevc_dec_test_unit
-                           PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
+target_include_directories(
+    lcevc_dec_test_unit PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../utility/include"
+                                "${CMAKE_SOURCE_DIR}/src")
 
 target_link_libraries(
-    lcevc_dec_test_unit PRIVATE lcevc_dec::api_static lcevc_dec::compiler lcevc_dec::platform
-                                lcevc_dec::api_utility GTest::gtest_main)
+    lcevc_dec_test_unit
+    PRIVATE lcevc_dec::api_static
+            lcevc_dec::compiler
+            lcevc_dec::platform
+            lcevc_dec::pipeline
+            lcevc_dec::utility
+            lcevc_dec::api_utility
+            lcevc_dec::common
+            GTest::gtest
+            lcevc_dec::gtest_main)
 
-install(TARGETS lcevc_dec_test_unit DESTINATION "bin")
+install(TARGETS lcevc_dec_test_unit)

@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -14,10 +14,10 @@
 
 // A value type to hold all the memory layout sizes and strides, for a given LCEVC_PictureDesc
 //
-#ifndef VN_LCEVC_UTILITY_PICTURE_LAYOUT_H
-#define VN_LCEVC_UTILITY_PICTURE_LAYOUT_H
+#ifndef VN_LCEVC_API_UTILITY_PICTURE_LAYOUT_H
+#define VN_LCEVC_API_UTILITY_PICTURE_LAYOUT_H
 
-#include "LCEVC/lcevc_dec.h"
+#include <LCEVC/lcevc_dec.h>
 
 #include <cassert>
 #include <cstdint>
@@ -51,6 +51,8 @@ public:
 
     // Fetch description from given picture
     PictureLayout(LCEVC_DecoderHandle decoderHandle, LCEVC_PictureHandle pictureHandle);
+
+    bool operator==(const PictureLayout& other) const;
 
     // The format and "nominal" width and height of the layout.
     LCEVC_ColorFormat format() const;
@@ -133,6 +135,9 @@ public:
     // padding, or into per-pixel padding in the case of 10bit data stored in 16bit types).
     bool isCompatible(const PictureLayout& other) const;
 
+    // Return true if the other PictureLayout are the same - excluding strides and offsets
+    bool isSame(const PictureLayout& other) const;
+
     // Return true if using an interleaved format
     bool isInterleaved() const;
 
@@ -201,4 +206,4 @@ private:
 
 } // namespace lcevc_dec::utility
 
-#endif
+#endif // VN_LCEVC_API_UTILITY_PICTURE_LAYOUT_H

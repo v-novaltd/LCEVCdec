@@ -17,12 +17,11 @@
 #ifndef VN_LCEVC_UTILITY_BASE_DECODER_BIN_H
 #define VN_LCEVC_UTILITY_BASE_DECODER_BIN_H
 
-#include "LCEVC/lcevc_dec.h"
-#include "LCEVC/utility/base_decoder.h"
-#include "LCEVC/utility/bin_reader.h"
-#include "LCEVC/utility/raw_reader.h"
-
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/lcevc_dec.h>
+#include <LCEVC/utility/base_decoder.h>
+#include <LCEVC/utility/bin_reader.h>
+#include <LCEVC/utility/raw_reader.h>
 
 #include <cstdint>
 #include <memory>
@@ -39,7 +38,7 @@ protected:
 public:
     BaseDecoderBin(std::string_view rawFile, std::string_view binFile);
 
-    bool isInitialised() const;
+    bool isInitialized() const;
 
     const LCEVC_PictureDesc& description() const override { return m_pictureDesc; }
     const PictureLayout& layout() const override { return m_pictureLayout; }

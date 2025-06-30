@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -33,7 +33,7 @@ public:
     void reset();
 
     // Append data to message
-    void update(const uint8_t* data, uint32_t size);
+    void update(const uint8_t* data, size_t size);
 
     // Finish message, and fetch the message's digest as bytes
     void digest(uint8_t output[16]);
@@ -62,10 +62,10 @@ private:
 
     // Pending message data
     uint8_t m_chunk[kChunkSize]{};
-    uint32_t m_chunkSize{0};
+    size_t m_chunkSize{0};
 
     bool m_finished{false};
 };
 
 } // namespace lcevc_dec::utility
-#endif
+#endif // VN_LCEVC_UTILITY_MD5_H

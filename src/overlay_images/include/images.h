@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -19,6 +19,9 @@ extern "C"
 {
 #endif
 
+#ifndef VN_LCEVC_OVERLAY_IMAGES_IMAGES_H
+#define VN_LCEVC_OVERLAY_IMAGES_IMAGES_H
+
 #include <stdint.h>
 
 typedef struct StaticImageDesc_t
@@ -35,3 +38,5 @@ typedef struct StaticImageDesc_t
 #ifdef __cplusplus
 }
 #endif
+
+#endif // VN_LCEVC_OVERLAY_IMAGES_IMAGES_H

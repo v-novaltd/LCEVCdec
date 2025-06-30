@@ -17,6 +17,7 @@ include("Sources.cmake")
 find_package(fmt REQUIRED)
 find_package(CLI11 REQUIRED)
 find_package(xxHash REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 add_executable(lcevc_dec_test_harness ${SOURCES})
 lcevc_set_properties(lcevc_dec_test_harness)
@@ -24,16 +25,21 @@ lcevc_set_properties(lcevc_dec_test_harness)
 target_link_libraries(
     lcevc_dec_test_harness
     lcevc_dec::api
+    lcevc_dec::common
     lcevc_dec::api_utility
     lcevc_dec::utility
     fmt::fmt
     CLI11::CLI11
+    nlohmann_json::nlohmann_json
     $<TARGET_NAME_IF_EXISTS:xxHash::xxHash>
     $<TARGET_NAME_IF_EXISTS:xxhash::xxhash>)
 
 # Tests can include internal headers from helper sources
-target_include_directories(lcevc_dec_test_harness PUBLIC "${CMAKE_SOURCE_DIR}/src/utility/src")
+target_include_directories(
+    lcevc_dec_test_harness
+    PUBLIC "${CMAKE_SOURCE_DIR}/src/utility/src"
+    PRIVATE "${CMAKE_SOURCE_DIR}/src")
 
 add_executable(lcevc_dec::test_harness ALIAS lcevc_dec_test_harness)
 
-install(TARGETS lcevc_dec_test_harness DESTINATION "bin")
+install(TARGETS lcevc_dec_test_harness)

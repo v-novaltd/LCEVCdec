@@ -17,9 +17,8 @@
 #ifndef VN_LCEVC_UTILITY_RAW_WRITER_H
 #define VN_LCEVC_UTILITY_RAW_WRITER_H
 
-#include "LCEVC/lcevc_dec.h"
-
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/lcevc_dec.h>
 
 #include <iostream>
 #include <memory>
@@ -88,4 +87,4 @@ std::unique_ptr<RawWriter> createRawWriter(const LCEVC_PictureDesc& description,
 
 } // namespace lcevc_dec::utility
 
-#endif
+#endif // VN_LCEVC_UTILITY_RAW_WRITER_H

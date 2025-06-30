@@ -16,12 +16,11 @@
 //
 // This should be replaced by proper API logging
 //
-#include "LCEVC/build_config.h"
-#include "LCEVC/lcevc_dec.h"
-
 #include <fmt/core.h>
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
+#include <LCEVC/build_config.h>
+#include <LCEVC/lcevc_dec.h>
 
 #include <cassert>
 #include <vector>
@@ -250,14 +249,14 @@ LCEVC_ReturnCode LCEVC_InitializeDecoder(LCEVC_DecoderHandle decHandle)
 
 void LCEVC_DestroyDecoder(LCEVC_DecoderHandle decHandle) { assert(0); }
 
-LCEVC_ReturnCode LCEVC_SendDecoderEnhancementData(LCEVC_DecoderHandle decHandle, int64_t timestamp,
-                                                  bool discontinuity, const uint8_t* data, uint32_t byteSize)
+LCEVC_ReturnCode LCEVC_SendDecoderEnhancementData(LCEVC_DecoderHandle decHandle, uint64_t timestamp,
+                                                  const uint8_t* data, uint32_t byteSize)
 {
     assert(0);
     return LCEVC_Error;
 }
 
-LCEVC_ReturnCode LCEVC_SendDecoderBase(LCEVC_DecoderHandle decHandle, int64_t timestamp, bool discontinuity,
+LCEVC_ReturnCode LCEVC_SendDecoderBase(LCEVC_DecoderHandle decHandle, uint64_t timestamp,
                                        LCEVC_PictureHandle base, uint32_t timeoutUs, void* userData)
 {
     assert(0);
@@ -283,14 +282,14 @@ LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture(LCEVC_DecoderHandle decHandle, LCEV
     return LCEVC_Error;
 }
 
-LCEVC_ReturnCode LCEVC_PeekDecoder(LCEVC_DecoderHandle decHandle, int64_t timestamp,
+LCEVC_ReturnCode LCEVC_PeekDecoder(LCEVC_DecoderHandle decHandle, uint64_t timestamp,
                                    LCEVC_PictureDesc* pictureDesc, LCEVC_DecodeInformation* information)
 {
     assert(0);
     return LCEVC_Error;
 }
 
-LCEVC_ReturnCode LCEVC_SkipDecoder(LCEVC_DecoderHandle decHandle, int64_t timestamp)
+LCEVC_ReturnCode LCEVC_SkipDecoder(LCEVC_DecoderHandle decHandle, uint64_t timestamp)
 {
     assert(0);
     return LCEVC_Error;

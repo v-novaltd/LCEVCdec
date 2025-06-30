@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,11 +12,12 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#ifndef VN_API_TEST_UNIT_DECODE_TESTER_H_
-#define VN_API_TEST_UNIT_DECODE_TESTER_H_
+#ifndef VN_LCEVC_API_EVENT_TESTER_H
+#define VN_LCEVC_API_EVENT_TESTER_H
 
 #include "utils.h"
 
+#include <LCEVC/common/constants.h>
 #include <LCEVC/lcevc_dec.h>
 
 #include <cstddef>
@@ -76,16 +77,16 @@ private:
     std::unordered_set<uintptr_t> m_bases;
     std::unordered_set<uintptr_t> m_outputs;
 
-    int64_t m_basePtsToSend = 0;
-    int64_t m_enhancementPtsToSend = 0;
-    int64_t m_latestReceivedPts = -1;
+    uint64_t m_basePtsToSend = 0;
+    uint64_t m_enhancementPtsToSend = 0;
+    uint64_t m_latestReceivedPts = kInvalidTimestamp;
 
     bool m_basesDone = false;
     bool m_enhancementsDone = false;
     bool m_outputsDone = false;
 
-    const int64_t m_afterTheEndPts;
+    const uint64_t m_afterTheEndPts;
     bool m_tornDown = false;
 };
 
-#endif // VN_API_TEST_UNIT_DECODE_TESTER_H_
+#endif // VN_LCEVC_API_EVENT_TESTER_H

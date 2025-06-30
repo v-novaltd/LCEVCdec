@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2024. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,11 +12,13 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#ifndef VN_API_POOL_H_
-#define VN_API_POOL_H_
+#ifndef VN_LCEVC_API_POOL_H
+#define VN_LCEVC_API_POOL_H
 
 #include "handle.h"
-
+//
+#include <LCEVC/common/class_utils.hpp>
+//
 #include <cassert>
 #include <memory>
 #include <vector>
@@ -26,16 +28,13 @@
 namespace lcevc_dec::decoder {
 // Pool class, to glue instances of objects to the handles that we output in the API. It is
 // recommended that T be a parent-most class (i.e. have no parents), but that you allocate
-// child- most classes in `allocate`.
-
-// Also, avoid putting the function definitions in the source file. If you're on Windows, it's
-// tempting (because it will compile), but it won't work on our Linux builds.
+// child-most classes in `allocate`.
 
 template <typename T>
 class Pool
 {
 public:
-    virtual ~Pool() = default;
+    ~Pool() = default;
 
     explicit Pool(size_t capacity)
     {
@@ -53,11 +52,7 @@ public:
         }
     }
 
-    // Note that this does not allocate the memory, just the handle. This will actually move the
-    // pointer itself, so if you've assigned the freshly-made pointer to some variable before
-    // allocating it to a spot here, that variable will not generally be valid after calling
-    // this function.
-    virtual Handle<T> allocate(std::unique_ptr<T>&& ptrToT)
+    Handle<T> add(T* ptrToT)
     {
         if (m_freeIndices.empty() || ptrToT == nullptr) {
             return kInvalidHandle;
@@ -76,11 +71,13 @@ public:
         return handleOut;
     }
 
-    void release(Handle<T> handle)
+    Handle<T> add(std::unique_ptr<T>&& ptrToT) { return add(ptrToT.release()); }
+
+    T* remove(Handle<T> handle)
     {
         if (!isValid(handle)) {
             assert(false);
-            return;
+            return nullptr;
         }
         const size_t idx = handleIndex(handle);
 
@@ -91,7 +88,9 @@ public:
         // Add back to free list
         m_freeIndices.push_back(idx);
 
-        m_objects[idx].reset();
+        T* const ret = std::move(m_objects[idx]);
+        m_objects[idx] = nullptr;
+        return ret;
     }
 
     T* lookup(Handle<T> handle)
@@ -100,7 +99,7 @@ public:
             assert(false);
             return nullptr;
         }
-        return m_objects[handleIndex(handle)].get();
+        return m_objects[handleIndex(handle)];
     }
 
     const T* lookup(Handle<T> handle) const
@@ -109,13 +108,30 @@ public:
             assert(false);
             return nullptr;
         }
-        return m_objects[handleIndex(handle)].get();
+        return m_objects[handleIndex(handle)];
+    }
+
+    Handle<T> reverseLookup(const T* ptr) const
+    {
+        if (ptr == nullptr) {
+            return Handle<T>{kInvalidHandle};
+        }
+
+        // Look for native pointer in pool
+        for (size_t idx = 0; idx < m_objects.size(); ++idx) {
+            if (m_objects[idx] == ptr) {
+                return handleMake(idx, m_generations[idx]);
+            }
+        }
+
+        // Not found
+        return Handle<T>{kInvalidHandle};
     }
 
     bool isValid(Handle<T> handle) const
     {
         const size_t index = handleIndex(handle);
-        if (index >= m_generations.capacity()) {
+        if (index >= m_generations.size()) {
             // Invalid index (out of range)
             return false;
         }
@@ -128,7 +144,25 @@ public:
         return true;
     }
 
-protected:
+    size_t size() const { return m_objects.size() - m_freeIndices.size(); }
+
+    Handle<T> at(size_t num) const
+    {
+        // Find the nth set handle
+        for (size_t idx = 0; idx < m_objects.size(); ++idx) {
+            if ((m_generations[idx] & 1) == 1) {
+                if (num == 0) {
+                    return handleMake(idx, m_generations[idx]);
+                }
+                --num;
+            }
+        }
+        return Handle<T>{kInvalidHandle};
+    }
+
+    VNNoCopyNoMove(Pool);
+
+private:
     static const size_t kGenerationBits = 16;
 
     static size_t handleIndex(Handle<T> handle) { return handle.handle >> kGenerationBits; }
@@ -143,11 +177,11 @@ protected:
 
     // m_generations is essentially an array of counters, indicating how many times each of its
     // indices has been used (+1 for allocation AND +1 for release)
-    std::vector<std::unique_ptr<T>> m_objects;
+    std::vector<T*> m_objects;
     std::vector<uint16_t> m_generations;
     std::vector<size_t> m_freeIndices;
 };
 
 } // namespace lcevc_dec::decoder
 
-#endif // VN_API_PICTURE_POOL_H_
+#endif // VN_LCEVC_API_POOL_H
