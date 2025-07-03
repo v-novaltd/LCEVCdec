@@ -14,6 +14,7 @@
 
 #include "surface/overlay.h"
 
+#include <LCEVC/common/log.h>
 #include <images.h>
 #include <lcevcLogo.h>
 
