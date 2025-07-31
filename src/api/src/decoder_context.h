@@ -19,6 +19,7 @@
 #include "handle.h"
 #include "pool.h"
 //
+#include <LCEVC/build_config.h>
 #include <LCEVC/common/class_utils.hpp>
 #include <LCEVC/common/configure.hpp>
 #include <LCEVC/lcevc_dec.h>
@@ -42,6 +43,11 @@ class AccelContext;
 class Decoder;
 class EventDispatcher;
 class PictureLock;
+
+#if !VN_SDK_STATIC
+typedef lcevc_dec::pipeline::PipelineBuilder* (*CreatePipelineBuilderFn)(void* diagnosticState,
+                                                                         void* accelerationState);
+#endif
 
 // The collection of state needed to implement the API
 //
@@ -106,6 +112,11 @@ private:
 
     // The pipeline to use
     std::string m_pipelineName = "cpu";
+
+#if !VN_SDK_STATIC
+    // Shared library handle
+    LdcSharedLibrary m_pipelineLibrary;
+#endif
 
     // The application-wide (logging/simd etc.) managed by 'common'
     common::Configurable* m_commonConfiguration;

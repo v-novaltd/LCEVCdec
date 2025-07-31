@@ -41,7 +41,7 @@ def get_glslang_validator_path(build_dir):
             return None
 
     except FileNotFoundError:
-        print(f"Error: {conanbuildinfo_path} not found.")
+        print(f"Warning: {conanbuildinfo_path} not found.")
         return None
 
 

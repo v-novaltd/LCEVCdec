@@ -19,14 +19,19 @@
 #include <LCEVC/common/configure.hpp>
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/log.h>
+
+#if VN_SDK_STATIC
 #if VN_SDK_PIPELINE(CPU)
 #include <LCEVC/pipeline_cpu/create_pipeline.h>
+#endif
+#if VN_SDK_PIPELINE(VULKAN)
+#include <LCEVC/pipeline_vulkan/create_pipeline.h>
 #endif
 #if VN_SDK_PIPELINE(LEGACY)
 #include <LCEVC/pipeline_legacy/create_pipeline.h>
 #endif
-#if VN_SDK_PIPELINE(VULKAN)
-#include <LCEVC/pipeline_vulkan/create_pipeline.h>
+#else
+#include <LCEVC/common/shared_library.h>
 #endif
 
 #include <algorithm>
@@ -132,17 +137,10 @@ pipeline::PipelineBuilder* DecoderContext::pipelineBuilder()
 {
     // If something needs the builder, and it has not been created yet - construct it given
     // configured name.
-    //
-    // NB: This will use 'name' -> so/dll lookup in the future.
-    //
     pipeline::PipelineBuilder* pb = nullptr;
 
     if (!m_pipelineBuilder) {
-#if VN_SDK_PIPELINE(LEGACY)
-        if (m_pipelineName == "legacy") {
-            pb = createPipelineBuilderLegacy(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
-        }
-#endif
+#if VN_SDK_STATIC
 #if VN_SDK_PIPELINE(CPU)
         if (m_pipelineName == "cpu") {
             pb = createPipelineBuilderCPU(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
@@ -152,6 +150,25 @@ pipeline::PipelineBuilder* DecoderContext::pipelineBuilder()
         if (m_pipelineName == "vulkan") {
             pb = createPipelineBuilderVulkan(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
         }
+#endif
+#if VN_SDK_PIPELINE(LEGACY)
+        if (m_pipelineName == "legacy") {
+            pb = createPipelineBuilderLegacy(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
+        }
+#endif
+#else
+        std::string libraryName = "lcevc_dec_pipeline_";
+        libraryName.append(m_pipelineName);
+        m_pipelineLibrary = ldcSharedLibraryFind(libraryName.c_str());
+        if (!m_pipelineLibrary) {
+            VNLogErrorF("Cannot load %s pipeline shared library", m_pipelineName.c_str());
+            return nullptr;
+        }
+
+        CreatePipelineBuilderFn builderFn = (CreatePipelineBuilderFn)ldcSharedLibrarySymbol(
+            m_pipelineLibrary, "createPipelineBuilder");
+
+        pb = builderFn(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
 #endif
         assert(pb);
 

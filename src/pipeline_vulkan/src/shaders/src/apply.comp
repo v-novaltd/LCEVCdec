@@ -34,6 +34,7 @@ layout(push_constant) uniform consts {
     int saturate;
     int testVal;
     int layerCount;
+    int tuRasterOrder;
 };
 
 const uint ADD = 0;
@@ -50,12 +51,12 @@ uint applyCounter = 0;
 void applyTu(uint firstPixelinTu, uint firstResidual, uint operation, uint tuWidth)
 {
     for (uint j = 0; j < tuWidth; ++j) {
-        for (uint i = 0; i < tuWidth / 2; ++i) {
-            const uint pixelPairIndex = firstPixelinTu + i + j * stride / 2;
-            const uint residualPairIndex = residualOffset / 4 + firstResidual / 2 +
-                                           (applyCounter * tuWidth * tuWidth / 2) + i + j * tuWidth / 2;
+        for (uint i = 0; i < (tuWidth >> 1); ++i) {
+            const uint pixelPairIndex = firstPixelinTu + i + j * (stride >> 1);
+            const uint residualPairIndex = (residualOffset >> 2) + (firstResidual >> 1) +
+                                           applyCounter * tuWidth * (tuWidth >> 1) + i + j * (tuWidth >> 1);
 
-            if (pixelPairIndex >= srcWidth * srcHeight / 2) {
+            if (pixelPairIndex >= srcWidth * (srcHeight >> 1)) {
                 return;
             }
 
@@ -106,10 +107,19 @@ void process64Bitmask(uint bitmaskMost, uint bitmaskLeast, uint operation,
         }
 
         const uint tusInRow = (dds == 1) ? 8 : 16;
-        const uint tuX = i % tusInRow;
-        const uint tuY = i / tusInRow;
+        const uint iX = i % tusInRow;
+        const uint iY = i / tusInRow;
 
-        const uint index = startingPixelInBLock + tuX * 2 + tuY * tuWidth * stride / 2;
+        const uint widthInPairs = stride >> 1;
+        const uint index = startingPixelInBLock + iX * (tuWidth >> 1) + iY * tuWidth * widthInPairs;
+
+        const uint startX = startingPixelInBLock % widthInPairs;
+        const uint startY = startingPixelInBLock / widthInPairs;
+        const uint X = startX + iX * (tuWidth >> 1);
+        const uint Y = startY + iY * tuWidth;
+        if(X >= widthInPairs || Y >= srcHeight) {
+            continue;
+        }
 
         if (willApply > 0) {
             if (operation == ADD) {
@@ -129,11 +139,65 @@ void process64Bitmask(uint bitmaskMost, uint bitmaskLeast, uint operation,
     }
 }
 
+void processRasterBitmask(uvec4 bitmask1and2, uvec4 bitmask3and4, uint operation, uint block, uint tu, uint tuWidth, uint dds)
+{
+    const uint pixelPairsInRaster = (256 >> 1) * tuWidth;
+    const uint pixelPairStartIndex = block * pixelPairsInRaster;
+    const uint widthInPairs = stride >> 1;
+
+    for (uint i = 0; i < 256; ++i) {
+        uint bitSelector;
+        uint willApply;
+        if (i < 32) {
+            bitSelector = 1 << (31 - i);
+            willApply = bitmask1and2.y & bitSelector;
+        }
+        else if (i < 64){
+            bitSelector = 1 << (63 - i);
+            willApply = bitmask1and2.x & bitSelector;
+        }
+        else if (i < 96) {
+            bitSelector = 1 << (95 - i);
+            willApply = bitmask1and2.w & bitSelector;
+        }
+        else if (i < 128){
+            bitSelector = 1 << (127 - i);
+            willApply = bitmask1and2.z & bitSelector;
+        }
+        else if (i < 160) {
+            bitSelector = 1 << (159 - i);
+            willApply = bitmask3and4.y & bitSelector;
+        }
+        else if (i < 192){
+            bitSelector = 1 << (191 - i);
+            willApply = bitmask3and4.x & bitSelector;
+        }
+        else if (i < 224) {
+            bitSelector = 1 << (223 - i);
+            willApply = bitmask3and4.w & bitSelector;
+        }
+        else if (i < 256){
+            bitSelector = 1 << (255 - i);
+            willApply = bitmask3and4.z & bitSelector;
+        }
+
+        if (willApply > 0) {
+            const uint pixelPairIndex = pixelPairStartIndex + i * (tuWidth >> 1);
+            const uint Y = pixelPairIndex / widthInPairs;
+            const uint X = pixelPairIndex % widthInPairs;
+            const uint index = X + Y * tuWidth * widthInPairs;
+
+            applyTu(index, tu, ADD, tuWidth);
+        }
+    }
+}
+
 void main()
 {
     const uint CMDSIZE =
         10; // 4 without DD. The 3 extra (wasted) uint64_t are still part of the command stream in DDS.
-    const uint tuWidth = (layerCount == 16) ? 4 : 2;
+    const uint dds = (layerCount == 16) ? 1 : 0;
+    const uint tuWidth = (dds == 1) ? 4 : 2;
     const uint x = gl_GlobalInvocationID.x;
     const uint commandIndex = x * CMDSIZE;
     ivec4 command = ivec4(cmd.samples[commandIndex], cmd.samples[commandIndex + 1],
@@ -145,37 +209,36 @@ void main()
               ((command.y & 0x7FFF) << 12); // Offset into CommandBuffer of first residual for operation.
     uint bitStart = (command.y >> 15) & 0xFF;  // First set bit in bitmask.
     uint bitCount = (command.y >> 23) & 0x1FF; // Number of set bits in bitmask.
-    uint bitmaskLeast = command.z;
-    uint bitmaskMost = command.w;
+    uvec4 bitmask1and2 = uvec4(command.z, command.w , 0, 0); // 1_lsb, 1_msb, 2_lsb, 2_msb
 
     // DD
-    uint bitmask2Least = 0;
-    uint bitmask2Most = 0;
-    uint bitmask3Least = 0;
-    uint bitmask3Most = 0;
-    uint bitmask4Least = 0;
-    uint bitmask4Most = 0;
-    if (layerCount == 4) {
-        bitmask2Least = cmd.samples[commandIndex + 4];
-        bitmask2Most = cmd.samples[commandIndex + 5];
-        bitmask3Least = cmd.samples[commandIndex + 6];
-        bitmask3Most = cmd.samples[commandIndex + 7];
-        bitmask4Least = cmd.samples[commandIndex + 8];
-        bitmask4Most = cmd.samples[commandIndex + 9];
+    uvec4 bitmask3and4 = uvec4(0, 0, 0, 0); // 3_lsb, 3_msb, 4_lsb, 4_msb
+    if (dds == 0 || tuRasterOrder == 1) { // when in raster order, we make use of all 4 bitmasks for DDS
+        bitmask1and2.z = cmd.samples[commandIndex + 4];
+        bitmask1and2.w = cmd.samples[commandIndex + 5];
+        bitmask3and4.x = cmd.samples[commandIndex + 6];
+        bitmask3and4.y = cmd.samples[commandIndex + 7];
+        bitmask3and4.z = cmd.samples[commandIndex + 8];
+        bitmask3and4.w = cmd.samples[commandIndex + 9];
     }
 
-    const uint blocksInRow = (srcWidth % 32 == 0) ? (srcWidth / 32) : (srcWidth / 32) + 1;
-    const uint blocksInColumn = (srcHeight % 32 == 0) ? (srcHeight / (2*32)) : (srcHeight / (2*32)) + 1;
-    const uint blockX = block % blocksInRow;
-    const uint blockY = block / blocksInRow;
-    const uint firstPixelInBLock = blockX * 16 + blockY * (stride / 2) * 32;
+    if (tuRasterOrder == 1) {
+        processRasterBitmask(bitmask1and2, bitmask3and4, operation, block, tu, tuWidth, dds);
+    }
+    else { // temporal on block order
+        const uint pixelsInBlockLength = 32;
+        const uint blocksInRow = (srcWidth % pixelsInBlockLength == 0) ? (srcWidth / pixelsInBlockLength) : (srcWidth / pixelsInBlockLength) + 1;
+        const uint blockX = block % blocksInRow;
+        const uint blockY = block / blocksInRow;
+        const uint firstPixelInBLock = blockX * (pixelsInBlockLength >> 1) + blockY * (stride >> 1) * pixelsInBlockLength;
 
-    if (layerCount == 16) { // DDS
-        process64Bitmask(bitmaskMost, bitmaskLeast, operation, firstPixelInBLock, tu, tuWidth, 1);
-    } else { // DD
-        process64Bitmask(bitmaskMost, bitmaskLeast, operation, firstPixelInBLock, tu, tuWidth, 0);
-        process64Bitmask(bitmask2Most, bitmask2Least, operation, firstPixelInBLock + 2 * stride, tu, tuWidth, 0);
-        process64Bitmask(bitmask3Most, bitmask3Least, operation, firstPixelInBLock + 2 * 2 * stride, tu, tuWidth, 0);
-        process64Bitmask(bitmask4Most, bitmask4Least, operation, firstPixelInBLock + 3 * 2 * stride, tu, tuWidth, 0);
+        if (dds == 1) {
+            process64Bitmask(bitmask1and2.y, bitmask1and2.x, operation, firstPixelInBLock, tu, tuWidth, 1);
+        } else { // DD
+            process64Bitmask(bitmask1and2.y, bitmask1and2.x, operation, firstPixelInBLock, tu, tuWidth, 0);
+            process64Bitmask(bitmask1and2.w, bitmask1and2.z, operation, firstPixelInBLock + 4 * stride, tu, tuWidth, 0);
+            process64Bitmask(bitmask3and4.y, bitmask3and4.x, operation, firstPixelInBLock + 2 * 4 * stride, tu, tuWidth, 0);
+            process64Bitmask(bitmask3and4.w, bitmask3and4.z, operation, firstPixelInBLock + 3 * 4 * stride, tu, tuWidth, 0);
+        }
     }
 }

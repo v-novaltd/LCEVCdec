@@ -251,7 +251,7 @@ Option                      Type       Default       Pipelines   Description
 ``highlight_residuals``     boolean    false         all         If true, residuals will appear as saturated squares.
 ``s_filter_strength``       float      -1 (disabled) all         If provided, this overrides the stream's S-Filter strength.
                                                                  S-Filter is a sharpening modification to the upsampling step.
-``trace_file``              string     -             cpu, vulkan Path to dump a `perfetto <https://ui.perfetto.dev/>`_ compatible
+``trace_file``              string     \-            cpu, vulkan Path to dump a `perfetto <https://ui.perfetto.dev/>`_ compatible
                                                                  JSON file - ``VN_SDK_TRACING`` CMake flag required.
 =========================== ========== ============= =========== ==================================================================
 

@@ -27,12 +27,16 @@ layout(std430, set = 0, binding = 1) buffer restrict writeonly DstImageBuffer {
 } dst;
 
 layout(push_constant) uniform consts {
-    int numPixels; // The amount of pixels in the src buffer
+    int width;
+    int containerStrideIn;
+    int containerOffsetIn;
+    int containerStrideOut;
+    int containerOffsetOut;
+    int containerStrideV; // used to check for nv12 and as input or output stride for V-plane
+    int containerOffsetV; // used with nv12 as input or output offset for V-plane
     int bit8;
     int toInternal;
-    int nv12;      // pixel pointer to the start of the UV plane
-    int uvFlipped; // bool to signal NV21
-    int batchSize; // number of elements to process in each shader invocation
+    int shift;     // 5 for 10bit, 3 for 12bit, and 1 for 14bit
 };
 
 #include "common.glsl"
@@ -41,95 +45,38 @@ void main()
 {
     const uint x = gl_GlobalInvocationID.x;
     const uint y = gl_GlobalInvocationID.y;
-    const uint index = x + gl_NumWorkGroups.x * gl_WorkGroupSize.x * y;
-    const uint packDensity = (bit8 == 1) ? 4 : 2;
-    const uint numPixelPacks = numPixels / packDensity;
-    const uint numBatches = numPixelPacks / batchSize;
 
     if (toInternal == 1) {
         if (bit8 == 1) {
-            if (nv12 != 0) {
-                const uint jumpU = nv12 / (2 * 2);
-                const uint jumpV = jumpU / 2;
-                for (int i = 0; i < batchSize; ++i) {
-                    const uint pixelsDone = (i + x * batchSize) * packDensity;
-                    if (pixelsDone >= numPixels) {
-                        return;
-                    }
-                    const ivec4 pixels =
-                        toInternalFrom8bit(unpack8bit(src.samples[batchSize * index + i]));
-                    if (pixelsDone < nv12) {
-                        dst.samples[batchSize * 2 * index + 2 * i] = pack16bitInternals(pixels.xy);
-                        dst.samples[batchSize * 2 * index + 2 * i + 1] = pack16bitInternals(pixels.zw);
-                    } else {
-                        dst.samples[jumpU + batchSize * index + i] = pack16bitInternals(ivec2(pixels.x, pixels.z));
-                        dst.samples[jumpU + jumpV + batchSize * index + i] = pack16bitInternals(ivec2(pixels.y, pixels.w));
-                    }
-                }
+            if (containerStrideV != 0) { // NV12 src
+                const ivec4 pixels = toInternalFrom8bit(unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));
+                dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bitInternals(ivec2(pixels.x, pixels.z));
+                dst.samples[containerOffsetV + x + y * containerStrideV] = pack16bitInternals(ivec2(pixels.y, pixels.w));
             } else {
-                for (int i = 0; i < batchSize; ++i) {
-                    const uint pixelsDone = (i + x * batchSize) * packDensity;
-                    if (pixelsDone >= numPixels) {
-                        return;
-                    }
-                    const ivec4 pixels = toInternalFrom8bit(unpack8bit(src.samples[batchSize * index + i]));
-                    dst.samples[batchSize * 2 * index + 2 * i] = pack16bitInternals(pixels.xy);
-                    dst.samples[batchSize * 2 * index + 2 * i + 1] = pack16bitInternals(pixels.zw);
+                const ivec4 pixels = toInternalFrom8bit(unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));
+                dst.samples[containerOffsetOut + 2 * x + y * containerStrideOut] = pack16bitInternals(pixels.xy);
+                if(4 * x + 2 < width) {
+                    dst.samples[containerOffsetOut + 2 * x + 1 + y * containerStrideOut] = pack16bitInternals(pixels.zw);
                 }
             }
         } else {
-            for (int i = 0; i < batchSize; ++i) {
-                const uint pixelsDone = (i + x * batchSize) * packDensity;
-                if (pixelsDone >= numPixels) {
-                    return;
-                }
-                const ivec2 pixels = toInternalFrom16bit(unpack16bit(src.samples[batchSize * index + i]));
-                dst.samples[batchSize * index + i] = pack16bitInternals(pixels);
-            }
+            const ivec2 pixels = toInternalFrom16bit(unpack16bit(src.samples[containerOffsetIn + x + y * containerStrideIn]), shift);
+            dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bitInternals(pixels);
         }
     } else {
         if (bit8 == 1) {
-            if (nv12 != 0) {
-                const uint jumpU = nv12 / (2 * 2);
-                const uint jumpV = jumpU / 2;
-                for (int i = 0; i < batchSize; ++i) {
-                    const uint pixelsDone = (i + x * batchSize) * packDensity;
-                    if (pixelsDone >= numPixels) {
-                        return;
-                    }
-                    if (pixelsDone < nv12) {
-                        const ivec2 pixels1 = unpack16bitInternals(src.samples[batchSize * 2 * index + 2 * i]);
-                        const ivec2 pixels2 = unpack16bitInternals(src.samples[batchSize * 2 * index + 2 * i + 1]);
-                        dst.samples[batchSize * index + i] = pack8bit(
-                            fromInternalTo8bit(ivec4(pixels1.x, pixels1.y, pixels2.x, pixels2.y)));
-                    } else {
-                        const ivec2 pixels1 = unpack16bitInternals(src.samples[jumpU + batchSize * index + i]);
-                        const ivec2 pixels2 = unpack16bitInternals(src.samples[jumpU + jumpV + batchSize * index + i]);
-                        dst.samples[batchSize * index + i] = pack8bit(
-                            fromInternalTo8bit(ivec4(pixels1.x, pixels2.x, pixels1.y, pixels2.y)));
-                    }
-                }
+            if (containerStrideV != 0) { // NV12 dst
+                const ivec2 pixels1 = unpack16bitInternals(src.samples[containerOffsetIn + x + y * containerStrideIn]);
+                const ivec2 pixels2 = unpack16bitInternals(src.samples[containerOffsetV + x + y * containerStrideV]);
+                dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack8bit(fromInternalTo8bit(ivec4(pixels1.x, pixels2.x, pixels1.y, pixels2.y)));
             } else {
-                for (int i = 0; i < batchSize; ++i) {
-                    const uint pixelsDone = (i + x * batchSize) * packDensity;
-                    if (pixelsDone >= numPixels) {
-                        return;
-                    }
-                    const ivec2 pixels1 = unpack16bitInternals(src.samples[batchSize * 2 * index + 2 * i]);
-                    const ivec2 pixels2 = unpack16bitInternals(src.samples[batchSize * 2 * index + 2 * i + 1]);
-                    dst.samples[batchSize * index + i] = pack8bit(fromInternalTo8bit(ivec4(pixels1.x, pixels1.y, pixels2.x, pixels2.y)));
-                }
+                const ivec2 pixels1 = unpack16bitInternals(src.samples[containerOffsetIn + 2 * x + y * containerStrideIn]);
+                const ivec2 pixels2 = unpack16bitInternals(src.samples[containerOffsetIn + 2 * x + 1 + y * containerStrideIn]);
+                dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack8bit(fromInternalTo8bit(ivec4(pixels1.x, pixels1.y, pixels2.x, pixels2.y)));
             }
         } else {
-            for (int i = 0; i < batchSize; ++i) {
-                const uint pixelsDone = (i + x * batchSize) * packDensity;
-                if (pixelsDone >= numPixels) {
-                    return;
-                }
-
-                const ivec2 pixels = unpack16bitInternals(src.samples[batchSize * index + i]);
-                dst.samples[batchSize * index + i] = pack16bit(fromInternalTo16bit(pixels));
-            }
+            const ivec2 pixels = unpack16bitInternals(src.samples[containerOffsetIn + x + y * containerStrideIn]);
+            dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bit(fromInternalTo16bit(pixels, shift));
         }
     }
 }

@@ -57,15 +57,7 @@ bool PictureLock::getPlaneDesc(uint32_t planeIndex, LdpPicturePlaneDesc* planeDe
         return false;
     }
 
-    if (mapping.ptr == nullptr) {
-        return false;
-    }
-
-    assert(this->picture);
-
-    planeDescOut->firstSample = mapping.ptr + mapping.offset +
-                                ldpPictureLayoutPlaneOffset(&this->picture->layout, planeIndex);
-    planeDescOut->rowByteStride = ldpPictureLayoutRowStride(&this->picture->layout, planeIndex);
+    static_cast<PictureVulkan*>(picture)->getPlaneDescInternal(planeIndex, *planeDescOut);
     return true;
 }
 

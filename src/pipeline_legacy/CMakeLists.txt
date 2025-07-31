@@ -15,6 +15,7 @@ include("Sources.cmake")
 
 add_library(lcevc_dec_pipeline_legacy ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_pipeline_legacy)
+set_target_properties(lcevc_dec_pipeline_legacy PROPERTIES SOVERSION ${PIPELINE_LEGACY_VERSION})
 
 target_compile_definitions(lcevc_dec_pipeline_legacy PRIVATE VNEnablePipelineAPIExport)
 

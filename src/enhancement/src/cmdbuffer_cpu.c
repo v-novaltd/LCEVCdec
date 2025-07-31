@@ -179,6 +179,10 @@ bool ldeCmdBufferCpuReset(LdeCmdBufferCpu* cmdBuffer, uint8_t transformSize)
     cmdBufferStorageReset(&cmdBuffer->data);
     cmdBuffer->count = 0;
 
+    if (cmdBuffer->numEntryPoints > 0) {
+        memset(cmdBuffer->entryPoints, 0, sizeof(LdeCmdBufferCpuEntryPoint) * cmdBuffer->numEntryPoints);
+    }
+
     /* Buffer already has the correct number of layers set - nothing to do */
     if (transformSize == cmdBuffer->transformSize) {
         return true;
@@ -269,13 +273,6 @@ void ldeCmdBufferCpuSplit(const LdeCmdBufferCpu* srcBuffer)
     int32_t cmdOffset = 0;
     uint32_t tuIndex = 0;
     uint16_t bufferIndex = 0;
-
-    for (uint16_t i = 0; i < numEntryPoints; i++) {
-        entryPoints[i].initialJump = 0;
-        entryPoints[i].commandOffset = 0;
-        entryPoints[i].dataOffset = 0;
-        entryPoints[i].count = 0;
-    }
 
     int32_t lastCmdBlock = -1;
     uint32_t lastBufferCount = 0;

@@ -84,24 +84,27 @@ public:
         int16_t residuals[kLayerCount] = {0};
         ldeCmdBufferGpuReset(&cmdBuffer, &cmdBufferBuilder, kLayerCount);
 
-        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOClearAndSet, residuals, 0));
+        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOClearAndSet, residuals,
+                                          0, false));
 
-        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 5));
+        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 5, false));
 
         incrementResiduals(residuals, kLayerCount); // 1
-        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 63));
+        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 63, false));
 
         incrementResiduals(residuals, kLayerCount); // 2
-        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOSet, residuals, 2));
+        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOSet, residuals, 2, false));
 
         incrementResiduals(residuals, kLayerCount); // 3
-        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 64));
+        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 64, false));
 
-        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOClearAndSet, residuals, 128));
+        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOClearAndSet, residuals,
+                                          128, false));
 
-        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOSetZero, residuals, 2038));
+        ASSERT_TRUE(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOSetZero, residuals,
+                                          2038, false));
 
-        ASSERT_TRUE(ldeCmdBufferGpuBuild(&cmdBuffer, &cmdBufferBuilder));
+        ASSERT_TRUE(ldeCmdBufferGpuBuild(&cmdBuffer, &cmdBufferBuilder, false));
     }
 };
 

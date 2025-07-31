@@ -51,21 +51,12 @@ class Runner:
                 self.env['PATH'] += ";" + self._executable[:self._executable.find("bin") + 3]
             else:
                 raise RuntimeError(f"Cannot set library paths executable: {self._executable}")
+        if platform.system() == "Darwin" and self._executable.endswith('ModelDecoder'):
+            self.env['DYLD_LIBRARY_PATH'] = os.path.abspath(
+                os.path.join(config.get('CACHE_PATH'), 'ltm', 'libs'))
 
     def get_config(self):
         return self._config
-
-    def update_config(self, params):
-        if isinstance(params, dict):
-            for param, value in params.items():
-                self.set_param(param, value)
-        elif isinstance(params, list):
-            it = iter(params)
-
-            for param, value in zip(it, it):
-                self.set_param(param, value)
-        else:
-            raise ValueError("Params must be a dict or list")
 
     def set_params_from_config(self, test):
         for key, value in test.items():

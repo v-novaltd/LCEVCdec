@@ -50,7 +50,6 @@ list(APPEND HEADERS "src/bin_writer.h" "src/enum_map.h" "src/parse_raw_name.h"
 list(
     APPEND
     INTERFACES
-    "include/LCEVC/utility/base_decoder.h"
     "include/LCEVC/utility/bin_reader.h"
     "include/LCEVC/utility/byte_order.h"
     "include/LCEVC/utility/check.h"

@@ -28,7 +28,7 @@ include("Sources.cmake")
 set(PUBLIC_LIBRARIES lcevc_dec::platform lcevc_dec::compiler)
 set(PRIVATE_LIBRARIES lcevc_dec::core_version)
 
-# Explicit static Library for core decoder
+# Explicit static library for legacy unit tests
 # -------------------------------------------------------------------------------------------------
 if (VN_SDK_UNIT_TESTS)
     add_library(lcevc_dec_legacy_static STATIC)
@@ -58,6 +58,7 @@ endif ()
 
 add_library(lcevc_dec_legacy)
 lcevc_set_properties(lcevc_dec_legacy)
+set_target_properties(lcevc_dec_legacy PROPERTIES SOVERSION ${PIPELINE_LEGACY_VERSION})
 
 target_sources(lcevc_dec_legacy PRIVATE ${SOURCES})
 if (VN_SDK_GENERATE_PGO)

@@ -47,21 +47,21 @@ def is_os_valid(unzipped_path):
 
 
 def initialize_ltm():
-    if not is_platform_valid():
+    if not is_platform_valid() and not os.path.exists(LOCAL_LTM_PATH):
         logger.error(
             f"Current platform {config.get('PLATFORM')} or target {os.environ.get('TARGET')} is"
             " not supported by the LTM pre-built executables")
-        if os.path.exists(LOCAL_LTM_PATH):
-            shutil.rmtree(LOCAL_LTM_PATH)
         return ""
 
     existing_version = None
     if os.path.exists(LOCAL_LTM_PATH):
         with open(os.path.join(LOCAL_LTM_PATH, 'version.txt'), 'r') as f:
-            existing_version = f.read()
+            existing_version = f.read().strip()
         requested_version = config.get('LTM_URL')[config.get(
             'LTM_URL').rfind('/') + 1:config.get('LTM_URL').rfind('.')]
         if existing_version != requested_version:
+            logger.info(f"Existing LTM version '{existing_version}' doesn't match config version "
+                        f"'{requested_version}', removing and re-downloading")
             shutil.rmtree(LOCAL_LTM_PATH)
             existing_version = None
 

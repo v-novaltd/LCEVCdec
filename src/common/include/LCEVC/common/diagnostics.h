@@ -60,7 +60,7 @@ typedef enum LdcDiagType
     LdcDiagTypeLogFormatted, // Format string at capture time - for 'complex' messages where performance is not an issue
 
     // Tracing
-    LdcDiagTypeTraceBegin,   // STart named event
+    LdcDiagTypeTraceBegin,   // Start named event
     LdcDiagTypeTraceEnd,     // Stop named event
     LdcDiagTypeTraceInstant, // Named event with no duration
     LdcDiagTypeTraceScoped,  // Enter/leave function scope (id in event marks begin vs. end)

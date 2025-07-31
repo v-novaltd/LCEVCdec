@@ -50,7 +50,7 @@ public:
     VNNoCopyNoMove(PipelineBuilderCPU);
 
 private:
-    friend std::unique_ptr<PipelineBuilder> createPipelineBuilderCPU();
+    friend std::unique_ptr<PipelineBuilder> createPipelineBuilder();
 
     LdcMemoryAllocator* m_allocator = nullptr;
 

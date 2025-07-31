@@ -18,6 +18,7 @@
 
 #include <LCEVC/common/acceleration.h>
 #include <LCEVC/common/diagnostics.h>
+#include <LCEVC/pipeline_legacy/create_pipeline.h>
 //
 #include <memory>
 
@@ -87,7 +88,7 @@ std::unique_ptr<pipeline::Pipeline> DecoderBuilder::finish(pipeline::EventSink* 
 // Factory function - extern "C" so it can be grabbed from DLLs
 //
 VN_LCEVC_PIPELINE_API lcevc_dec::pipeline::PipelineBuilder*
-createPipelineBuilderLegacy(void* diagnosticsState, void* accelerationState)
+CREATE_PIPELINE_LEGACY_BUILDER_NAME(void* diagnosticsState, void* accelerationState)
 {
     // Connect this shared libraries diagnostics and acceleration to parent
     ldcDiagnosticsInitialize(diagnosticsState);

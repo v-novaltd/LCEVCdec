@@ -153,7 +153,7 @@ PipelineCPU::~PipelineCPU()
     // Release frames
     for (uint32_t i = 0; i < m_frames.size(); ++i) {
         FrameCPU* frame{VNAllocationPtr(m_frames[i], FrameCPU)};
-        frame->release();
+        frame->release(false);
         // Call destructor directly, as we are doing in-place construct/destruct
         frame->~FrameCPU();
         VNFree(m_allocator, &m_frames[i]);
@@ -631,7 +631,7 @@ FrameCPU* PipelineCPU::findFrame(uint64_t timestamp)
 void PipelineCPU::freeFrame(FrameCPU* frame)
 {
     // Release task group and allocations
-    frame->release();
+    frame->release(true);
 
     // Find slot
     LdcMemoryAllocation* frameAlloc{m_frames.findUnordered(ldcVectorCompareAllocationPtr, frame)};

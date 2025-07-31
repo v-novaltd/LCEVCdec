@@ -69,7 +69,10 @@ def setup_app_logger():
 
 
 def get_githash():
-    repo = git.Repo(search_parent_directories=True)
+    try:
+        repo = git.Repo(search_parent_directories=True)
+    except git.exc.GitError:
+        return "Unknown"
     return repo.head.object.hexsha[:8]
 
 

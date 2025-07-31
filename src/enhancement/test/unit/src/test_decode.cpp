@@ -32,6 +32,7 @@ const static filesystem::path kTestAssets = findAssetsDir("src/enhancement/test/
 class Decode : public testing::Test
 {
 public:
+    virtual void openBin() { assert(false); }
     void SetUp() override
     {
         ldcDiagnosticsLogLevel(LdcLogLevelInfo);
@@ -40,6 +41,7 @@ public:
         ldeFrameConfigInitialize(allocator, &frameConfig);
         frameConfig.chunkAllocation = chunkAllocation;
 
+        openBin();
         EXPECT_EQ(getFrame(), true);
     }
 
@@ -89,12 +91,26 @@ public:
     LdeCmdBufferGpuBuilder cmdBufferGpuBuilder = {};
 
     MD5 hash;
-
-private:
-    std::unique_ptr<BinReader> m_binReader = createBinReader((kTestAssets / "decode.bin").string());
+    std::unique_ptr<BinReader> m_binReader;
 };
 
-TEST_F(Decode, DecodeToCpuCmdBuffer)
+class DecodeTemporalOn : public Decode
+{
+    void openBin() override
+    {
+        m_binReader = createBinReader((kTestAssets / "decode_temp_on.bin").string());
+    }
+};
+
+class DecodeTemporalOff : public Decode
+{
+    void openBin() override
+    {
+        m_binReader = createBinReader((kTestAssets / "decode_temp_off.bin").string());
+    }
+};
+
+TEST_F(DecodeTemporalOn, DecodeToCpuCmdBuffer)
 {
     EXPECT_EQ(ldeCmdBufferCpuInitialize(allocator, &cmdBufferCpu, 0), true);
     EXPECT_EQ(ldeCmdBufferCpuReset(&cmdBufferCpu, globalConfig.numLayers), true);
@@ -120,7 +136,7 @@ TEST_F(Decode, DecodeToCpuCmdBuffer)
     ldeCmdBufferCpuFree(&cmdBufferCpu);
 }
 
-TEST_F(Decode, DecodeToGpuCmdBuffer)
+TEST_F(DecodeTemporalOn, DecodeToGpuCmdBuffer)
 {
     EXPECT_TRUE(ldeCmdBufferGpuInitialize(allocator, &cmdBufferGpu, &cmdBufferGpuBuilder));
     EXPECT_EQ(globalConfig.numLayers, 4);
@@ -152,7 +168,52 @@ TEST_F(Decode, DecodeToGpuCmdBuffer)
     ldeCmdBufferGpuFree(&cmdBufferGpu, &cmdBufferGpuBuilder);
 }
 
-TEST_F(Decode, InvalidInputs)
+TEST_F(DecodeTemporalOff, DecodeToCpuCmdBuffer)
+{
+    EXPECT_EQ(ldeCmdBufferCpuInitialize(allocator, &cmdBufferCpu, 0), true);
+    EXPECT_EQ(ldeCmdBufferCpuReset(&cmdBufferCpu, globalConfig.numLayers), true);
+
+    EXPECT_TRUE(ldeDecodeEnhancement(&globalConfig, &frameConfig, LOQ1, 0, 0, &cmdBufferCpu,
+                                     nullptr, nullptr));
+    EXPECT_EQ(cmdBufferCpu.count, 110);
+    EXPECT_EQ(hashCpuBuffer(), "2c3e03aca3071a7fc1602aa0183d8e5d");
+}
+
+TEST_F(DecodeTemporalOff, DecodeToGpuCmdBuffer)
+{
+    EXPECT_TRUE(ldeCmdBufferGpuInitialize(allocator, &cmdBufferGpu, &cmdBufferGpuBuilder));
+    EXPECT_EQ(globalConfig.numLayers, 4);
+    EXPECT_TRUE(ldeCmdBufferGpuReset(&cmdBufferGpu, &cmdBufferGpuBuilder, globalConfig.numLayers));
+    EXPECT_TRUE(ldeDecodeEnhancement(&globalConfig, &frameConfig, LOQ1, 0, 0, nullptr,
+                                     &cmdBufferGpu, &cmdBufferGpuBuilder));
+    EXPECT_EQ(cmdBufferGpu.commandCount, 9);
+    EXPECT_EQ(cmdBufferGpuBuilder.residualCapacity, 440);
+    EXPECT_EQ(cmdBufferGpu.residualCount, 440);
+    EXPECT_EQ(hashGpuBuffer(), "6756dfa75d9d89120fa6f22e0d2be6c3");
+
+    EXPECT_TRUE(ldeCmdBufferGpuReset(&cmdBufferGpu, &cmdBufferGpuBuilder, globalConfig.numLayers));
+    EXPECT_TRUE(ldeDecodeEnhancement(&globalConfig, &frameConfig, LOQ0, 0, 0, nullptr,
+                                     &cmdBufferGpu, &cmdBufferGpuBuilder));
+    EXPECT_EQ(cmdBufferGpu.commandCount, 14);
+    EXPECT_EQ(cmdBufferGpuBuilder.residualCapacity, 804);
+    EXPECT_EQ(cmdBufferGpuBuilder.residualSetCount, 0);
+    EXPECT_EQ(cmdBufferGpuBuilder.residualClearAndSetCount, 0);
+    EXPECT_EQ(cmdBufferGpu.residualCount, 804);
+    EXPECT_EQ(hashGpuBuffer(), "45914d5584eca6510c622c352393836c");
+
+    EXPECT_TRUE(getFrame());
+    EXPECT_TRUE(ldeCmdBufferGpuReset(&cmdBufferGpu, &cmdBufferGpuBuilder, globalConfig.numLayers));
+    EXPECT_TRUE(ldeDecodeEnhancement(&globalConfig, &frameConfig, LOQ0, 0, 0, nullptr,
+                                     &cmdBufferGpu, &cmdBufferGpuBuilder));
+    EXPECT_EQ(cmdBufferGpu.commandCount, 14);
+    EXPECT_EQ(cmdBufferGpuBuilder.residualCapacity, 804);
+    EXPECT_EQ(cmdBufferGpu.residualCount, 776);
+    EXPECT_EQ(hashGpuBuffer(), "d6ab7c0bdb99077d155825d19cf9e98c");
+
+    ldeCmdBufferGpuFree(&cmdBufferGpu, &cmdBufferGpuBuilder);
+}
+
+TEST_F(DecodeTemporalOn, InvalidInputs)
 {
     EXPECT_FALSE(ldeDecodeEnhancement(&globalConfig, &frameConfig, LOQ2, 0, 0, &cmdBufferCpu,
                                       nullptr, nullptr));

@@ -128,7 +128,7 @@ struct VulkanUpscaleArgs
     PictureVulkan* src;
     PictureVulkan* dst;
     PictureVulkan* base;     /**< base picture only used for PA */
-    bool applyPA;            /**< Indicates that predicted-average should be applied */
+    uint8_t applyPA;         /**< Indicates that predicted-average should be off, 1D, or 2D */
     LdppDitherFrame* dither; /**< Indicates that dithering should be applied  */
     LdeScalingMode mode;     /**< The type of scaling to perform (1D or 2D). */
     bool vertical; /**< Not part of the standard but if the scaling mode is 1D we can optionally do vertical instead of horizontal. Required for unit tests */
@@ -143,6 +143,7 @@ struct VulkanApplyArgs
     LdeCmdBufferGpu bufferGpu;
     bool highlightResiduals;
     bool temporalRefresh;
+    bool tuRasterOrder;
 };
 
 // A base picture reference and other arguments from sendBase()
@@ -281,7 +282,7 @@ private:
                                                         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
                                                         void* pUserData);
 
-    void dispatchCompute(int width, int height, VkCommandBuffer& cmdBuf, int wgSize);
+    void dispatchCompute(int width, int height, VkCommandBuffer& cmdBuf, int wgSize, int packDensity = 2);
 
     bool mapMemory(VkDeviceMemory& memory, uint8_t* mappedPtr);
     bool unmapMemory(VkDeviceMemory& memory, uint8_t* mappedPtr);
@@ -302,6 +303,8 @@ private:
     bool m_firstApply = true;
     bool m_initialized = false;
     bool m_realGpu = false;
+    uint8_t m_shift = 5;
+    LdeChroma m_chroma = LdeChroma::CT420;
 
     VkInstance m_instance;
     VkDebugUtilsMessengerEXT m_debugMessenger;
@@ -389,7 +392,8 @@ private:
                                                   uint8_t intermediatePtr);
     LdcTaskDependency addTaskApplyCmdBufferTemporal(FrameVulkan* frame, LdpEnhancementTile* enhancementTile,
                                                     LdcTaskDependency temporalBufferDep,
-                                                    LdcTaskDependency CmdBufferDep);
+                                                    LdcTaskDependency CmdBufferDep,
+                                                    uint8_t intermediatePtr);
 
     LdcTaskDependency addTaskApplyAddTemporal(FrameVulkan* frame, LdcTaskDependency temporalDep,
                                               LdcTaskDependency sourceDep, uint8_t intermediatePtr);

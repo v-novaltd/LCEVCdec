@@ -18,6 +18,7 @@
 #include <LCEVC/common/class_utils.hpp>
 #include <LCEVC/common/configure.hpp>
 #include <LCEVC/common/return_code.h>
+#include <LCEVC/common/shared_library.h>
 #include <LCEVC/pipeline/buffer.h>
 #include <LCEVC/pipeline/event_sink.h>
 #include <LCEVC/pipeline/picture.h>
@@ -37,7 +38,7 @@ namespace lcevc_dec::pipeline {
 //
 // Pipeline implementations will expose a factory function along the lines of:
 //
-// std::unique_ptr<PipelineBuilder> createPipelineBuilderXXXX();
+// std::unique_ptr<PipelineBuilder> createPipelineBuilder();
 //
 // Depending on the pipeline, it may need connections to system objects or resources - these
 // would be pipeline specific parameters to the factory function.

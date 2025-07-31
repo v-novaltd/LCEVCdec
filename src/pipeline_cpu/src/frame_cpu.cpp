@@ -106,10 +106,13 @@ void FrameCPU::generateTasks(uint64_t previousTimestamp)
 
 // Release resources associated with a frame
 //
-void FrameCPU::release()
+void FrameCPU::release(bool wait)
 {
-    // Make sure task group is finished
-    ldcTaskGroupWait(&m_taskGroup);
+    if (wait) {
+        // Make sure task group is finished
+        ldcTaskGroupWait(&m_taskGroup);
+    }
+
     ldcTaskGroupDestroy(&m_taskGroup);
 
     VNFree(m_pipeline->allocator(), &m_enhancementData);

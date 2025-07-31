@@ -616,9 +616,6 @@ static bool parseEncodedData(ByteStream* stream, LdeFrameConfig* frameConfig, co
     calculateTileChunkIndices(frameConfig, globalConfig);
     VNCheckB(chunkCheckAlloc(frameConfig, globalConfig));
 
-    frameConfig->loqEnabled[LOQ0] = false;
-    frameConfig->loqEnabled[LOQ1] = false;
-
     /* --- Read the enabled & RLE-only flags --- */
     BitStream chunkHeadersStream = {{0}};
     VNCheckB(bitstreamInitialize(&chunkHeadersStream, bytestreamCurrent(stream),
@@ -687,9 +684,6 @@ static bool parseEncodedDataTiled(ByteStream* stream, LdeFrameConfig* frameConfi
     /* Pre-calculate chunk offsets for quicker chunk lookup. */
     calculateTileChunkIndices(frameConfig, globalConfig);
     VNCheckB(chunkCheckAlloc(frameConfig, globalConfig));
-
-    frameConfig->loqEnabled[LOQ0] = false;
-    frameConfig->loqEnabled[LOQ1] = false;
 
     if (frameConfig->entropyEnabled || frameConfig->temporalSignallingPresent) {
         BitStream rleOnlyBS = {{0}};
@@ -870,6 +864,8 @@ static bool parseEncodedDataTiled(ByteStream* stream, LdeFrameConfig* frameConfi
                 }
             }
         }
+
+        tiledSizeDecoderRelease(sizeDecoderPtr);
     }
 
     return true;
@@ -1410,9 +1406,23 @@ void ldeConfigsReleaseFrame(LdeFrameConfig* frameConfig)
     }
 }
 
+void ldeConfigReset(LdeFrameConfig* frameConfig)
+{
+    frameConfig->globalConfigSet = false;
+    frameConfig->frameConfigSet = false;
+    frameConfig->numChunks = 0;
+    frameConfig->loqEnabled[LOQ0] = false;
+    frameConfig->loqEnabled[LOQ1] = false;
+}
+
 bool ldeConfigsParse(const uint8_t* serialized, const size_t serializedSize, LdeGlobalConfig* globalConfig,
                      LdeFrameConfig* frameConfig, bool* globalConfigModified)
 {
+    if (!serialized || !serializedSize) {
+        VNLogError("Serialised NULL or no size");
+        return false;
+    }
+
     // Unencapsulate - output size will always be the same or smaller
     size_t unencapsulatedSize = 0;
     bool idr = false;
@@ -1435,6 +1445,9 @@ bool ldeConfigsParse(const uint8_t* serialized, const size_t serializedSize, Lde
     frameConfig->frameConfigSet = false;
     frameConfig->globalConfigSet = false;
     frameConfig->nalType = idr ? NTIDR : NTNonIDR;
+    frameConfig->loqEnabled[LOQ0] = false;
+    frameConfig->loqEnabled[LOQ1] = false;
+    frameConfig->numChunks = 0;
 
     if (!bytestreamInitialize(&stream, unencapsulated, unencapsulatedSize)) {
         VNFree(frameConfig->allocator, &frameConfig->unencapsulatedAllocation);

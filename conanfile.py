@@ -33,10 +33,8 @@ class LCEVCDecoderSDK(ConanFile):
         "executables": [True, False],
         "unit_tests": [True, False],
         "vulkan": [True, False],
-        "utility": [True, False],
         "benchmark": [True, False],
         "simd": [True, False],
-        "force_overlay": [True, False],
         "debug_syntax": [True, False],
         "api_layer": [True, False],
         "json_config": [True, False],
@@ -47,10 +45,8 @@ class LCEVCDecoderSDK(ConanFile):
         "shared": True,
         "executables": True,
         "unit_tests": True,
-        "utility": True,
         "benchmark": False,
         "simd": True,
-        "force_overlay": False,
         "debug_syntax": False,
         "api_layer": True,
         "json_config": True,
@@ -146,7 +142,7 @@ class LCEVCDecoderSDK(ConanFile):
             reqs.append('nlohmann_json/3.11.3')
 
         if self.options.base_decoder == "ffmpeg":
-            reqs.append('ffmpeg/7.1')
+            reqs.append('ffmpeg/7.1.1')
 
         if self.options.base_decoder == "libav":
             reqs.append('libav/12.3')
@@ -159,7 +155,7 @@ class LCEVCDecoderSDK(ConanFile):
                 reqs.extend(['gtest/1.12.1', 'range-v3/0.12.0'])
 
         if self.options.vulkan and self.settings.os != "Android":
-            reqs.extend(['vulkan-loader/1.3.255', 'vulkan-headers/1.3.255'])
+            reqs.extend(['vulkan-loader/1.4.313', 'vulkan-headers/1.4.313'])
 
         for package in reqs:
             self.requires(package)
@@ -170,12 +166,12 @@ class LCEVCDecoderSDK(ConanFile):
 
     def set_version(self):
         # Extract version from git
-        self._get_git_info()
-        self.version = self.git_short_version
+        if self._get_git_info():
+            self.version = self.git_short_version
 
     def _get_git_info(self):
         # Add git info to exported sources.
-        # Will be picked up by version file generation tools instead of running git.
+        # Will be picked up by version file generation tools if available instead of running git
         if os.path.exists(os.path.join(self.recipe_folder, '.git')):
             git = Git(self)
             # Only consider tags of form [dev]<digits>.<digits>.<digits>...
@@ -189,7 +185,8 @@ class LCEVCDecoderSDK(ConanFile):
                 f"-C {self.recipe_folder} describe --match \"*.*.*\" --dirty")
             self.git_short_version = git.run(
                 f"-C {self.recipe_folder} describe --match \"*.*.*\" --abbrev=0")
-        else:
+            return True
+        elif os.path.exists(os.path.join(self.recipe_folder, '.githash')):
             with open(os.path.join(self.recipe_folder, '.githash')) as f:
                 self.git_hash = f.read()
             with open(os.path.join(self.recipe_folder, '.gitlonghash')) as f:
@@ -202,16 +199,18 @@ class LCEVCDecoderSDK(ConanFile):
                 self.git_version = f.read()
             with open(os.path.join(self.recipe_folder, '.gitshortversion')) as f:
                 self.git_short_version = f.read()
+            return True
+        return False
 
     def export_sources(self):
-        self._get_git_info()
-
-        save(self, os.path.join(self.export_sources_folder, ".githash"), self.git_hash)
-        save(self, os.path.join(self.export_sources_folder, ".gitlonghash"), self.git_long_hash)
-        save(self, os.path.join(self.export_sources_folder, ".gitdate"), self.git_date)
-        save(self, os.path.join(self.export_sources_folder, ".gitbranch"), self.git_branch)
-        save(self, os.path.join(self.export_sources_folder, ".gitversion"), self.git_version)
-        save(self, os.path.join(self.export_sources_folder, ".gitshortversion"), self.git_short_version)
+        if self._get_git_info():
+            save(self, os.path.join(self.export_sources_folder, ".githash"), self.git_hash)
+            save(self, os.path.join(self.export_sources_folder, ".gitlonghash"), self.git_long_hash)
+            save(self, os.path.join(self.export_sources_folder, ".gitdate"), self.git_date)
+            save(self, os.path.join(self.export_sources_folder, ".gitbranch"), self.git_branch)
+            save(self, os.path.join(self.export_sources_folder, ".gitversion"), self.git_version)
+            save(self, os.path.join(self.export_sources_folder,
+                 ".gitshortversion"), self.git_short_version)
 
     def generate(self):
         deps = CMakeDeps(self)
@@ -234,7 +233,6 @@ class LCEVCDecoderSDK(ConanFile):
         cmake.variables["VN_SDK_API_LAYER"] = self.options.api_layer
         cmake.variables["VN_CORE_BENCHMARK"] = self.options.benchmark
         cmake.variables["VN_CORE_SIMD"] = self.options.simd
-        cmake.variables["VN_CORE_FORCE_OVERLAY"] = self.options.force_overlay
 
         if self.settings.os == 'Android' and self.settings.arch == 'armv7':
             cmake.variables["CMAKE_ANDROID_ARM_NEON"] = self.options.simd

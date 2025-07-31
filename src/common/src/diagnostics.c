@@ -139,11 +139,8 @@ void ldcDiagnosticsInitialize(void* parentState)
 void ldcDiagnosticsRelease(void)
 {
     // Should only release our 'own' state
-    if (ldcDiagnosticsState != &localState) {
-        return;
-    }
-
-    if (ldcDiagnosticsState->initialized == false) {
+    if (ldcDiagnosticsState != &localState || ldcDiagnosticsState->initialized == false) {
+        ldcDiagnosticsState = NULL;
         return;
     }
 
@@ -172,6 +169,8 @@ void ldcDiagnosticsRelease(void)
     threadMutexDestroy(&ldcDiagnosticsState->mutex);
     ldcDiagnosticsBufferDestroy(&ldcDiagnosticsState->diagnosticsBuffer);
 #endif
+
+    ldcDiagnosticsState = NULL;
 }
 
 void ldcDiagnosticsFlush(void)

@@ -15,6 +15,8 @@
 #include "pipeline_builder_cpu.h"
 //
 #include "pipeline_cpu.h"
+
+#include <LCEVC/pipeline_cpu/create_pipeline.h>
 //
 #include <LCEVC/common/acceleration.h>
 #include <LCEVC/common/diagnostics.h>
@@ -99,7 +101,7 @@ bool PipelineBuilderCPU::configure(std::string_view name, const std::vector<std:
 } // namespace lcevc_dec::pipeline_cpu
 
 VN_LCEVC_PIPELINE_API lcevc_dec::pipeline::PipelineBuilder*
-createPipelineBuilderCPU(void* diagnosticState, void* accelerationState)
+CREATE_PIPELINE_CPU_BUILDER_NAME(void* diagnosticState, void* accelerationState)
 {
     // Connect this shared libraries diagnostics to parent
     ldcDiagnosticsInitialize(diagnosticState);

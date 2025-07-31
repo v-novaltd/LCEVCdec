@@ -96,10 +96,21 @@ endif ()
 if (GIT_VERSION STREQUAL ""
     OR GIT_SHORT_VERSION STREQUAL ""
     OR GIT_HASH STREQUAL "")
-    message(WARNING "Cannot determine git version, please clone from a git repo")
+    message(STATUS "Cannot determine git version, using project version ${CMAKE_PROJECT_VERSION}")
 else ()
     message(STATUS "Git: Version=${GIT_VERSION} ShortVersion=${GIT_SHORT_VERSION} Hash=${GIT_HASH}")
 endif ()
+
+# cmake-format: off
+file(READ "${CMAKE_SOURCE_DIR}/include/LCEVC/api_defs.h" API_DEFS_CONTENT)
+string(REGEX MATCH "#define LCEVC_DEC_VERSION_MAJOR ([0-9]+)" API_VERSION_MAJOR_LINE "${API_DEFS_CONTENT}")
+string(REGEX REPLACE "#define LCEVC_DEC_VERSION_MAJOR ([0-9]+)" "\\1" API_VERSION_MAJOR "${API_VERSION_MAJOR_LINE}")
+string(REGEX MATCH "#define LCEVC_DEC_VERSION_MINOR ([0-9]+)" API_VERSION_MINOR_LINE "${API_DEFS_CONTENT}")
+string(REGEX REPLACE "#define LCEVC_DEC_VERSION_MINOR ([0-9]+)" "\\1" API_VERSION_MINOR "${API_VERSION_MINOR_LINE}")
+string(REGEX MATCH "#define LCEVC_DEC_VERSION_PATCH ([0-9]+)" API_VERSION_PATCH_LINE "${API_DEFS_CONTENT}")
+string(REGEX REPLACE "#define LCEVC_DEC_VERSION_PATCH ([0-9]+)" "\\1" API_VERSION_PATCH "${API_VERSION_PATCH_LINE}")
+set(API_VERSION "${API_VERSION_MAJOR}.${API_VERSION_MINOR}.${API_VERSION_PATCH}")
+# cmake-format: on
 
 # Default MSVC runtime library, this has to before the 'project()' command
 cmake_policy(SET CMP0091 NEW)
@@ -218,7 +229,6 @@ function (lcevc_set_properties TARGET)
                    CXX_STANDARD 17
                    VS_GLOBAL_EnableMicrosoftCodeAnalysis false
                    VS_GLOBAL_EnableClangTidyCodeAnalysis true)
-
 endfunction ()
 
 macro (lcevc_add_subdirectory DIR)

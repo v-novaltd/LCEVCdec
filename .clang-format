@@ -52,9 +52,6 @@ AllowShortBlocksOnASingleLine: Empty
 PointerAlignment: Left
 ReferenceAlignment: Left
 
-# Switches
-AllowShortCaseLabelsOnASingleLine: true
-
 # Horizontal Whitespace
 SpaceAfterCStyleCast: false
 SpaceAfterLogicalNot: false
@@ -83,6 +80,7 @@ MaxEmptyLinesToKeep: 1
 KeepEmptyLinesAtTheStartOfBlocks: false
 
 # Switches
+AllowShortCaseLabelsOnASingleLine: true
 IndentCaseLabels: true
 IndentCaseBlocks: false
 

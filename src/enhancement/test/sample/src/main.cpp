@@ -39,7 +39,7 @@ int main(int argc, char** argv)
 
     // Setup common logger and memory utilities
     ldcDiagnosticsInitialize(NULL);
-    ldcDiagnosticsLogLevel(LdcLogLevelInfo);
+    ldcDiagnosticsLogLevel(LdcLogLevelVerbose);
     ldcDiagnosticsHandlerPush(ldcDiagHandlerStdio, stdout);
     LdcMemoryAllocator* allocator = ldcMemoryAllocatorMalloc();
 
@@ -54,11 +54,14 @@ int main(int argc, char** argv)
     LdeGlobalConfig globalConfig = {};
     LdeFrameConfig frameConfig = {};
     LdeCmdBufferCpu cmdBufferCpu = {};
+    LdeCmdBufferGpu cmdBufferGpu = {};
+    LdeCmdBufferGpuBuilder cmdBufferGpuBuilder = {};
 
     // Initialize memory for the configs, chunks and cmdbuffer
     ldeGlobalConfigInitialize(BitstreamVersionUnspecified, &globalConfig);
     ldeFrameConfigInitialize(allocator, &frameConfig);
     ldeCmdBufferCpuInitialize(allocator, &cmdBufferCpu, 0);
+    ldeCmdBufferGpuInitialize(allocator, &cmdBufferGpu, &cmdBufferGpuBuilder);
 
     // Loop until we have no frames
     while (binReader->read(decodeIndex, presentationIndex, rawNalUnit)) {
@@ -75,12 +78,20 @@ int main(int argc, char** argv)
                 for (uint32_t tileIdx = 0; tileIdx < globalConfig.numTiles[planeIdx][loqIdx]; tileIdx++) {
                     // Reset the cmdBuffer for this loq-plane-tile
                     ldeCmdBufferCpuReset(&cmdBufferCpu, transformSize);
+                    ldeCmdBufferGpuReset(&cmdBufferGpu, &cmdBufferGpuBuilder, transformSize);
                     if (!ldeDecodeEnhancement(&globalConfig, &frameConfig, static_cast<LdeLOQIndex>(loqIdx),
                                               planeIdx, tileIdx, &cmdBufferCpu, nullptr, nullptr)) {
                         return EXIT_FAILURE;
                     }
-                    fmt::print("Frame {} LOQ{} plane {} tile {} has {} residuals\n", frameIndex,
-                               loqIdx, planeIdx, tileIdx, cmdBufferCpu.count);
+                    if (!ldeDecodeEnhancement(&globalConfig, &frameConfig,
+                                              static_cast<LdeLOQIndex>(loqIdx), planeIdx, tileIdx,
+                                              nullptr, &cmdBufferGpu, &cmdBufferGpuBuilder)) {
+                        return EXIT_FAILURE;
+                    }
+                    fmt::print("Frame {} LOQ{} plane {} tile {} has {} CPU commands, {} GPU "
+                               "commands and {} GPU residuals\n",
+                               frameIndex, loqIdx, planeIdx, tileIdx, cmdBufferCpu.count,
+                               cmdBufferGpu.commandCount, cmdBufferGpu.residualCount);
                 }
             }
         }

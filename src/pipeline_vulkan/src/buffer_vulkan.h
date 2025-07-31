@@ -23,6 +23,9 @@
 
 namespace lcevc_dec::pipeline_vulkan {
 
+// Default minimum row alignment for internal allocations
+static const auto kVulkanBufferRowAlignment = 4 - 1;
+
 class PictureVulkan;
 class PipelineVulkan;
 

@@ -10,3 +10,4 @@ Libs: -L"${libdir}" @PC_LIBS@
 Cflags: -I"${includedir}"
 @PC_LIBS_PRIVATE@
 @PC_REQUIRES_PRIVATE@
+vulkan_pipeline=@PC_VULKAN_PIPELINE@

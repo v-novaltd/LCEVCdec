@@ -12,24 +12,6 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-// PipelineBuilder
-//
-// Interface between API and decoder pipeline creation.
-//
-//
-// Pipeline implementations will expose a factory function along the lines of:
-//
-// std::unique_ptr<PipelineBuilder> createPipelineBuilderXXXX();
-//
-// Depending on the pipeline, it may need connections to system objects or resources - these
-// would be pipeline specific parameters to the factory function.
-//
-// Configuration settings are passed to the builder, then `finish()` is called to create the actual
-// pipeline.
-//
-// This two stage process is to allow the specialization of the Pipeline implementation depending
-// on configuration, and to keep the online interface clear of configuration.
-//
 #ifndef VN_LCEVC_PIPELINE_CPU_PIPELINE_CPU_H
 #define VN_LCEVC_PIPELINE_CPU_PIPELINE_CPU_H
 

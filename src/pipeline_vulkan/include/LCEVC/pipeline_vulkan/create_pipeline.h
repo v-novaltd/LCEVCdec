@@ -17,7 +17,13 @@
 
 #include <LCEVC/pipeline/pipeline.h>
 
+#if VN_SDK_STATIC
+#define CREATE_PIPELINE_VULKAN_BUILDER_NAME createPipelineBuilderVulkan
+#else
+#define CREATE_PIPELINE_VULKAN_BUILDER_NAME createPipelineBuilder
+#endif
+
 VN_LCEVC_PIPELINE_API lcevc_dec::pipeline::PipelineBuilder*
-createPipelineBuilderVulkan(void* diagnosticState, void* accelerationState);
+CREATE_PIPELINE_VULKAN_BUILDER_NAME(void* diagnosticState, void* accelerationState);
 
 #endif // VN_LCEVC_PIPELINE_VULKAN_CREATE_PIPELINE_H

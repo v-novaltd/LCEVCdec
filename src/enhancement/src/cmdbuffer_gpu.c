@@ -23,9 +23,9 @@ enum CmdBufferGpuConstants
 {
     CBGKStoreGrowFactor = 2, /**< The factory multiply current capacity by when growing buffers. */
     CBGKInitialResidualBuilderCapacity =
-        8192, /**< Initial capacity of each residual buffer within CmdBufferGpuBuilder in 2*bytes */
+        2048, /**< Initial capacity of each residual buffer within CmdBufferGpuBuilder in 2*bytes */
     CBGKInitialCommandBuilderCapacity =
-        1024, /**< Initial capacity of CmdBufferGpu commands in CmdBufferGpuCmds */
+        256, /**< Initial capacity of CmdBufferGpu commands in CmdBufferGpuCmds */
     CBGKMaxBlockIndex = (1 << 18) - 1, /**< Max 18-bit number to initialize new commands block index values to */
     CBGKDDSLayers = 16,                /**< layerCount for a DDS buffer */
     CBGKDDLayers = 4,                  /**< layerCount for a DD buffer */
@@ -129,19 +129,23 @@ static bool cmdBufferCommandsResize(LdeCmdBufferGpu* cmdBuffer,
 }
 
 void cmdBufferAppendResiduals(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cmdBufferBuilder,
-                              LdeCmdBufferGpuCmd* cmd, const int16_t* residuals, int16_t* residualBuffer,
-                              uint32_t* residualCount, const uint32_t* residualCapacity, uint32_t tuIndex)
+                              LdeCmdBufferGpuCmd* cmd, const int16_t* residuals,
+                              int16_t* residualBuffer, uint32_t* residualCount,
+                              const uint32_t* residualCapacity, uint32_t tuIndex, bool tuRasterOrder)
 {
     const bool dds = cmdBuffer->layerCount == CBGKDDSLayers;
     const uint16_t blockSize = dds ? CBGKDDSBlockSize : CBGKDDBlockSize;
-    const uint16_t tuBlockPosition = tuIndex % blockSize;
-    if (dds) {
+    uint16_t tuBlockPosition = tuIndex % blockSize;
+    if (!tuRasterOrder && dds) {
         cmd->bitmask[0] |= (1ULL << (blockSize - 1 - tuBlockPosition));
         if (cmd->bitCount == 0) {
             cmd->bitStart = clz64(cmd->bitmask[0]);
         }
     } else {
-        uint16_t maskIndex = tuBlockPosition >> 6;
+        if (tuRasterOrder) {
+            tuBlockPosition = tuIndex % CBGKDDBlockSize;
+        }
+        const uint16_t maskIndex = tuBlockPosition >> 6;
         cmd->bitmask[maskIndex] |= (1ULL << (blockSize - 1 - (tuBlockPosition % 64)));
         if (cmd->bitCount == 0) {
             cmd->bitStart = clz64(cmd->bitmask[maskIndex]);
@@ -210,9 +214,11 @@ bool ldeCmdBufferGpuInitialize(LdcMemoryAllocator* allocator, LdeCmdBufferGpu* c
 }
 
 bool ldeCmdBufferGpuAppend(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cmdBufferBuilder,
-                           LdeCmdBufferGpuOperation operation, const int16_t* residuals, uint32_t tuIndex)
+                           LdeCmdBufferGpuOperation operation, const int16_t* residuals,
+                           uint32_t tuIndex, bool tuRasterOrder)
 {
-    const uint32_t blockIndex = tuIndex >> (cmdBuffer->layerCount == CBGKDDSLayers ? 6 : 8);
+    const uint32_t blockIndex =
+        tuIndex >> (!tuRasterOrder && cmdBuffer->layerCount == CBGKDDSLayers ? 6 : 8);
     LdeCmdBufferGpuCmd* cmd = NULL;
     int16_t* residualBuffer = 0;
     uint32_t* residualCount = 0;
@@ -226,8 +232,8 @@ bool ldeCmdBufferGpuAppend(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* c
                 residualCount = &cmdBufferBuilder->residualClearAndSetCount;
                 residualCapacity = &cmdBufferBuilder->residualClearAndSetCapacity;
 
-                cmdBufferAppendResiduals(cmdBuffer, cmdBufferBuilder, cmd, residuals,
-                                         residualBuffer, residualCount, residualCapacity, tuIndex);
+                cmdBufferAppendResiduals(cmdBuffer, cmdBufferBuilder, cmd, residuals, residualBuffer,
+                                         residualCount, residualCapacity, tuIndex, false);
 
                 return true;
             }
@@ -270,7 +276,7 @@ bool ldeCmdBufferGpuAppend(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* c
         // modify existing cmd
         if (operation != CBGOClearAndSet) {
             cmdBufferAppendResiduals(cmdBuffer, cmdBufferBuilder, cmd, residuals, residualBuffer,
-                                     residualCount, residualCapacity, tuIndex);
+                                     residualCount, residualCapacity, tuIndex, tuRasterOrder);
         }
     } else {
         if (cmdBuffer->commandCount == cmdBufferBuilder->commandCapacity - 2) {
@@ -298,7 +304,7 @@ bool ldeCmdBufferGpuAppend(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* c
 
         if (operation != CBGOClearAndSet) {
             cmdBufferAppendResiduals(cmdBuffer, cmdBufferBuilder, cmd, residuals, residualBuffer,
-                                     residualCount, residualCapacity, tuIndex);
+                                     residualCount, residualCapacity, tuIndex, tuRasterOrder);
         }
 
         cmdBuffer->commandCount++;
@@ -343,7 +349,8 @@ bool ldeCmdBufferGpuReset(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cm
     return true;
 }
 
-bool ldeCmdBufferGpuBuild(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cmdBufferBuilder)
+bool ldeCmdBufferGpuBuild(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cmdBufferBuilder,
+                          bool tuRasterOrder)
 {
     const uint32_t setResidualsStart = cmdBufferBuilder->residualAddCount;
     const uint32_t clearResidualsStart =
@@ -351,6 +358,7 @@ bool ldeCmdBufferGpuBuild(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cm
     const uint32_t newResidualCount = cmdBufferBuilder->residualAddCount +
                                       cmdBufferBuilder->residualSetCount +
                                       cmdBufferBuilder->residualClearAndSetCount;
+    cmdBuffer->residualCount = newResidualCount;
 
     if (!cmdBuffer->residuals) {
         cmdBuffer->residuals = VNAllocateArray(cmdBuffer->allocator, &cmdBuffer->allocationResiduals,
@@ -367,19 +375,20 @@ bool ldeCmdBufferGpuBuild(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cm
 
     memcpy(cmdBuffer->residuals, cmdBufferBuilder->residualsAdd,
            cmdBufferBuilder->residualAddCount * sizeof(int16_t));
-    memcpy(&cmdBuffer->residuals[setResidualsStart], cmdBufferBuilder->residualsSet,
-           cmdBufferBuilder->residualSetCount * sizeof(int16_t));
-    memcpy(&cmdBuffer->residuals[clearResidualsStart], cmdBufferBuilder->residualsClearAndSet,
-           cmdBufferBuilder->residualClearAndSetCount * sizeof(int16_t));
-    cmdBuffer->residualCount = newResidualCount;
+    if (!tuRasterOrder) {
+        memcpy(&cmdBuffer->residuals[setResidualsStart], cmdBufferBuilder->residualsSet,
+               cmdBufferBuilder->residualSetCount * sizeof(int16_t));
+        memcpy(&cmdBuffer->residuals[clearResidualsStart], cmdBufferBuilder->residualsClearAndSet,
+               cmdBufferBuilder->residualClearAndSetCount * sizeof(int16_t));
 
-    for (uint32_t cmdIndex = 0; cmdIndex < cmdBuffer->commandCount; cmdIndex++) {
-        LdeCmdBufferGpuCmd* cmd = &cmdBuffer->commands[cmdIndex];
-        switch (cmd->operation) {
-            case CBGOAdd: continue;
-            case CBGOSet: cmd->dataOffset += setResidualsStart; break;
-            case CBGOSetZero: continue;
-            case CBGOClearAndSet: cmd->dataOffset += clearResidualsStart; break;
+        for (uint32_t cmdIndex = 0; cmdIndex < cmdBuffer->commandCount; cmdIndex++) {
+            LdeCmdBufferGpuCmd* cmd = &cmdBuffer->commands[cmdIndex];
+            switch (cmd->operation) {
+                case CBGOAdd: continue;
+                case CBGOSet: cmd->dataOffset += setResidualsStart; break;
+                case CBGOSetZero: continue;
+                case CBGOClearAndSet: cmd->dataOffset += clearResidualsStart; break;
+            }
         }
     }
 

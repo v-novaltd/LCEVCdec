@@ -56,7 +56,7 @@ public:
     PictureLock* getLock() const { return VNAllocationPtr(m_lockAllocation, PictureLock); }
 
     // Buffer management
-    void setExternal(const LdpPicturePlaneDesc* planeDescArr, const LdpPictureBufferDesc* buffer);
+    void setExternal(const LdpPicturePlaneDesc* planeDescArr, const LdpPictureBufferDesc* bufferDesc);
 
     uint32_t getRequiredSize() const;
 

@@ -117,6 +117,28 @@ TEST_F(ConfigParserTest, checkParams)
     EXPECT_FALSE(frameConfig.chunks);
 }
 
+TEST_F(ConfigParserTest, configReset)
+{
+    openAsset("decode_temp_on.bin");
+    auto frame = getFrame();
+    EXPECT_EQ(frame.size(), 610);
+    bool globalConfigModified = false;
+    EXPECT_TRUE(ldeConfigsParse(frame.data(), frame.size(), &globalConfig, &frameConfig,
+                                &globalConfigModified));
+    EXPECT_EQ(frameConfig.frameConfigSet, true);
+    EXPECT_EQ(frameConfig.numChunks, 8);
+    EXPECT_EQ(frameConfig.loqEnabled[LOQ0], true);
+    EXPECT_EQ(frameConfig.loqEnabled[LOQ1], true);
+
+    ldeConfigReset(&frameConfig);
+    EXPECT_EQ(frameConfig.frameConfigSet, false);
+    EXPECT_EQ(frameConfig.numChunks, 0);
+    EXPECT_EQ(frameConfig.loqEnabled[LOQ0], false);
+    EXPECT_EQ(frameConfig.loqEnabled[LOQ1], false);
+
+    ldeConfigsReleaseFrame(&frameConfig);
+}
+
 TEST_F(ConfigParserTest, multiFrame)
 {
     openAsset("parse_std.bin");

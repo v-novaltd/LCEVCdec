@@ -40,6 +40,8 @@ set(PRIVATE_LIBRARIES
 add_library(lcevc_dec_api ${SOURCES} ${HEADERS} ${INTERFACES})
 add_library(lcevc_dec::api ALIAS lcevc_dec_api)
 lcevc_set_properties(lcevc_dec_api)
+set_target_properties(lcevc_dec_api PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION
+                                                                          ${PROJECT_VERSION_MAJOR})
 
 target_include_directories(
     lcevc_dec_api

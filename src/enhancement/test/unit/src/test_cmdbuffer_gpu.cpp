@@ -56,7 +56,7 @@ TEST_F(CmdBuffersGpu, addCommandsAndBuild)
     int16_t residuals[kLayerCount] = {0};
     ldeCmdBufferGpuReset(&cmdBuffer, &cmdBufferBuilder, kLayerCount);
 
-    EXPECT_EQ(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 5), true);
+    EXPECT_EQ(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 5, false), true);
     EXPECT_EQ(cmdBuffer.commandCount, 1);
     EXPECT_EQ(cmdBuffer.commands[cmdBuffer.commandCount - 1].blockIndex, 0);
     EXPECT_EQ(cmdBufferBuilder.currentAddCmd, cmdBuffer.commandCount - 1);
@@ -66,7 +66,7 @@ TEST_F(CmdBuffersGpu, addCommandsAndBuild)
     EXPECT_EQ(cmdBufferBuilder.residualAddCount, kLayerCount * 1);
 
     incrementResiduals(residuals, kLayerCount); // 1
-    EXPECT_EQ(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 63), true);
+    EXPECT_EQ(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 63, false), true);
     EXPECT_EQ(cmdBuffer.commandCount, 1);
     EXPECT_EQ(cmdBuffer.commands[cmdBuffer.commandCount - 1].blockIndex, 0);
     EXPECT_EQ(cmdBufferBuilder.currentAddCmd, cmdBuffer.commandCount - 1);
@@ -76,7 +76,7 @@ TEST_F(CmdBuffersGpu, addCommandsAndBuild)
     EXPECT_EQ(cmdBufferBuilder.residualAddCount, kLayerCount * 2);
 
     incrementResiduals(residuals, kLayerCount); // 2
-    EXPECT_EQ(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOSet, residuals, 2), true);
+    EXPECT_EQ(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOSet, residuals, 2, false), true);
     EXPECT_EQ(cmdBuffer.commandCount, 2);
     EXPECT_EQ(cmdBuffer.commands[cmdBuffer.commandCount - 1].blockIndex, 0);
     EXPECT_EQ(cmdBufferBuilder.currentSetCmd, cmdBuffer.commandCount - 1);
@@ -86,7 +86,7 @@ TEST_F(CmdBuffersGpu, addCommandsAndBuild)
     EXPECT_EQ(cmdBufferBuilder.residualSetCount, kLayerCount * 1);
 
     incrementResiduals(residuals, kLayerCount); // 3
-    EXPECT_EQ(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 64), true);
+    EXPECT_EQ(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOAdd, residuals, 64, false), true);
     EXPECT_EQ(cmdBuffer.commandCount, 3);
     EXPECT_EQ(cmdBuffer.commandCount - 1, cmdBufferBuilder.currentAddCmd);
     EXPECT_EQ(cmdBuffer.commands[cmdBuffer.commandCount - 1].blockIndex, 1);
@@ -96,7 +96,8 @@ TEST_F(CmdBuffersGpu, addCommandsAndBuild)
     EXPECT_EQ(cmdBuffer.commands[cmdBufferBuilder.currentAddCmd].bitmask[0], 0x8000000000000000);
     EXPECT_EQ(cmdBufferBuilder.residualAddCount, kLayerCount * 3);
 
-    EXPECT_EQ(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOSetZero, residuals, 2038), true);
+    EXPECT_EQ(ldeCmdBufferGpuAppend(&cmdBuffer, &cmdBufferBuilder, CBGOSetZero, residuals, 2038, false),
+              true);
     EXPECT_EQ(cmdBuffer.commandCount, 4);
     EXPECT_EQ(cmdBuffer.commands[cmdBuffer.commandCount - 1].blockIndex, 31);
     EXPECT_EQ(cmdBufferBuilder.currentSetZeroCmd, cmdBuffer.commandCount - 1);
@@ -104,7 +105,7 @@ TEST_F(CmdBuffersGpu, addCommandsAndBuild)
     EXPECT_EQ(cmdBuffer.commands[cmdBufferBuilder.currentSetZeroCmd].bitStart, 54);
     EXPECT_EQ(cmdBuffer.commands[cmdBufferBuilder.currentSetZeroCmd].bitmask[0], 0x200);
 
-    EXPECT_EQ(ldeCmdBufferGpuBuild(&cmdBuffer, &cmdBufferBuilder), true);
+    EXPECT_EQ(ldeCmdBufferGpuBuild(&cmdBuffer, &cmdBufferBuilder, false), true);
     EXPECT_EQ(cmdBuffer.residualCount, 64);
     EXPECT_EQ(cmdBufferBuilder.residualCapacity, 64);
     EXPECT_EQ(cmdBuffer.commands[0].dataOffset, 0);

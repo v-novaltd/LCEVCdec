@@ -17,7 +17,13 @@
 
 #include <LCEVC/pipeline/pipeline.h>
 
+#if VN_SDK_STATIC
+#define CREATE_PIPELINE_LEGACY_BUILDER_NAME createPipelineBuilderLegacy
+#else
+#define CREATE_PIPELINE_LEGACY_BUILDER_NAME createPipelineBuilder
+#endif
+
 VN_LCEVC_PIPELINE_API lcevc_dec::pipeline::PipelineBuilder*
-createPipelineBuilderLegacy(void* diagnosticsState, void* accelerationState);
+CREATE_PIPELINE_LEGACY_BUILDER_NAME(void* diagnosticsState, void* accelerationState);
 
 #endif // VN_LCEVC_PIPELINE_LEGACY_CREATE_PIPELINE_H

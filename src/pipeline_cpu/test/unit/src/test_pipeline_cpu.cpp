@@ -27,7 +27,7 @@ using namespace lcevc_dec::pipeline;
 TEST(PipelineCPU, Create)
 {
     auto pipelineBuilder =
-        createPipelineBuilderCPU(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
+        CREATE_PIPELINE_CPU_BUILDER_NAME(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
     ASSERT_TRUE(pipelineBuilder);
 
     auto pipeline = pipelineBuilder->finish(EventSink::nullSink());
@@ -44,7 +44,7 @@ public:
     void SetUp() override
     {
         auto pipelineBuilder =
-            createPipelineBuilderCPU(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
+            CREATE_PIPELINE_CPU_BUILDER_NAME(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
         ASSERT_TRUE(pipelineBuilder);
 
         mPipeline = pipelineBuilder->finish(EventSink::nullSink());

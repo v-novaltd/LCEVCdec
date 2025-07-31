@@ -11,10 +11,12 @@
 # licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
+
 include("Sources.cmake")
 
 add_library(lcevc_dec_pipeline_cpu ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_pipeline_cpu)
+set_target_properties(lcevc_dec_pipeline_cpu PROPERTIES SOVERSION ${PIPELINE_CPU_VERSION})
 
 target_compile_definitions(lcevc_dec_pipeline_cpu PRIVATE VNEnablePipelineAPIExport)
 

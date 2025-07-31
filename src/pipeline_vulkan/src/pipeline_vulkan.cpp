@@ -37,8 +37,56 @@
 #include <cstdint>
 #include <memory>
 #include <sstream>
+#include <type_traits>
 
 namespace lcevc_dec::pipeline_vulkan {
+
+struct PushConstants
+{
+    int kernel[4];
+    int srcWidth;
+    int srcHeight;
+    int pa;
+    int containerStrideIn;
+    int containerOffsetIn;
+    int containerStrideOut;
+    int containerOffsetOut;
+    int containerStrideBase;
+    int containerOffsetBase;
+};
+
+struct PushConstantsApply
+{
+    int srcWidth;
+    int srcHeight;
+    int residualOffset;
+    int stride;
+    int saturate;
+    int testVal;
+    int layerCount;
+    int tuRasterOrder;
+};
+
+struct PushConstantsConversion
+{
+    int width;
+    int containerStrideIn;
+    int containerOffsetIn;
+    int containerStrideOut;
+    int containerOffsetOut;
+    int containerStrideV; // used to check for nv12 and as input or output stride for V-plane
+    int containerOffsetV; // used with nv12 as input or output offset for V-plane
+    int bit8;
+    int toInternal;
+    int shift; // 5 for 10bit, 3 for 12bit, and 1 for 14bit
+};
+
+struct PushConstantsBlit
+{
+    int width;
+    int height;
+    int batchSize; // number of elements to process in each shader invocation
+};
 
 // Utility functions for finding things in Arrays
 //
@@ -85,47 +133,42 @@ namespace {
         return compareTimestamps(ets, ts);
     }
 
+    inline void getSubsamplingShifts(LdeChroma chroma, int& widthShift, int& heightShift)
+    {
+        widthShift = 0;
+        heightShift = 0;
+        switch (chroma) {
+            case LdeChroma::CT420: heightShift = 1; [[fallthrough]];
+            case LdeChroma::CT422: widthShift = 1; break;
+            default: break;
+        }
+    }
+
+    template <typename, typename = std::void_t<>>
+    struct HasContainerBase : std::false_type
+    {};
+
+    template <typename T>
+    struct HasContainerBase<T, std::void_t<decltype(std::declval<T>().containerStrideBase),
+                                           decltype(std::declval<T>().containerOffsetBase)>> : std::true_type
+    {};
+
+    template <typename T>
+    inline void setContainerStrides(T& constants, int index, PictureVulkan* srcPicture,
+                                    PictureVulkan* dstPicture, PictureVulkan* basePicture)
+    {
+        constants.containerStrideIn = srcPicture->layout.rowStrides[index] >> 2;
+        constants.containerOffsetIn = srcPicture->layout.planeOffsets[index] >> 2;
+        constants.containerStrideOut = dstPicture->layout.rowStrides[index] >> 2;
+        constants.containerOffsetOut = dstPicture->layout.planeOffsets[index] >> 2;
+        if constexpr (HasContainerBase<T>::value) {
+            if (basePicture) {
+                constants.containerStrideBase = basePicture->layout.rowStrides[index] >> 2;
+                constants.containerOffsetBase = basePicture->layout.planeOffsets[index] >> 2;
+            }
+        }
+    }
 } // namespace
-
-struct PushConstants
-{
-    int kernel[4];
-    int srcWidth;
-    int srcHeight;
-    int bit8;
-    int pixelStrideIn;
-    int pixelStrideOut;
-    int pa;
-    int pixelOffsetIn;
-};
-
-struct PushConstantsApply
-{
-    int srcWidth;
-    int srcHeight;
-    int residualOffset;
-    int stride;
-    int saturate;
-    int testVal;
-    int layerCount;
-};
-
-struct PushConstantsConversion
-{
-    int numPixels;
-    int bit8;
-    int toInternal;
-    int nv12;      // pixel pointer to the start of the UV plane
-    int uvFlipped; // bool to signal NV21
-    int batchSize; // number of elements to process in each shader invocation
-};
-
-struct PushConstantsBlit
-{
-    int width;
-    int height;
-    int batchSize; // number of elements to process in each shader invocation
-};
 
 VKAPI_ATTR VkBool32 VKAPI_CALL
 PipelineVulkan::debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT, VkDebugUtilsMessageTypeFlagsEXT,
@@ -789,9 +832,8 @@ bool PipelineVulkan::init()
     return true;
 }
 
-void PipelineVulkan::dispatchCompute(int width, int height, VkCommandBuffer& cmdBuf, int wgSize)
+void PipelineVulkan::dispatchCompute(int width, int height, VkCommandBuffer& cmdBuf, int wgSize, int packDensity)
 {
-    const int packDensity = 2;
     const int modX = width % (packDensity * wgSize);
     const int divX = width / (packDensity * wgSize);
     const int numGroupsX = modX ? divX + 1 : divX;
@@ -869,25 +911,24 @@ bool PipelineVulkan::conversion(VulkanConversionArgs* params)
     srcPicture->getDesc(srcDesc);
     dstPicture->getDesc(dstDesc);
 
-    const auto srcBit8 =
-        srcDesc.colorFormat == LdpColorFormatI420_8 || srcDesc.colorFormat == LdpColorFormatGRAY_8 ||
-        srcDesc.colorFormat == LdpColorFormatNV12_8 || srcDesc.colorFormat == LdpColorFormatNV21_8;
+    auto isBit8 = [](LdpColorFormat colorFormat) {
+        return colorFormat == LdpColorFormatI444_8 || colorFormat == LdpColorFormatI422_8 ||
+               colorFormat == LdpColorFormatI420_8 || colorFormat == LdpColorFormatGRAY_8 ||
+               colorFormat == LdpColorFormatNV12_8 || colorFormat == LdpColorFormatNV21_8;
+    };
+    const auto srcBit8 = isBit8(srcDesc.colorFormat);
+    const auto dstBit8 = isBit8(dstDesc.colorFormat);
 
-    const auto dstBit8 =
-        dstDesc.colorFormat == LdpColorFormatI420_8 || dstDesc.colorFormat == LdpColorFormatGRAY_8 ||
-        dstDesc.colorFormat == LdpColorFormatNV12_8 || dstDesc.colorFormat == LdpColorFormatNV21_8;
-
-    const auto srcNv12 = srcDesc.colorFormat == LdpColorFormatNV12_8;
-    const auto dstNv12 = dstDesc.colorFormat == LdpColorFormatNV12_8;
-    const auto srcNv21 = srcDesc.colorFormat == LdpColorFormatNV21_8;
-    const auto dstNv21 = dstDesc.colorFormat == LdpColorFormatNV21_8;
-
-    constants.numPixels = srcBit8 ? srcBuffer->size() : srcBuffer->size() / 2;
+    constants.width = srcPicture->layout.width;
+    auto height = srcPicture->layout.height;
     constants.bit8 = params->toInternal ? static_cast<int>(srcBit8) : static_cast<int>(dstBit8);
     constants.toInternal = params->toInternal ? 1 : 0;
-    constants.nv12 = (srcNv12 || srcNv21 || dstNv12 || dstNv21) ? srcDesc.width * srcDesc.height : 0;
-    constants.uvFlipped = (srcNv21 || dstNv21) ? 1 : 0;
-    constants.batchSize = 16;
+    constants.shift = m_shift;
+
+    setContainerStrides(constants, 0, srcPicture, dstPicture, nullptr);
+
+    constants.containerStrideV = 0; // used to signal no nv12
+    constants.containerOffsetV = 0;
 
     updateComputeDescriptorSets(srcVkBuffer, dstVkBuffer, m_descriptorSetConversion);
 
@@ -902,12 +943,41 @@ bool PipelineVulkan::conversion(VulkanConversionArgs* params)
                        sizeof(PushConstantsConversion), &constants);
 
     const int packDensity = (srcBit8 || dstBit8) ? 4 : 2;
-    const int pixelsPerInvocation = packDensity * constants.batchSize;
-    int invocs = constants.numPixels / pixelsPerInvocation;
-    if (constants.numPixels % pixelsPerInvocation) {
-        ++invocs;
+    dispatchCompute(constants.width, height, m_commandBuffer, workGroupSize, packDensity); // Y
+
+    if (m_chroma != LdeChroma::CTMonochrome) {
+        int widthShift{};
+        int heightShift{};
+        getSubsamplingShifts(m_chroma, widthShift, heightShift);
+
+        const auto srcNv12 = srcDesc.colorFormat == LdpColorFormatNV12_8;
+        const auto dstNv12 = dstDesc.colorFormat == LdpColorFormatNV12_8;
+        const auto srcNv21 = srcDesc.colorFormat == LdpColorFormatNV21_8;
+        const auto dstNv21 = dstDesc.colorFormat == LdpColorFormatNV21_8;
+        const auto nv12 = srcNv12 || srcNv21 || dstNv12 || dstNv21;
+        if (!nv12) {
+            constants.width = srcPicture->layout.width >> widthShift;
+        } else {
+            // for nv12 src, these will be used as V-plane outputs, otherwise V-plane inputs
+            constants.containerStrideV = srcNv12 ? dstPicture->layout.rowStrides[2] >> 2
+                                                 : srcPicture->layout.rowStrides[2] >> 2;
+            constants.containerOffsetV = srcNv12 ? dstPicture->layout.planeOffsets[2] >> 2
+                                                 : srcPicture->layout.planeOffsets[2] >> 2;
+        }
+        height = srcPicture->layout.height >> heightShift;
+        setContainerStrides(constants, 1, srcPicture, dstPicture, nullptr);
+
+        vkCmdPushConstants(m_commandBuffer, m_pipelineLayoutConversion, VK_SHADER_STAGE_COMPUTE_BIT,
+                           0, sizeof(PushConstantsConversion), &constants);
+        dispatchCompute(constants.width, height, m_commandBuffer, workGroupSize, packDensity); // U
+
+        if (!nv12) {
+            setContainerStrides(constants, 2, srcPicture, dstPicture, nullptr);
+            vkCmdPushConstants(m_commandBuffer, m_pipelineLayoutConversion, VK_SHADER_STAGE_COMPUTE_BIT,
+                               0, sizeof(PushConstantsConversion), &constants);
+            dispatchCompute(constants.width, height, m_commandBuffer, workGroupSize, packDensity); // V
+        }
     }
-    vkCmdDispatch(m_commandBuffer, invocs, 1, 1);
 
     if (vkEndCommandBuffer(m_commandBuffer) != VK_SUCCESS) {
         VNLogError("failed to end command buffer");
@@ -937,14 +1007,6 @@ bool PipelineVulkan::upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs*
 
     LdpPictureDesc srcDesc;
     srcPicture->getDesc(srcDesc);
-
-    // Get frame parameters required by shader
-    const auto srcWidth = srcDesc.width;
-    const auto srcHeight = srcDesc.height;
-
-    const auto srcPixelStrideY = srcWidth; // srcPicture->layout.rowStrides[0]; TODO - check this
-    const auto srcPixelStrideU = srcWidth / 2; // srcPicture->layout.rowStrides[1]; TODO - check this
-    const auto srcPixelStrideV = srcWidth / 2; // srcPicture->layout.rowStrides[2]; TODO - check this
 
     // Get VkBuffers to update descriptor sets (attach buffers to shaders)
     auto* srcBuffer = static_cast<BufferVulkan*>(srcPicture->buffer);
@@ -981,12 +1043,11 @@ bool PipelineVulkan::upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs*
                          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 1, &memoryBarrierIntermediate, 0,
                          nullptr, 0, nullptr);
 
-    constants.srcWidth = srcWidth;
-    constants.srcHeight = srcHeight;
-    constants.pixelStrideIn = srcPixelStrideY;
-    constants.pixelStrideOut = srcWidth;
+    constants.srcWidth = srcDesc.width;
+    constants.srcHeight = srcDesc.height;
     constants.pa = 0;
-    constants.pixelOffsetIn = 0;
+    setContainerStrides(constants, 0, srcPicture, dstPicture, nullptr);
+
     vkCmdBindPipeline(m_commandBufferIntermediate, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineVertical);
     vkCmdBindDescriptorSets(m_commandBufferIntermediate, VK_PIPELINE_BIND_POINT_COMPUTE,
                             m_pipelineLayoutVertical, 0, 1, &m_descriptorSetSrcMid, 0, nullptr);
@@ -995,22 +1056,27 @@ bool PipelineVulkan::upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs*
     dispatchCompute(constants.srcWidth, constants.srcHeight, m_commandBufferIntermediate,
                     workGroupSize); // Y
 
-    constants.srcWidth = srcWidth / 2;
-    constants.srcHeight = srcHeight / 2;
-    constants.pixelStrideIn = srcPixelStrideU;
-    constants.pixelStrideOut = srcWidth / 2;
-    constants.pixelOffsetIn = srcPixelStrideY * srcHeight;
-    vkCmdPushConstants(m_commandBufferIntermediate, m_pipelineLayoutVertical,
-                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &constants);
-    dispatchCompute(constants.srcWidth, constants.srcHeight, m_commandBufferIntermediate,
-                    workGroupSize); // U
+    if (m_chroma != LdeChroma::CTMonochrome) {
+        int widthShift{};
+        int heightShift{};
+        getSubsamplingShifts(m_chroma, widthShift, heightShift);
 
-    constants.pixelStrideIn = srcPixelStrideV;
-    constants.pixelOffsetIn = (srcPixelStrideY * srcHeight + srcPixelStrideU * srcHeight / 2);
-    vkCmdPushConstants(m_commandBufferIntermediate, m_pipelineLayoutVertical,
-                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &constants);
-    dispatchCompute(constants.srcWidth, constants.srcHeight, m_commandBufferIntermediate,
-                    workGroupSize); // V
+        constants.srcWidth = srcDesc.width >> widthShift;
+        constants.srcHeight = srcDesc.height >> heightShift;
+        setContainerStrides(constants, 1, srcPicture, dstPicture, nullptr);
+
+        vkCmdPushConstants(m_commandBufferIntermediate, m_pipelineLayoutVertical,
+                           VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &constants);
+        dispatchCompute(constants.srcWidth, constants.srcHeight, m_commandBufferIntermediate,
+                        workGroupSize); // U
+
+        setContainerStrides(constants, 2, srcPicture, dstPicture, nullptr);
+
+        vkCmdPushConstants(m_commandBufferIntermediate, m_pipelineLayoutVertical,
+                           VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &constants);
+        dispatchCompute(constants.srcWidth, constants.srcHeight, m_commandBufferIntermediate,
+                        workGroupSize); // V
+    }
 
     if (vkEndCommandBuffer(m_commandBufferIntermediate) != VK_SUCCESS) {
         VNLogError("failed to end command buffer");
@@ -1045,15 +1111,6 @@ bool PipelineVulkan::upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArg
     LdpPictureDesc srcDesc;
     srcPicture->getDesc(srcDesc);
 
-    // Get frame parameters required by shader
-    const auto srcWidth = srcDesc.width;
-    const auto srcHeight = srcDesc.height;
-    const auto applyPA = params->applyPA;
-
-    const auto srcPixelStrideY = srcPicture->layout.rowStrides[0]; // TODO - check this
-    const auto srcPixelStrideU = srcWidth / 2; // srcPicture->layout.rowStrides[1]; TODO - check this
-    const auto srcPixelStrideV = srcWidth / 2; // srcPicture->layout.rowStrides[2]; TODO - check this
-
     // Get VkBuffers to update descriptor sets (attach buffers to shaders)
     auto* srcBuffer = static_cast<BufferVulkan*>(srcPicture->buffer);
     assert(srcBuffer);
@@ -1062,13 +1119,6 @@ bool PipelineVulkan::upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArg
     auto* baseBuffer = static_cast<BufferVulkan*>(basePicture->buffer);
     assert(baseBuffer);
     VkBuffer& baseVkBuffer = baseBuffer->getVkBuffer();
-
-    const auto dstPixelStrideY = 2 * srcWidth;
-    const auto dstPixelStrideU = srcWidth;
-    const auto dstPixelStrideV = srcWidth;
-    dstPicture->layout.rowStrides[0] = dstPixelStrideY * 2;
-    dstPicture->layout.rowStrides[1] = dstPixelStrideU * 2;
-    dstPicture->layout.rowStrides[2] = dstPixelStrideV * 2;
 
     auto* dstBuffer = static_cast<BufferVulkan*>(dstPicture->buffer);
     assert(dstBuffer);
@@ -1107,37 +1157,41 @@ bool PipelineVulkan::upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArg
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0,
                          nullptr);
 
-    constants.srcWidth = srcWidth;
-    constants.srcHeight = srcHeight;
-    constants.pixelStrideIn = srcWidth;
-    constants.pixelStrideOut = dstPixelStrideY;
-    constants.pixelOffsetIn = 0;
-    constants.pa = applyPA ? 1 : 0;
+    constants.srcWidth = srcDesc.width;
+    constants.srcHeight = srcDesc.height;
+    constants.pa = params->applyPA;
+
+    setContainerStrides(constants, 0, srcPicture, dstPicture, basePicture);
+
     vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineHorizontal);
     vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             m_pipelineLayoutHorizontal, 0, 1, &m_descriptorSetMidDst, 0, nullptr);
     vkCmdPushConstants(m_commandBuffer, m_pipelineLayoutHorizontal, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                        sizeof(PushConstants), &constants);
-    dispatchCompute(constants.srcWidth, constants.srcHeight / 2, m_commandBuffer,
-                    workGroupSize); // Y. constants.srcHeight/2 because we are doing 2 rows at a time for PA
+    dispatchCompute(constants.srcWidth, constants.srcHeight >> 1, m_commandBuffer,
+                    workGroupSize); // Y. constants.srcHeight / 2 because we are doing 2 rows at a time for PA
 
-    constants.srcWidth = srcWidth / 2;
-    constants.srcHeight = srcHeight;
-    constants.pixelStrideIn = srcPixelStrideU;
-    constants.pixelStrideOut = dstPixelStrideU;
-    constants.pixelOffsetIn = dstPixelStrideY * srcHeight / 2;
+    if (m_chroma != LdeChroma::CTMonochrome) {
+        int widthShift{};
+        int heightShift{};
+        getSubsamplingShifts(m_chroma, widthShift, heightShift);
 
-    vkCmdPushConstants(m_commandBuffer, m_pipelineLayoutHorizontal, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                       sizeof(PushConstants), &constants);
-    dispatchCompute(constants.srcWidth, constants.srcHeight / 2, m_commandBuffer, workGroupSize); // U
+        constants.srcWidth = srcDesc.width >> widthShift;
+        constants.srcHeight = srcDesc.height >> heightShift;
 
-    constants.pixelStrideIn = srcPixelStrideV;
-    constants.pixelStrideOut = dstPixelStrideV;
-    constants.pixelOffsetIn = (srcPixelStrideY * srcHeight * 2 + srcPixelStrideU * srcHeight) / 2;
-    vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            m_pipelineLayoutHorizontal, 0, 1, &m_descriptorSetMidDst, 0, nullptr);
-    dispatchCompute(constants.srcWidth, constants.srcHeight / 2, m_commandBuffer,
-                    workGroupSize); // V
+        setContainerStrides(constants, 1, srcPicture, dstPicture, basePicture);
+
+        vkCmdPushConstants(m_commandBuffer, m_pipelineLayoutHorizontal, VK_SHADER_STAGE_COMPUTE_BIT,
+                           0, sizeof(PushConstants), &constants);
+        dispatchCompute(constants.srcWidth, constants.srcHeight, m_commandBuffer, workGroupSize); // U
+
+        setContainerStrides(constants, 2, srcPicture, dstPicture, basePicture);
+
+        vkCmdPushConstants(m_commandBuffer, m_pipelineLayoutHorizontal, VK_SHADER_STAGE_COMPUTE_BIT,
+                           0, sizeof(PushConstants), &constants);
+        dispatchCompute(constants.srcWidth, constants.srcHeight, m_commandBuffer,
+                        workGroupSize); // V
+    }
 
     if (vkEndCommandBuffer(m_commandBuffer) != VK_SUCCESS) {
         VNLogError("failed to end command buffer");
@@ -1195,6 +1249,7 @@ bool PipelineVulkan::upscaleFrame(const LdeKernel* kernel, VulkanUpscaleArgs* pa
 
         params->src = params->dst;
         params->dst = output;
+        params->applyPA = params->applyPA ? 2 : 0;
         upscaleHorizontal(kernel, params);
     }
 
@@ -1250,13 +1305,15 @@ bool PipelineVulkan::apply(VulkanApplyArgs* params)
 
     vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
 
-    constants.srcWidth = params->planeWidth;
-    constants.srcHeight = params->planeHeight;
-    constants.stride = params->planeWidth;
+    constants.srcWidth = applyTemporal ? m_temporalPicture->layout.width : params->plane->layout.width;
+    constants.srcHeight = applyTemporal ? m_temporalPicture->layout.height : params->plane->layout.height;
+    constants.stride = applyTemporal ? m_temporalPicture->layout.rowStrides[0] >> 1
+                                     : params->plane->layout.rowStrides[0] >> 1;
     constants.residualOffset = residualOffset;
     constants.saturate = params->highlightResiduals ? 1 : 0;
     constants.testVal = 0;
     constants.layerCount = buffer.layerCount;
+    constants.tuRasterOrder = params->tuRasterOrder ? 1 : 0;
     vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineApply);
     vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayoutApply,
                             0, 1, &m_descriptorSetApply, 0, nullptr);
@@ -2279,20 +2336,79 @@ void* PipelineVulkan::taskConvertToInternal(LdcTask* task, const LdcTaskPart* /*
         return nullptr;
     }
 
+    pipeline->m_shift = 15 - frame->baseBitdepth;
+
     auto* srcPicture = static_cast<PictureVulkan*>(frame->basePicture);
-    LdpPictureDesc dstDesc;
-    srcPicture->getDesc(dstDesc);
-    dstDesc.colorFormat = LdpColorFormatI420_16_LE;
-    auto* dstPicture = static_cast<PictureVulkan*>(pipeline->allocPictureManaged(dstDesc));
+    LdpPictureDesc srcDesc;
+    srcPicture->getDesc(srcDesc);
+
+    // external base check
+    if (LdpPictureBufferDesc exDesc{}; srcPicture->getBufferDesc(exDesc)) {
+        auto managedBuffer = static_cast<BufferVulkan*>(srcPicture->buffer);
+        if (managedBuffer->size() != exDesc.byteSize) { // padded base
+            const bool nv12 = (srcPicture->layout.layoutInfo->format == LdpColorFormatNV12_8 ||
+                               srcPicture->layout.layoutInfo->format == LdpColorFormatNV21_8)
+                                  ? true
+                                  : false;
+
+            const uint32_t byteWidth = (frame->baseBitdepth == 8) ? srcDesc.width : 2 * srcDesc.width;
+            const uint32_t planeWidth = nv12 ? byteWidth : byteWidth >> 1;
+
+            auto removePadding = [&](uint32_t width, uint32_t height, uint32_t pixelWidth,
+                                     uint8_t planeIndex, uint32_t internalOffset,
+                                     uint32_t externalOffsetU, uint32_t externalOffsetV) {
+                for (uint32_t y = 0; y < height; ++y) {
+                    const auto internalIndex = internalOffset + y * pixelWidth;
+                    auto externalIndex = y * srcPicture->layout.rowStrides[planeIndex];
+                    if (planeIndex > 0) {
+                        externalIndex += externalOffsetU * srcPicture->layout.rowStrides[planeIndex - 1];
+                    }
+                    if (planeIndex > 1) {
+                        externalIndex += externalOffsetV * srcPicture->layout.rowStrides[planeIndex - 2];
+                    }
+                    std::memcpy(managedBuffer->ptr() + internalIndex, exDesc.data + externalIndex, width);
+                }
+            };
+
+            removePadding(byteWidth, srcDesc.height, byteWidth, 0, 0, 0, 0); // Y
+
+            if (pipeline->m_chroma != LdeChroma::CTMonochrome) {
+                removePadding(planeWidth, srcDesc.height >> 1, planeWidth, 1,
+                              byteWidth * srcDesc.height, srcDesc.height, 0); // U
+
+                if (!nv12) {
+                    removePadding(byteWidth >> 1, srcDesc.height >> 1, planeWidth, 2,
+                                  5 * byteWidth * srcDesc.height >> 2, srcDesc.height >> 1,
+                                  srcDesc.height); // V
+
+                    srcPicture->layout.rowStrides[2] = planeWidth;
+                    srcPicture->layout.planeOffsets[2] = 5 * byteWidth * srcDesc.height >> 2;
+                }
+                srcPicture->layout.rowStrides[1] = planeWidth;
+                srcPicture->layout.planeOffsets[1] = byteWidth * srcDesc.height;
+            }
+            srcPicture->layout.rowStrides[0] = byteWidth;
+            srcPicture->layout.planeOffsets[0] = 0;
+        } else {
+            std::memcpy(managedBuffer->ptr(), exDesc.data, exDesc.byteSize);
+        }
+    }
+
+    switch (pipeline->m_chroma) {
+        case LdeChroma::CTMonochrome: srcDesc.colorFormat = LdpColorFormatGRAY_16_LE; break;
+        case LdeChroma::CT420: srcDesc.colorFormat = LdpColorFormatI420_16_LE; break;
+        case LdeChroma::CT422: srcDesc.colorFormat = LdpColorFormatI422_16_LE; break;
+        case LdeChroma::CT444: srcDesc.colorFormat = LdpColorFormatI444_16_LE; break;
+        default: srcDesc.colorFormat = LdpColorFormatUnknown; break;
+    }
+    auto* dstPicture = static_cast<PictureVulkan*>(pipeline->allocPictureManaged(srcDesc));
 
     VulkanConversionArgs args{};
     args.src = srcPicture;
     args.dst = dstPicture;
     args.toInternal = true;
 
-    const bool r = pipeline->conversion(&args);
-
-    if (!r) {
+    if (!pipeline->conversion(&args)) {
         VNLogError("Conversion to internal failed");
     }
 
@@ -2352,10 +2468,23 @@ void* PipelineVulkan::taskConvertFromInternal(LdcTask* task, const LdcTaskPart* 
     args.dst = static_cast<PictureVulkan*>(frame->outputPicture);
     args.toInternal = false;
 
-    const bool r = pipeline->conversion(&args);
-
-    if (!r) {
+    if (!pipeline->conversion(&args)) {
         VNLogError("Conversion from internal failed");
+    }
+
+    if (frame->globalConfig->cropEnabled) {
+        args.dst->margins.left = frame->globalConfig->crop.left;
+        args.dst->margins.right = frame->globalConfig->crop.right;
+        args.dst->margins.top = frame->globalConfig->crop.top;
+        args.dst->margins.bottom = frame->globalConfig->crop.bottom;
+    }
+
+    // external output check
+    if (LdpPictureBufferDesc exDesc{};
+        static_cast<PictureVulkan*>(frame->outputPicture)->getBufferDesc(exDesc)) {
+        auto managedBuffer =
+            static_cast<BufferVulkan*>(static_cast<PictureVulkan*>(frame->outputPicture)->buffer);
+        std::memcpy(exDesc.data, managedBuffer->ptr(), exDesc.byteSize);
     }
 
     return nullptr;
@@ -2413,8 +2542,8 @@ void* PipelineVulkan::taskUpsample(LdcTask* task, const LdcTaskPart* /*part*/)
         static_cast<PictureVulkan*>(pipeline->allocPictureManaged(desc));
     upscaleArgs.dst = frame->m_intermediatePicture[intermediatePtr - 1];
 
-    upscaleArgs.applyPA = frame->globalConfig->predictedAverageEnabled;
-    upscaleArgs.dither = nullptr; // pipeline->m_dither;
+    upscaleArgs.applyPA = static_cast<uint8_t>(frame->globalConfig->predictedAverageEnabled);
+    upscaleArgs.dither = nullptr; // TODO pipeline->m_dither;
     upscaleArgs.mode = frame->globalConfig->scalingModes[data.loq - 1];
     upscaleArgs.vertical = false;
     upscaleArgs.loq1 = (loq == 2) ? true : false;
@@ -2422,8 +2551,7 @@ void* PipelineVulkan::taskUpsample(LdcTask* task, const LdcTaskPart* /*part*/)
     assert(upscaleArgs.mode != Scale0D);
     VNLogDebug("taskUpsample timestamp:%" PRIx64 " loq:%d", frame->timestamp, (uint32_t)data.loq);
 
-    const bool r = pipeline->upscaleFrame(&frame->globalConfig->kernel, &upscaleArgs);
-    if (!r) {
+    if (!pipeline->upscaleFrame(&frame->globalConfig->kernel, &upscaleArgs)) {
         VNLogError("Upsample failed");
     }
 
@@ -2520,30 +2648,19 @@ void* PipelineVulkan::taskApplyCmdBufferDirect(LdcTask* task, const LdcTaskPart*
     VNLogDebug("taskApplyCmdBufferDirect timestamp:%" PRIx64 " loq:%d plane:%d", data.frame->timestamp,
                (uint32_t)data.enhancementTile->loq, data.enhancementTile->plane);
 
-    /*
-    LdpPicturePlaneDesc ppDesc{};
-
-    frame->getIntermediatePlaneDesc(data.enhancementTile->plane, data.enhancementTile->loq, ppDesc);
-
-    // TODO Workaround for apply
-    ppDesc.rowByteStride = ppDesc.rowByteStride / 2;
-
-    bool r = ldppApplyCmdBuffer(&pipeline->m_taskPool, NULL, data.enhancementTile, LdpFPS14,
-                                &ppDesc, false, pipeline->m_configuration.forceScalar,
-                                pipeline->m_configuration.highlightResiduals);
-
-    if (!r) {
-        VNLogError("ldppPlaneBlit out failed");
-    }
-    */
+    auto* picture = frame->m_intermediatePicture[intermediatePtr];
+    LdpPictureDesc desc{};
+    picture->getDesc(desc);
 
     VulkanApplyArgs args{};
-    args.plane = frame->m_intermediatePicture[intermediatePtr];
-    args.planeWidth = frame->baseWidth * 2;   // TODO - check this is ok for 0D/1D
-    args.planeHeight = frame->baseHeight * 2; // TODO - check this is ok for 0D/1D
+    args.plane = picture;
+    args.planeWidth = desc.width;
+    args.planeHeight = desc.height;
     args.bufferGpu = data.enhancementTile->bufferGpu;
     args.temporalRefresh = false;
     args.highlightResiduals = pipeline->m_configuration.highlightResiduals;
+    args.tuRasterOrder =
+        !frame->globalConfig->temporalEnabled && frame->globalConfig->tileDimensions == TDTNone;
 
     if (!pipeline->apply(&args)) {
         VNLogError("Vulkan apply direct failed");
@@ -2577,6 +2694,7 @@ struct TaskApplyCmdBufferTemporalData
     PipelineVulkan* pipeline;
     FrameVulkan* frame;
     LdpEnhancementTile* enhancementTile;
+    uint8_t intermediatePtr;
 };
 
 void* PipelineVulkan::taskApplyCmdBufferTemporal(LdcTask* task, const LdcTaskPart* part)
@@ -2588,24 +2706,20 @@ void* PipelineVulkan::taskApplyCmdBufferTemporal(LdcTask* task, const LdcTaskPar
     const TaskApplyCmdBufferTemporalData& data{VNTaskData(task, TaskApplyCmdBufferTemporalData)};
     PipelineVulkan* const pipeline{data.pipeline};
     FrameVulkan* const frame{data.frame};
+    const uint8_t intermediatePtr{data.intermediatePtr};
 
     VNLogDebug("taskApplyCmdBufferTemporal timestamp:%" PRIx64 " tile:%d loq:%d plane:%d",
                data.frame->timestamp, data.enhancementTile->tile,
                (uint32_t)data.enhancementTile->loq, data.enhancementTile->plane);
 
-    LdpPicturePlaneDesc ppDesc{frame->m_temporalBuffer[data.enhancementTile->plane]->planeDesc};
-
-    // TODO workaround for apply
-    ppDesc.rowByteStride = ppDesc.rowByteStride / 2;
-
-    // bool r = ldppApplyCmdBuffer(&pipeline->m_taskPool, NULL, data.enhancementTile, LdpFPS14,
-    //                             &ppDesc, false, pipeline->m_configuration.forceScalar,
-    //                             pipeline->m_configuration.highlightResiduals);
+    const auto* picture = frame->m_intermediatePicture[intermediatePtr];
+    LdpPictureDesc desc{};
+    picture->getDesc(desc);
 
     VulkanApplyArgs args{};
     args.plane = nullptr;
-    args.planeWidth = frame->baseWidth * 2;   // TODO - check this is ok for 0D/1D
-    args.planeHeight = frame->baseHeight * 2; // TODO - check this is ok for 0D/1D
+    args.planeWidth = desc.width;
+    args.planeHeight = desc.height;
     args.bufferGpu = data.enhancementTile->bufferGpu;
     args.temporalRefresh = frame->config.temporalRefresh;
     args.highlightResiduals = pipeline->m_configuration.highlightResiduals;
@@ -2620,9 +2734,10 @@ void* PipelineVulkan::taskApplyCmdBufferTemporal(LdcTask* task, const LdcTaskPar
 LdcTaskDependency PipelineVulkan::addTaskApplyCmdBufferTemporal(FrameVulkan* frame,
                                                                 LdpEnhancementTile* enhancementTile,
                                                                 LdcTaskDependency temporalBufferDep,
-                                                                LdcTaskDependency cmdBufferDep)
+                                                                LdcTaskDependency cmdBufferDep,
+                                                                uint8_t intermediatePtr)
 {
-    const TaskApplyCmdBufferTemporalData data{this, frame, enhancementTile};
+    const TaskApplyCmdBufferTemporalData data{this, frame, enhancementTile, intermediatePtr};
     const LdcTaskDependency inputs[] = {temporalBufferDep, cmdBufferDep};
     const LdcTaskDependency output{ldcTaskDependencyAdd(&frame->m_taskGroup)};
 
@@ -2786,14 +2901,22 @@ struct TaskBaseDoneData
 
 void* PipelineVulkan::taskBaseDone(LdcTask* task, const LdcTaskPart* part)
 {
-    VNUnused(part);
+    VNTraceScoped();
     assert(task->dataSize == sizeof(TaskBaseDoneData));
+
     const TaskBaseDoneData& data{VNTaskData(task, TaskBaseDoneData)};
 
     VNLogDebug("taskBaseDone timestamp:%" PRIx64, data.frame->timestamp);
 
     assert(data.frame->basePicture);
+
+    // Generate event
+    data.pipeline->m_eventSink->generate(pipeline::EventBasePictureDone, data.frame->basePicture);
+
+    // Send base picture back to API
     data.pipeline->m_basePictureOutBuffer.push(data.frame->basePicture);
+
+    // Frame no longer has access to base picture
     data.frame->basePicture = nullptr;
     return nullptr;
 }
@@ -2833,7 +2956,24 @@ void* PipelineVulkan::taskOutputDone(LdcTask* task, const LdcTaskPart* part)
     {
         common::ScopedLock lock(pipeline->m_interTaskMutex);
         frame->m_state = FrameStateDone;
+
+        // Build the decode info for the frame
+        frame->m_decodeInfo.timestamp = frame->timestamp;
+        frame->m_decodeInfo.hasBase = true;
+        frame->m_decodeInfo.hasEnhancement =
+            frame->config.loqEnabled[LOQ1] || frame->config.loqEnabled[LOQ0];
+        frame->m_decodeInfo.skipped = frame->m_skip;
+        frame->m_decodeInfo.enhanced = frame->config.loqEnabled[LOQ1] || frame->config.loqEnabled[LOQ0];
+        frame->m_decodeInfo.baseWidth = frame->baseWidth;
+        frame->m_decodeInfo.baseHeight = frame->baseHeight;
+        frame->m_decodeInfo.baseBitdepth = frame->baseBitdepth;
+        frame->m_decodeInfo.userData = frame->userData;
+
         pipeline->m_interTaskFrameDone.signal();
+
+        pipeline->m_eventSink->generate(pipeline::EventOutputPictureDone, frame->outputPicture,
+                                        &frame->m_decodeInfo);
+        pipeline->m_eventSink->generate(pipeline::EventCanReceive);
     }
 
     return nullptr;
@@ -2894,6 +3034,8 @@ void PipelineVulkan::generateTasksEnhancement(FrameVulkan* frame, uint64_t previ
     const LdeFrameConfig& frameConfig{frame->config};
     const LdeGlobalConfig& globalConfig{*frame->globalConfig};
     auto intermediatePtr = static_cast<uint8_t>(LOQ2);
+
+    m_chroma = frame->globalConfig->chroma;
 
     uint32_t enhancementTileIdx = 0;
 
@@ -2986,7 +3128,8 @@ void PipelineVulkan::generateTasksEnhancement(FrameVulkan* frame, uint64_t previ
                     assert(et->loq == LOQ0 && et->tile == tile);
                     LdcTaskDependency commands{addTaskGenerateCmdBuffer(frame, et)};
 
-                    tiles[tile] = addTaskApplyCmdBufferTemporal(frame, et, temporal, commands);
+                    tiles[tile] =
+                        addTaskApplyCmdBufferTemporal(frame, et, temporal, commands, intermediatePtr);
                 }
                 // Wait for all tiles to finish
                 temporal = addTaskWaitForMany(frame, tiles, numPlaneTiles);
@@ -2996,7 +3139,7 @@ void PipelineVulkan::generateTasksEnhancement(FrameVulkan* frame, uint64_t previ
 
                 LdcTaskDependency commands{addTaskGenerateCmdBuffer(frame, et)};
 
-                temporal = addTaskApplyCmdBufferTemporal(frame, et, temporal, commands);
+                temporal = addTaskApplyCmdBufferTemporal(frame, et, temporal, commands, intermediatePtr);
             }
         }
 
@@ -3057,7 +3200,11 @@ void PipelineVulkan::generateTasksPassthrough(FrameVulkan* frame)
 {
     VNTraceScoped();
 
-    const uint8_t numImagePlanes{ldpPictureLayoutPlanes(&frame->basePicture->layout)};
+    uint8_t numImagePlanes{kLdpPictureMaxNumPlanes};
+    if (frame->basePicture) {
+        VNLogDebugF("No base for passthrough: %" PRIx64, frame->timestamp);
+        numImagePlanes = ldpPictureLayoutPlanes(&frame->basePicture->layout);
+    }
 
     LdcTaskDependency outputPlanes[kLdpPictureMaxNumPlanes] = {};
 

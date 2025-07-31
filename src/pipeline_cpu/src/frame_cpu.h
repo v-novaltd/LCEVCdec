@@ -54,7 +54,7 @@ public:
     void generateTasks(uint64_t previousTimestamp);
 
     // Tidy up
-    void release();
+    void release(bool wait);
 
     bool initializeCommandBuffers();
     void releaseCommandBuffers();

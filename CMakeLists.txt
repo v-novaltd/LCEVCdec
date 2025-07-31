@@ -14,9 +14,11 @@
 
 cmake_minimum_required(VERSION 3.19.0 FATAL_ERROR)
 
+# Compiler configuration
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(VN_MSVC_RUNTIME_STATIC "Use static multi-threaded runtime for MSVC" ON)
 option(VN_STRIP_RELEASE "Strip any debug information from release binaries" ON)
+option(VN_SDK_SIMD "Enable SIMD for current architecture (SSE + AVX2 or NEON)" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 include("CMakeSetup")
@@ -24,9 +26,10 @@ include("CMakeSetup")
 project(
     LCEVCdec_SDK
     DESCRIPTION "The Open Source LCEVC Decoder SDK"
+    VERSION 4.0.1
     LANGUAGES CXX C)
 
-# Configuration
+# Build configuration
 option(VN_SDK_EXECUTABLES "Include samples and test harness executables in SDK installations" OFF)
 option(VN_SDK_SAMPLE_SOURCE "Include sample sources in SDK installations" ON)
 option(VN_SDK_UNIT_TESTS "Enable unit test executables" OFF)
@@ -88,14 +91,15 @@ endif ()
 # Performance options
 option(VN_SDK_THREADING "Enable multithreading" ON)
 option(VN_SDK_THREADS_CUSTOM "Use a custom threading implementation." OFF)
-option(VN_SDK_SIMD "Enable SIMD for current architecture" ON)
-option(VN_SDK_SSE "Enable SSE for current architecture" ON)
-option(VN_SDK_AVX2 "Enable AVX2 for current architecture" ON)
-option(VN_SDK_NEON "Enable NEON for current architecture" ON)
 option(VN_SDK_GENERATE_PGO "Make an instrumented build for profile-guided optimization (PGO)." OFF)
 option(VN_SDK_USE_PGO "Use previously-generated PGO profiles to optimize this build." OFF)
 option(VN_SDK_BENCHMARK "Build benchmark google benchmark tests" OFF)
 option(VN_SDK_FORCE_OVERLAY "Enable forced overlay" OFF)
+
+# Pipeline Versions
+set(PIPELINE_CPU_VERSION 1)
+set(PIPELINE_VULKAN_VERSION 1)
+set(PIPELINE_LEGACY_VERSION 1)
 
 # Decoder components
 

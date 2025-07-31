@@ -15,6 +15,8 @@
 #include "pipeline_builder_vulkan.h"
 //
 #include "pipeline_vulkan.h"
+
+#include <LCEVC/pipeline_vulkan/create_pipeline.h>
 //
 #include <LCEVC/common/acceleration.h>
 #include <LCEVC/common/diagnostics.h>
@@ -101,7 +103,8 @@ bool PipelineBuilderVulkan::configure(std::string_view name, const std::vector<s
 } // namespace lcevc_dec::pipeline_vulkan
 
 VN_LCEVC_PIPELINE_API
-lcevc_dec::pipeline::PipelineBuilder* createPipelineBuilderVulkan(void* diagnosticState, void* accelerationState)
+lcevc_dec::pipeline::PipelineBuilder* CREATE_PIPELINE_VULKAN_BUILDER_NAME(void* diagnosticState,
+                                                                          void* accelerationState)
 {
     // Connect this shared libraries diagnostics to parent
     ldcDiagnosticsInitialize(diagnosticState);

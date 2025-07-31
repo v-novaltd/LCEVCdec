@@ -148,11 +148,13 @@ bool ldeCmdBufferGpuReset(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cm
  * \param operation         Operation type of the residuals
  * \param residuals         A non-null pointer to memory containing layerCount values to add.
  * \param tuIndex           Absolute block aligned TU index of this TU
+ * \param tuRasterOrder     True if TUs are in raster order
  *
  * \return True on success, otherwise false.
  */
 bool ldeCmdBufferGpuAppend(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cmdBufferBuilder,
-                           LdeCmdBufferGpuOperation operation, const int16_t* residuals, uint32_t tuIndex);
+                           LdeCmdBufferGpuOperation operation, const int16_t* residuals,
+                           uint32_t tuIndex, bool tuRasterOrder);
 
 /*! \brief Builds the various individual residual buffers within the builder into a continuous block
  * of residual memory in the main cmdBuffer. This is automatically called by ldeDecode if using GPU
@@ -161,10 +163,12 @@ bool ldeCmdBufferGpuAppend(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* c
  *
  * \param cmdBuffer         The command buffer to release.
  * \param cmdBufferBuilder  The command buffer builder to release.
+ * \param tuRasterOrder     True if TUs are in raster order, allows some steps to be skipped.
  *
  * \return True on success, otherwise false.
  */
-bool ldeCmdBufferGpuBuild(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cmdBufferBuilder);
+bool ldeCmdBufferGpuBuild(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cmdBufferBuilder,
+                          bool tuRasterOrder);
 
 /*! \brief Releases all the memory associated with the command buffer and builder.
  *

@@ -30,7 +30,7 @@ TEST(PipelineLegacy, Create)
     ldcDiagnosticsInitialize(NULL);
 
     auto pipelineBuilder =
-        createPipelineBuilderLegacy(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
+        CREATE_PIPELINE_LEGACY_BUILDER_NAME(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
     ASSERT_TRUE(pipelineBuilder);
 
     auto pipeline = pipelineBuilder->finish(EventSink::nullSink());
@@ -47,7 +47,7 @@ public:
     void SetUp() override
     {
         auto pipelineBuilder =
-            createPipelineBuilderLegacy(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
+            CREATE_PIPELINE_LEGACY_BUILDER_NAME(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
         ASSERT_TRUE(pipelineBuilder);
 
         mPipeline = pipelineBuilder->finish(EventSink::nullSink());

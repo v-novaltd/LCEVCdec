@@ -72,7 +72,7 @@ The following diagram shows the 'block raster order' of a 76x72 pixel DDS frame.
 
 .. image:: ../img/tu_order.svg
 
-Note that when :cpp:member:`LdeGlobalConfig::temporalEnabled` is false the block raster order is not followed and the frame follows a standard raster order from the top left across the entire width of the frame.
+Note that when :cpp:member:`LdeGlobalConfig::temporalEnabled` is false the block raster order is not followed and the frame follows a standard raster order from the top left across the entire width of the frame (not rounded up to the nearest 32px). A GPU command buffer mask will be 265 TUs long, wrapping at the right edge of the frame to the next row of TUs, the final command reaching off the right of the last row will always have a zero mask for non-existent TUs.
 
 CPU Command Buffers
 -------------------
@@ -275,7 +275,7 @@ Where possible use the non-'F' logging functions as the string formatting and wr
 Sample
 ######
 
-The following sample reads an LCEVC .bin format stream, parses it and decodes it to CPU command buffers. An example stream can be found in the repo at ``LCEVCdec/src/enhancement/test/assets/decode.bin``.
+The following sample reads an LCEVC .bin format stream, parses it and decodes it to CPU command buffers. An example stream can be found in the repo at ``LCEVCdec/src/enhancement/test/assets/decode_temp_on.bin``.
 
 .. literalinclude:: ../../src/enhancement/test/sample/src/main.cpp
    :language: cpp

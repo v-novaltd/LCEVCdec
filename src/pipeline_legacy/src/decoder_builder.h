@@ -52,7 +52,7 @@ public:
     DecoderBuilder();
 
 private:
-    friend std::unique_ptr<pipeline::PipelineBuilder> createPipelineBuilderLegacy();
+    friend std::unique_ptr<pipeline::PipelineBuilder> createPipelineBuilder();
 
     DecoderConfig m_config;
 };

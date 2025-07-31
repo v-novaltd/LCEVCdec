@@ -129,10 +129,6 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
         VNLogError("No CPU or GPU cmdbuffer provided to decode to");
         return false;
     }
-    if (tuRasterOrder && !cpuCmdBuffers) {
-        VNLogError("GPU cmdbuffers do not support temporal off streams yet");
-        return false;
-    }
 
     LdeChunk* chunks = {0};
     LdeChunk* temporalChunk = {0};
@@ -243,7 +239,7 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
                 }
             } else {
                 if (!ldeCmdBufferGpuAppend(cmdBufferGpu, cmdBufferBuilder, CBGOClearAndSet, NULL,
-                                           blockAlignedIndex)) {
+                                           blockAlignedIndex, false)) {
                     VNLogError("Failed to append to GPU cmdbuffer, likely out of memory");
                     return false;
                 }
@@ -316,7 +312,7 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
                     operation = CBGOSet;
                 }
                 if (!ldeCmdBufferGpuAppend(cmdBufferGpu, cmdBufferBuilder, operation, residuals,
-                                           currentIndex)) {
+                                           currentIndex, tuRasterOrder)) {
                     VNLogError("Failed to append to GPU cmdbuffer, likely out of memory");
                     return false;
                 }
@@ -381,7 +377,7 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
     }
 
     if (!cpuCmdBuffers) {
-        ldeCmdBufferGpuBuild(cmdBufferGpu, cmdBufferBuilder);
+        ldeCmdBufferGpuBuild(cmdBufferGpu, cmdBufferBuilder, tuRasterOrder);
     }
 
     return res;

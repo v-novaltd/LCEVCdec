@@ -45,6 +45,15 @@ void ldeFrameConfigInitialize(LdcMemoryAllocator* allocator, LdeFrameConfig* fra
  *  \param[in] frameConfig   Frame config to release */
 void ldeConfigsReleaseFrame(LdeFrameConfig* frameConfig);
 
+/*! \brief Given a skipped or missed frame, reset the frame config to maintain assumed state without
+ *         residuals. Designed to be used for a few frames where it is known not to be an IDR.
+ *         Using for too many frames is likely to result in 'sticky residuals', after this point
+ *         passthrough mode is recommended instead.
+ *
+ * \param[inout]  frameConfig          Frame config to reset
+ */
+void ldeConfigReset(LdeFrameConfig* frameConfig);
+
 /*! \brief Parse a serialized frame to config structs, taking into account state from previous frames
  *
  * \param[in]     serialized           Serialised data to deserialize.

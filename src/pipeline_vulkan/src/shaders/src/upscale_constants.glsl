@@ -16,11 +16,13 @@ layout(push_constant) uniform consts {
     int kernel[4];
     int srcWidth;
     int srcHeight;
-    int bit8;
-    int pixelStrideIn;
-    int pixelStrideOut;
     int pa;
-    int pixelOffsetIn;
+    int containerStrideIn;
+    int containerOffsetIn;
+    int containerStrideOut;
+    int containerOffsetOut;
+    int containerStrideBase;
+    int containerOffsetBase;
 };
 
 const int ds = 0x2000; // Output pixel range bias

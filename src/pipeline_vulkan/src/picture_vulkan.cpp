@@ -209,7 +209,7 @@ bool PictureVulkan::initializeDesc(const LdpPictureDesc& desc,
         }
         ldpPictureLayoutInitializeDescStrides(&layout, &desc, rowStridesBytes);
     } else {
-        ldpPictureLayoutInitializeDesc(&layout, &desc, kBufferRowAlignment);
+        ldpPictureLayoutInitializeDesc(&layout, &desc, kVulkanBufferRowAlignment);
     }
 
     if (((desc.cropLeft + desc.cropRight) > desc.width) ||
@@ -229,11 +229,21 @@ bool PictureVulkan::initializeDesc(const LdpPictureDesc& desc,
 void PictureVulkan::setExternal(const LdpPicturePlaneDesc* planeDescArr, const LdpPictureBufferDesc* bufferDesc)
 {
     m_external = true;
-    for (uint32_t i = 0; i < ldpPictureLayoutPlanes(&layout); ++i) {
-        m_externalPlaneDescs[i] = planeDescArr[i];
+    for (uint32_t plane = 0; plane < ldpPictureLayoutPlanes(&layout); ++plane) {
+        if (planeDescArr) {
+            m_externalPlaneDescs[plane] = planeDescArr[plane];
+            layout.rowStrides[plane] = planeDescArr[plane].rowByteStride;
+        } else {
+            m_externalPlaneDescs[plane].firstSample =
+                bufferDesc->data + ldpPictureLayoutPlaneOffset(&layout, plane);
+            m_externalPlaneDescs[plane].rowByteStride =
+                ldpPictureLayoutDefaultRowStride(&layout, plane, kVulkanBufferRowAlignment);
+        }
     }
 
-    m_externalBufferDesc = *bufferDesc;
+    if (bufferDesc) {
+        m_externalBufferDesc = *bufferDesc;
+    }
 }
 
 uint32_t PictureVulkan::getRequiredSize() const

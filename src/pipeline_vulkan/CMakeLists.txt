@@ -56,29 +56,32 @@ set(LINK_LIBRARIES
     lcevc_dec::pixel_processing
     VulkanShim::VulkanShim)
 
-# TODO - do not build static if !VN_SDK_UNIT_TESTS Static build for tests
-add_library(lcevc_dec_pipeline_vulkan_static STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
-add_dependencies(lcevc_dec_pipeline_vulkan_static compile_shaders)
+# Explicit static library for vulkan unit tests
+if (VN_SDK_UNIT_TESTS)
+    add_library(lcevc_dec_pipeline_vulkan_static STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
+    add_dependencies(lcevc_dec_pipeline_vulkan_static compile_shaders)
 
-lcevc_set_properties(lcevc_dec_pipeline_vulkan_static)
+    lcevc_set_properties(lcevc_dec_pipeline_vulkan_static)
 
-target_compile_definitions(lcevc_dec_pipeline_vulkan_static PRIVATE VNEnablePipelineAPIExport)
+    target_compile_definitions(lcevc_dec_pipeline_vulkan_static PRIVATE VNEnablePipelineAPIExport)
 
-target_include_directories(
-    lcevc_dec_pipeline_vulkan_static
-    PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
-    PUBLIC "${CMAKE_CURRENT_LIST_DIR}/src"
-    PUBLIC "${CMAKE_BINARY_DIR}/src/pipeline_vulkan/src/hpp")
+    target_include_directories(
+        lcevc_dec_pipeline_vulkan_static
+        PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
+        PUBLIC "${CMAKE_CURRENT_LIST_DIR}/src"
+        PUBLIC "${CMAKE_BINARY_DIR}/src/pipeline_vulkan/src/hpp")
 
-target_link_libraries(lcevc_dec_pipeline_vulkan_static PUBLIC ${LINK_LIBRARIES})
+    target_link_libraries(lcevc_dec_pipeline_vulkan_static PUBLIC ${LINK_LIBRARIES})
 
-add_library(lcevc_dec::pipeline_vulkan_static ALIAS lcevc_dec_pipeline_vulkan_static)
+    add_library(lcevc_dec::pipeline_vulkan_static ALIAS lcevc_dec_pipeline_vulkan_static)
+endif ()
 
 # Shared build target
 add_library(lcevc_dec_pipeline_vulkan ${SOURCES} ${HEADERS} ${INTERFACES})
 add_dependencies(lcevc_dec_pipeline_vulkan compile_shaders)
 
 lcevc_set_properties(lcevc_dec_pipeline_vulkan)
+set_target_properties(lcevc_dec_pipeline_vulkan PROPERTIES SOVERSION ${PIPELINE_VULKAN_VERSION})
 
 target_compile_definitions(lcevc_dec_pipeline_vulkan PRIVATE VNEnablePipelineAPIExport)
 

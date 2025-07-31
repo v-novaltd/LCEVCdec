@@ -33,41 +33,30 @@ void main()
 {
     const uint x = gl_GlobalInvocationID.x;
     const uint y = gl_GlobalInvocationID.y;
-    const uint dstWidth = srcWidth;
     const uint dstHeight = 2 * srcHeight;
-    const uint packDensity = 2; // two internal format pixels per uint (for now)
-    const uint srcWidthPacked = pixelStrideIn / packDensity;
-    const uint srcWidthPackedReal = srcWidth / packDensity;
-    const uint dstWidthPacked = dstWidth / packDensity;
-    const uint srcOffset = pixelOffsetIn / packDensity;
-    const uint dstOffset = pixelOffsetIn; // 2x for doubling image size
-
-    if (x >= srcWidthPackedReal || y >= srcHeight) {
-        return;
-    }
 
     if (y == 0) { // first and last pixel in pairs
-        const ivec2 first = unpack16bitInternals(src.samples[srcOffset + x]);
-        const ivec2 second = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked]);
+        const ivec2 first = unpack16bitInternals(src.samples[containerOffsetIn + x]);
+        const ivec2 second = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn]);
 
         ivec2 dstFirst;
         dstFirst.x = clamp_s15(ds + kernel[3] * first.x + kernel[2] * first.x + kernel[1] * first.x + kernel[0] * second.x);
         dstFirst.y = clamp_s15(ds + kernel[3] * first.y + kernel[2] * first.y + kernel[1] * first.y + kernel[0] * second.y);
 
-        dst.samples[dstOffset + x] = pack16bitInternals(dstFirst);
+        dst.samples[containerOffsetOut + x] = pack16bitInternals(dstFirst);
 
-        const ivec2 last = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (srcHeight - 1)]);
-        const ivec2 secondToLast = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (srcHeight - 2)]);
+        const ivec2 last = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn * (srcHeight - 1)]);
+        const ivec2 secondToLast = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn * (srcHeight - 2)]);
 
         ivec2 dstLast;
         dstLast.x = clamp_s15(ds + kernel[0] * secondToLast.x + kernel[1] * last.x + kernel[2] * last.x + kernel[3] * last.x);
         dstLast.y = clamp_s15(ds + kernel[0] * secondToLast.y + kernel[1] * last.y + kernel[2] * last.y + kernel[3] * last.y);
 
-        dst.samples[dstOffset + x + dstWidthPacked * (dstHeight - 1)] = pack16bitInternals(dstLast);
+        dst.samples[containerOffsetOut + x + containerStrideOut * (dstHeight - 1)] = pack16bitInternals(dstLast);
     } else if (y == 1) { // first pair of pixels in pairs
-        const ivec2 first = unpack16bitInternals(src.samples[srcOffset + x]);
-        const ivec2 second = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked]);
-        const ivec2 third = unpack16bitInternals(src.samples[srcOffset + x + 2 * srcWidthPacked]);
+        const ivec2 first = unpack16bitInternals(src.samples[containerOffsetIn + x]);
+        const ivec2 second = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn]);
+        const ivec2 third = unpack16bitInternals(src.samples[containerOffsetIn + x + 2 * containerStrideIn]);
 
         ivec2 dstForwards;
         dstForwards.x = clamp_s15(ds + kernel[0] * first.x + kernel[1] * first.x + kernel[2] * second.x + kernel[3] * third.x);
@@ -77,14 +66,14 @@ void main()
         dstBackwards.x = clamp_s15(ds + kernel[3] * first.x + kernel[2] * first.x + kernel[1] * second.x + kernel[0] * third.x);
         dstBackwards.y = clamp_s15(ds + kernel[3] * first.y + kernel[2] * first.y + kernel[1] * second.y + kernel[0] * third.y);
 
-        dst.samples[dstOffset + x + dstWidthPacked] = pack16bitInternals(dstForwards);
-        dst.samples[dstOffset + x + 2 * dstWidthPacked] = pack16bitInternals(dstBackwards);
+        dst.samples[containerOffsetOut + x + containerStrideOut] = pack16bitInternals(dstForwards);
+        dst.samples[containerOffsetOut + x + 2 * containerStrideOut] = pack16bitInternals(dstBackwards);
     }
 
     else if (y == 2) { // last pair of pixels in pairs
-        const ivec2 last = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (srcHeight - 1)]);
-        const ivec2 secondToLast = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (srcHeight - 2)]);
-        const ivec2 thirdToLast = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (srcHeight - 3)]);
+        const ivec2 last = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn * (srcHeight - 1)]);
+        const ivec2 secondToLast = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn * (srcHeight - 2)]);
+        const ivec2 thirdToLast = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn * (srcHeight - 3)]);
 
         ivec2 dstForwards;
         dstForwards.x = clamp_s15(ds + kernel[0] * thirdToLast.x + kernel[1] * secondToLast.x + kernel[2] * last.x + kernel[3] * last.x);
@@ -94,13 +83,13 @@ void main()
         dstBackwards.x = clamp_s15(ds + kernel[3] * thirdToLast.x + kernel[2] * secondToLast.x + kernel[1] * last.x + kernel[0] * last.x);
         dstBackwards.y = clamp_s15(ds + kernel[3] * thirdToLast.y + kernel[2] * secondToLast.y + kernel[1] * last.y + kernel[0] * last.y);
 
-        dst.samples[dstOffset + x + dstWidthPacked * (dstHeight - 3)] = pack16bitInternals(dstForwards);
-        dst.samples[dstOffset + x + dstWidthPacked * (dstHeight - 2)] = pack16bitInternals(dstBackwards);
+        dst.samples[containerOffsetOut + x + containerStrideOut * (dstHeight - 3)] = pack16bitInternals(dstForwards);
+        dst.samples[containerOffsetOut + x + containerStrideOut * (dstHeight - 2)] = pack16bitInternals(dstBackwards);
     } else if (y < srcHeight) { // middle pairs of pixels in pairs
-        const ivec2 first = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (y - 3)]);
-        const ivec2 second = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (y - 2)]);
-        const ivec2 third = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * (y - 1)]);
-        const ivec2 fourth = unpack16bitInternals(src.samples[srcOffset + x + srcWidthPacked * y]);
+        const ivec2 first = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn * (y - 3)]);
+        const ivec2 second = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn * (y - 2)]);
+        const ivec2 third = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn * (y - 1)]);
+        const ivec2 fourth = unpack16bitInternals(src.samples[containerOffsetIn + x + containerStrideIn * y]);
 
         ivec2 dstForwards;
         dstForwards.x = clamp_s15(ds + kernel[0] * first.x + kernel[1] * second.x + kernel[2] * third.x + kernel[3] * fourth.x);
@@ -110,7 +99,7 @@ void main()
         dstBackwards.x = clamp_s15(ds + kernel[3] * first.x + kernel[2] * second.x + kernel[1] * third.x + kernel[0] * fourth.x);
         dstBackwards.y = clamp_s15(ds + kernel[3] * first.y + kernel[2] * second.y + kernel[1] * third.y + kernel[0] * fourth.y);
 
-        dst.samples[dstOffset + x + dstWidthPacked * (2 * y - 3)] = pack16bitInternals(dstForwards);
-        dst.samples[dstOffset + x + dstWidthPacked * (2 * y - 2)] = pack16bitInternals(dstBackwards);
+        dst.samples[containerOffsetOut + x + containerStrideOut * (2 * y - 3)] = pack16bitInternals(dstForwards);
+        dst.samples[containerOffsetOut + x + containerStrideOut * (2 * y - 2)] = pack16bitInternals(dstBackwards);
     }
 }

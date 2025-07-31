@@ -40,7 +40,6 @@ def load_tests(definitions_dir):
                 test['definition_csv'] = definition_csv
                 test['csv_row'] = csv_row
                 tests.append(test)
-    auto_gen_names(tests)
     check_duplicates(tests)
     if filter_name := os.environ.get('FILTER_NAME', config.get('FILTER_NAME')):
         logger.info(f"Filtering tests by name substring '{filter_name}'")
@@ -87,38 +86,6 @@ def parse_test(test, filter_group):
         if value != '':
             params[group][param] = value
     return params
-
-
-def auto_gen_names(tests):
-    groups = set([test['group'] for test in tests])
-    for group in groups:
-        group_tests = list(filter(lambda d: d['group'] == group, tests))
-        all_params = set()
-        for test in group_tests:
-            for param_name, param_group in test.items():
-                if isinstance(param_group, dict) and param_name != 'meta':
-                    [all_params.add(f"{param_name}:{param}") for param in param_group
-                     if test[param_name][param] != '']
-        iterated_params = set()
-        for param in all_params:
-            param_group, param_name = param.split(':')
-            if 'base' not in param_name and 'lcevc' not in param_name and \
-                    len(set([test[param_group][param_name] for test in group_tests
-                             if test.get(param_group, {}).get(param_name)])) > 1:
-                iterated_params.add(param)
-        for test in group_tests:
-            if not test.get('name'):
-                name = list()
-                for param in iterated_params:
-                    param_group, param_name = param.split(':')
-                    value = test[param_group][param_name]
-                    if '/' in value:
-                        value = value.split('/')[-1]
-                    if '\\' in value:
-                        value = value.split('\\')[-1]
-                    if value != '':
-                        name.append(f"{param_name.replace('-', '')}:{value}")
-                test['name'] = '-'.join(name)
 
 
 def check_duplicates(tests):

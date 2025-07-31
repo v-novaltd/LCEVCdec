@@ -17,7 +17,13 @@
 
 #include <LCEVC/pipeline/pipeline.h>
 
+#if VN_SDK_STATIC
+#define CREATE_PIPELINE_CPU_BUILDER_NAME createPipelineBuilderCPU
+#else
+#define CREATE_PIPELINE_CPU_BUILDER_NAME createPipelineBuilder
+#endif
+
 VN_LCEVC_PIPELINE_API lcevc_dec::pipeline::PipelineBuilder*
-createPipelineBuilderCPU(void* diagnosticState, void* accelerationState);
+CREATE_PIPELINE_CPU_BUILDER_NAME(void* diagnosticState, void* accelerationState);
 
 #endif // VN_LCEVC_PIPELINE_CPU_CREATE_PIPELINE_H

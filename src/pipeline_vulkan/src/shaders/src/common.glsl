@@ -60,10 +60,9 @@ ivec4 toInternalFrom8bit(uvec4 vals)
     return internal;
 }
 
-ivec2 toInternalFrom16bit(uvec2 vals)
+ivec2 toInternalFrom16bit(uvec2 vals, int shift)
 {
     ivec2 internal;
-    const int shift = 5;
     internal.x = int((vals.x << shift) - 0x4000);
     internal.y = int((vals.y << shift) - 0x4000);
     return internal;
@@ -109,10 +108,9 @@ uvec4 fromInternalTo8bit(ivec4 vals)
     return ext;
 }
 
-uvec2 fromInternalTo16bit(ivec2 vals)
+uvec2 fromInternalTo16bit(ivec2 vals, int shift)
 {
     uvec2 ext;
-    const int shift = 5;
     const int halfv = ((1 << shift) / 2);
     ext.x = uint(clamp2(((vals.x + 0x4000 + halfv) >> shift), 0, 32767 >> shift));
     ext.y = uint(clamp2(((vals.y + 0x4000 + halfv) >> shift), 0, 32767 >> shift));

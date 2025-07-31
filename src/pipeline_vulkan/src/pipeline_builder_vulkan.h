@@ -50,7 +50,7 @@ public:
     VNNoCopyNoMove(PipelineBuilderVulkan);
 
 private:
-    friend std::unique_ptr<PipelineBuilder> createPipelineBuilderVulkan();
+    friend std::unique_ptr<PipelineBuilder> createPipelineBuilder();
 
     LdcMemoryAllocator* m_allocator = nullptr;
 
