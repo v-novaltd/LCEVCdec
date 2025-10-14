@@ -67,7 +67,7 @@ static bool detectAVX2(void)
 {
     int32_t cpuInfo[4];
     loadCPUInfo(cpuInfo, 0);
-    if (nids < 7) {
+    if (cpuInfo[0] < 7) {
         return false;
     }
     loadCPUInfo(cpuInfo, 1);
