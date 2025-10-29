@@ -23,6 +23,7 @@ include("VNovaSetup")
 project(
     LCEVCdec_SDK
     DESCRIPTION "The Open Source LCEVC Decoder SDK"
+    VERSION 3.3.9
     LANGUAGES CXX C)
 
 # Configuration
@@ -118,6 +119,40 @@ endif ()
 
 # Define the variables to install files based on the GNU conventions
 include(GNUInstallDirs)
+
+# Find correct pkg-config libs
+if (VN_SDK_API_LAYER)
+    list(APPEND PC_LIBS "-llcevc_dec_api")
+endif ()
+if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
+    list(APPEND PC_LIBS "-llcevc_dec_utility")
+endif ()
+if (VN_SDK_API_LAYER)
+    list(APPEND PC_LIBS "-llcevc_dec_api_utility")
+endif ()
+list(APPEND PC_LIBS "-llcevc_dec_core")
+list(APPEND PC_LIBS "-llcevc_dec_core_sequencing")
+
+if (VN_SDK_BASE_DECODER)
+    list(APPEND PC_REQUIRES_PRIVATE "libavcodec libavformat libavfilter libavutil")
+endif ()
+if (VN_SDK_EXECUTABLES)
+    list(APPEND PC_REQUIRES_PRIVATE "libxxhash fmt")
+endif ()
+if (VN_SDK_UNIT_TESTS)
+    list(APPEND PC_REQUIRES_PRIVATE "gtest gmock")
+endif ()
+
+string(REPLACE ";" " " PC_LIBS "${PC_LIBS}")
+if (PC_REQUIRES_PRIVATE)
+    string(REPLACE ";" " " PC_REQUIRES_PRIVATE "${PC_REQUIRES_PRIVATE}")
+    set(PC_REQUIRES_PRIVATE "Requires.private: ${PC_REQUIRES_PRIVATE}")
+endif ()
+
+set(PC_VERSION ${PROJECT_VERSION})
+if (DEFINED GIT_SHORT_VERSION AND NOT GIT_SHORT_VERSION STREQUAL "")
+    set(PC_VERSION ${GIT_SHORT_VERSION})
+endif ()
 
 # Record configuration - header and README
 configure_file("cmake/templates/build_config.h.in" "generated/LCEVC/build_config.h")
