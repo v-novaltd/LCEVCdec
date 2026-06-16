@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -109,7 +109,6 @@ void threadSetName(const char* name)
     }
 
 #if VN_OS(LINUX) || VN_OS(ANDROID)
-    extern int pthread_setname_np(pthread_t target_thread, const char* name);
     const int res = pthread_setname_np(pthread_self(), name);
 #elif VN_OS(BROWSER)
     emscripten_set_thread_name(pthread_self(), name);
@@ -126,7 +125,7 @@ void threadSetName(const char* name)
 
 uint64_t threadTimeMicroseconds(int32_t offset)
 {
-    if (offset == UINT32_MAX) {
+    if (offset == -1) {
         return UINT64_MAX;
     }
 

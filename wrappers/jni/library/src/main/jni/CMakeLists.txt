@@ -23,8 +23,8 @@ cmake_minimum_required(VERSION 3.22.1 FATAL_ERROR)
 
 project(LCEVCdec_JNI)
 
-# C++17 is the reccomended standard since NDK r23. NDK r27 fully suppports C++20 but we will stick
-# to C++17 until there is a reason not to.
+# C++17 is the recommended standard since NDK r23. NDK r27 fully supports C++20 but we will stick to
+# C++17 until there is a reason not to.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

@@ -45,7 +45,7 @@
 
 /** Define API versioning */
 #define LCEVC_DEC_VERSION_MAJOR 4
-#define LCEVC_DEC_VERSION_MINOR 1
+#define LCEVC_DEC_VERSION_MINOR 2
 #define LCEVC_DEC_VERSION_PATCH 0
 
 #endif // API_DEFS_H

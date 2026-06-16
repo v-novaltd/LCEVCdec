@@ -328,6 +328,8 @@ LdcReturnCode FrameBase::setBasePicture(LdpPicture* picture, uint64_t frameDeadl
         baseHeight = ldpPictureLayoutHeight(&basePicture->layout);
         baseBitdepth = ldpPictureLayoutSampleBits(&basePicture->layout);
         baseFormat = ldpPictureLayoutFormat(&basePicture->layout);
+        baseSarNum = basePicture->sampleAspectRatio.numerator;
+        baseSarDen = basePicture->sampleAspectRatio.denominator;
     }
     deadline = frameDeadline;
 
@@ -568,25 +570,30 @@ LdpColorFormat FrameBase::getBaseColorFormat() const
 
 LdpPictureDesc FrameBase::getOutputPictureDesc(PassthroughMode passthroughMode) const
 {
-    LdpPictureDesc desc;
-
     assert(baseDataValid());
 
-    if (!m_passthrough) {
-        if (globalConfig->initialized) {
-            ldpDefaultPictureDesc(&desc, getOutputColorFormat(), globalConfig->width, globalConfig->height);
-        } else {
-            VNLogWarning("No global configuration");
-            ldpDefaultPictureDesc(&desc, baseFormat, baseWidth, baseHeight);
-        }
-    } else {
-        // Pass-through of some sort
-        if (passthroughMode == PassthroughMode::Scale && globalConfig->initialized) {
-            ldpDefaultPictureDesc(&desc, getOutputColorFormat(), globalConfig->width, globalConfig->height);
-        } else {
-            ldpDefaultPictureDesc(&desc, baseFormat, baseWidth, baseHeight);
-        }
+    LdpPictureDesc desc;
+    ldpDefaultPictureDesc(&desc, baseFormat, baseWidth, baseHeight);
+    desc.sampleAspectRatioNum = baseSarNum;
+    desc.sampleAspectRatioDen = baseSarDen;
+
+    // If frame was passed through without modification, report base frame description.
+    if (m_passthrough && (passthroughMode != PassthroughMode::Scale)) {
+        return desc;
     }
+
+    if (!globalConfig->initialized) {
+        VNLogWarning(
+            "No global configuration, which is required to get post-enhancement description.");
+        return desc;
+    }
+
+    // Update desc with post-enhancement description.
+    desc.width = globalConfig->width;
+    desc.height = globalConfig->height;
+    desc.colorFormat = getOutputColorFormat();
+    desc.sampleAspectRatioNum = globalConfig->vuiInfo.sarWidth;
+    desc.sampleAspectRatioDen = globalConfig->vuiInfo.sarHeight;
 
     return desc;
 }

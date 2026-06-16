@@ -16,7 +16,6 @@
 #define VN_LCEVC_COMMON_DETAIL_DIAGNOSTICS_BUFFER_H
 
 #include <assert.h>
-#include <LCEVC/common/log.h>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/common/threads.h>
 #include <string.h>

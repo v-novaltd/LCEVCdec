@@ -15,61 +15,62 @@
 #ifndef VN_LCEVC_PIPELINE_VULKAN_BUFFER_VULKAN_H
 #define VN_LCEVC_PIPELINE_VULKAN_BUFFER_VULKAN_H
 
-#include "backend_vulkan.h"
-
 #include <LCEVC/pipeline/buffer_base.h>
-#include <vk_mem_alloc.h>
+#include <LCEVC/pipeline/picture_layout.h>
+#include <vulkan/vulkan.h>
 
 namespace lcevc_dec::pipeline_vulkan {
 
 // Default minimum row alignment for internal allocations
 static const auto kVulkanBufferRowAlignment = 4;
 
-class PictureVulkan;
-class BackendVulkan;
-
+// Abstract interface for Vulkan-backed buffers in the pipeline.
+//
+// Concrete implementations:
+//   - BufferVulkanVma        — VMA-allocated buffer used for normal pipeline
+//                                buffers.
+//   - BufferVulkanAhbBuffer  — externally-supplied AHardwareBuffer imported
+//                                as a VkBuffer (Android).
+//   - BufferVulkanAhbImage   — externally-supplied AHardwareBuffer imported
+//                                as a 2D VkImage (Android).
 class BufferVulkan : public pipeline::BufferBase
 {
 public:
-    BufferVulkan(BackendVulkan& pipeline, uint32_t size, pipeline::BufferUsage usage);
-    ~BufferVulkan();
+    BufferVulkan() = default;
+    ~BufferVulkan() override = default;
 
-    uint32_t size() const override;
-    pipeline::BufferUsage usage() const override;
+    // Underlying Vulkan buffer handle, or VK_NULL_HANDLE if this object is
+    // exposed as a VkImage instead.
+    virtual VkBuffer getVkBuffer() const = 0;
 
-    bool resize(uint32_t size) override;
+    // Underlying Vulkan image handle, or VK_NULL_HANDLE if this object is
+    // exposed as a VkBuffer
+    virtual VkImage getVkImage() const { return VK_NULL_HANDLE; }
 
-    bool map(LdpBufferMapping* mapping, int32_t offset, uint32_t size, LdpAccess access) override;
-    void unmap(const LdpBufferMapping* mapping) override;
+    // Image view for storage/sampled image descriptors, or VK_NULL_HANDLE for
+    // buffer-backed storage.
+    virtual VkImageView getVkImageView(uint32_t plane = 0) const
+    {
+        VNUnused(plane);
+        return VK_NULL_HANDLE;
+    }
 
-    void clear() override;
-    void copyIn(uint32_t dstOffset, const void* src, uint32_t size) override;
-    void copyOut(void* dst, uint32_t srcOffset, uint32_t size) override;
+    // Picture layout implied by this buffer's contents
+    const LdpPictureLayout* getPictureLayout() const override { return nullptr; }
 
-    // Add 'clear to zero' to Vulkan comamnd buffer via vkCmdFillBuffer.
-    void clearCmd(VkCommandBuffer commandBuffer);
+    // Add 'clear to zero' for the buffer to the given Vulkan command buffer via vkCmdFillBuffer.
+    virtual void clearCmd(VkCommandBuffer commandBuffer) = 0;
 
-    VkBuffer& getVkBuffer() { return m_buffer; }
+    // vkCmdFillBuffer and barrier
+    static void clearWithBarrier(VkCommandBuffer commandBuffer, VkBuffer buffer, uint32_t size);
+
+    //  VkImageMemoryBarrier
+    static void imageLayoutTransition(VkCommandBuffer commandBuffer, VkImage image,
+                                      VkImageLayout oldLayout, VkImageLayout newLayout,
+                                      VkAccessFlags srcAccess, VkAccessFlags dstAccess,
+                                      VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage);
 
     VNNoCopyNoMove(BufferVulkan);
-
-private:
-    friend PictureVulkan;
-    bool createBufferAndMemory(uint32_t size);
-    void destroy();
-
-    BackendVulkan& m_pipeline;
-
-    uint32_t m_size{};
-    pipeline::BufferUsage m_usage{};
-
-    VkBuffer m_buffer{VK_NULL_HANDLE};
-    VmaAllocation m_vmaAllocation{};
-
-    bool m_mapped{false};
-
-    // Mapped pointer (only valid for host-visible (UsageIn/UsageOut) buffers)
-    uint8_t* m_ptr{};
 };
 
 } // namespace lcevc_dec::pipeline_vulkan

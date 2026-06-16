@@ -23,6 +23,7 @@
 #endif
 
 {
+    VNUnused(srcHeight);
     const int16x8_t kMin16 = vdupq_n_s16(-0x4000); /* see saturateS15 for explanation */
     const int16x8_t kMax16 = vdupq_n_s16(0x4000 - 1);
 #if IN_FIXED_POINT != FP_S16
@@ -58,6 +59,8 @@
         const int16x8_t ditherOffset = vdupq_n_s16((int16_t)dither->strength);
         const int16x8_t ditherShift = vdupq_n_s16(params.shift); // Shift when < 16bit
         const uint16_t ditherMul = (uint16_t)(dither->strength * 2u + 1u);
+#else
+        VNUnused(dither);
 #endif
 
 #if IN_FIXED_POINT == FP_U8

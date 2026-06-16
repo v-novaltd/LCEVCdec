@@ -30,6 +30,7 @@ layout(binding = 0) uniform UniformBufferObject {
     int ditherEnabled;
     int ditherShift;
     int ditherBufferSize;
+    int limitedRange;
 } ubo;
 
 layout(binding = 1) uniform sampler2D texSampler;
@@ -47,14 +48,20 @@ layout(binding = 5) readonly buffer DitherRowOffset {
 layout(location = 0) out vec4 outColor;
 
 vec4 YUVtoRGBA(vec3 YUV) {
+    vec3 yuv = YUV;
+    mat3 T;
+    if (ubo.limitedRange != 0) {
+        yuv.x -= 16.0 / 255.0;
+        T = mat3(1.164, 1.164, 1.164,
+                 0.0,  -0.392, 2.017,
+                 1.596, -0.813, 0.0);
+    } else {
+        T = mat3(1.0, 1.0, 1.0,
+                 0.0, -0.344, 1.770,
+                 1.403, -0.714, 0.0);
+    }
     const vec3 offset = vec3(0.0, -0.5, -0.5);
-
-    const mat3 T = mat3(1.0, 1.0, 1.0,
-                    0.0, -0.344, 1.770,
-                    1.403, -0.714, 0.0);
-
-    vec3 rgb = T * (YUV + offset);
-
+    vec3 rgb = T * (yuv + offset);
     return vec4(rgb, 1.0);
 }
 

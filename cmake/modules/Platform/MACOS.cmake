@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2024. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -15,8 +15,8 @@
 # Enable building with RPATH
 set(CMAKE_SKIP_BUILD_RPATH FALSE)
 
-# Do not use CMAKE_INSTALL_RPATH during build process
-set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+# Use install rpath during build to avoid embedding absolute build-directory paths in binaries
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
 
 # Set the installation RPATH to the 'lib' directory under CMAKE_INSTALL_PREFIX
 set(CMAKE_INSTALL_RPATH "@executable_path/../lib")
@@ -32,3 +32,11 @@ list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "@executable_path/../lib" isS
 if ("${isSystemDir}" STREQUAL "-1")
     set(CMAKE_INSTALL_RPATH "@executable_path/../lib")
 endif ("${isSystemDir}" STREQUAL "-1")
+
+# Deterministic static archives: BSD ar lacks -D support, so use libtool -static -D instead
+set(CMAKE_C_ARCHIVE_CREATE "libtool -static -D -o <TARGET> <LINK_FLAGS> <OBJECTS>")
+set(CMAKE_CXX_ARCHIVE_CREATE "libtool -static -D -o <TARGET> <LINK_FLAGS> <OBJECTS>")
+set(CMAKE_C_ARCHIVE_APPEND "libtool -static -D -o <TARGET> <TARGET> <LINK_FLAGS> <OBJECTS>")
+set(CMAKE_CXX_ARCHIVE_APPEND "libtool -static -D -o <TARGET> <TARGET> <LINK_FLAGS> <OBJECTS>")
+set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_RANLIB> -no_warning_for_no_symbols -D <TARGET>")
+set(CMAKE_CXX_ARCHIVE_FINISH "<CMAKE_RANLIB> -no_warning_for_no_symbols -D <TARGET>")

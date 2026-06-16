@@ -82,6 +82,8 @@
         const __m128i ditherOffset = _mm_set1_epi16((int16_t)dither->strength);
         const __m128i ditherShift = _mm_cvtsi32_si128((int32_t)params.shift); // Shift when < 16bit
         const __m128i ditherMul = _mm_set1_epi16((int16_t)(dither->strength * 2u + 1u));
+#else
+        VNUnused(dither);
 #endif
 
         // Get clamped source row indices

@@ -55,6 +55,7 @@ static bool chunkInitialize(EntropyDecoder* state, const LdeChunk* chunk, const 
     if (chunk->rleOnly) {
         state->rleOnly = true;
         state->rleData = chunk->data;
+        state->rleSize = chunk->size;
         return true;
     }
 
@@ -72,10 +73,10 @@ static bool chunkInitialize(EntropyDecoder* state, const LdeChunk* chunk, const 
     } else {
         /* Other entropy decodes just have two huffman streams (or, HuffTemporalCount, which equals
          * HuffSizeCount), so initialize each. */
-        for (uint8_t huffType = 0; huffType < HuffTemporalCount; huffType++) {
-            huffmanManualInitializeWithLut(&state->huffman[huffType].manualState,
-                                           &state->huffman[huffType].table, &state->hstream,
-                                           bitstreamVersion);
+        for (uint8_t huffType = 0; huffType < (uint8_t)HuffTemporalCount; huffType++) {
+            VNCheckB(huffmanManualInitializeWithLut(&state->huffman[huffType].manualState,
+                                                    &state->huffman[huffType].table,
+                                                    &state->hstream, bitstreamVersion));
         }
     }
 
@@ -100,9 +101,14 @@ static inline bool huffmanSingleDecode(const HuffmanSingleDecoder* decoder, Huff
     return false;
 }
 
-static inline uint8_t getNextSymbolRLEOnly(EntropyDecoder* state)
+static inline int32_t getNextSymbolRLEOnly(EntropyDecoder* state)
 {
-    return state->rleData[state->rawOffset++];
+    const size_t rawOffset = state->rawOffset;
+    if (rawOffset >= state->rleSize) {
+        return -1;
+    }
+    state->rawOffset = rawOffset + 1;
+    return state->rleData[rawOffset];
 }
 
 static inline void toggleTemporalState(EntropyDecoder* state, const uint8_t symbol)
@@ -116,14 +122,17 @@ static inline void toggleTemporalState(EntropyDecoder* state, const uint8_t symb
     }
 }
 
-static uint8_t getNextSymbolTemporalAndRLEOnly(EntropyDecoder* state)
+static int32_t getNextSymbolTemporalAndRLEOnly(EntropyDecoder* state)
 {
-    const uint8_t symbol = getNextSymbolRLEOnly(state);
-    toggleTemporalState(state, symbol);
+    const int32_t symbol = getNextSymbolRLEOnly(state);
+    if (symbol < 0) {
+        return symbol;
+    }
+    toggleTemporalState(state, (uint8_t)symbol);
     return symbol;
 }
 
-static uint8_t getNextSymbolTemporalAndHuffman(EntropyDecoder* state)
+static int32_t getNextSymbolTemporalAndHuffman(EntropyDecoder* state)
 {
     uint8_t symbol = 0;
 
@@ -162,6 +171,7 @@ bool entropyInitialize(EntropyDecoder* state, const LdeChunk* chunk, const Entro
     state->rawOffset = 0;
     state->rleOnly = false;
     state->rleData = NULL;
+    state->rleSize = 0;
     state->entropyEnabled = true;
     state->type = type;
 
@@ -176,7 +186,7 @@ bool entropyInitialize(EntropyDecoder* state, const LdeChunk* chunk, const Entro
     {                                                                                  \
         int16_t value = 0;                                                             \
         int32_t zeros = 0;                                                             \
-        uint8_t symbol = 0;                                                            \
+        int32_t symbol = 0;                                                            \
                                                                                        \
         if ((symbol = symbolGetterFn(state)) < 0) {                                    \
             return symbol;                                                             \
@@ -204,6 +214,11 @@ bool entropyInitialize(EntropyDecoder* state, const LdeChunk* chunk, const Entro
                 return symbol;                                                         \
             }                                                                          \
                                                                                        \
+            if (zeros > (INT32_MAX >> 7)) {                                            \
+                VNLogError("RLE run length overflows the run-length accumulator");     \
+                return -1;                                                             \
+            }                                                                          \
+                                                                                       \
             zeros = (zeros << 7) | (symbol & 0x7f);                                    \
         }                                                                              \
                                                                                        \
@@ -219,7 +234,7 @@ VN_ENTROPY_DECODE_DEFINE(getNextSymbolRLEOnly)
          * we leave this function */                                                                  \
         uint8_t value = state->currHuff;                                                              \
         int32_t count = 0;                                                                            \
-        uint8_t symbol = 0;                                                                           \
+        int32_t symbol = 0;                                                                           \
                                                                                                       \
         /* First symbol is always sent as raw, so we know which state we are starting with */         \
         if (state->rawOffset == 0) {                                                                  \
@@ -234,6 +249,11 @@ VN_ENTROPY_DECODE_DEFINE(getNextSymbolRLEOnly)
         do {                                                                                          \
             if ((symbol = symbolGetterFn(state)) < 0) {                                               \
                 return symbol;                                                                        \
+            }                                                                                         \
+                                                                                                      \
+            if (count > (INT32_MAX >> 7)) {                                                           \
+                VNLogError("Temporal run length overflows the run-length accumulator");               \
+                return -1;                                                                            \
             }                                                                                         \
                                                                                                       \
             count = count << 7 | (symbol & 0x7f);                                                     \

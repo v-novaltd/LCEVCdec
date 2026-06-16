@@ -40,6 +40,7 @@ COPYRIGHT_TYPES = ('*.cpp', '*.c', '*.h', '*.py', '*.js', '*.java', '*.gradle', 
 CLANG_FORMAT_TYPES = ('*.cpp', '*.c', '*.h')
 CMAKE_TYPES = ('*.cmake', 'CMakeLists.txt')
 PYTHON_TYPES = ('*.py',)
+JAVA_TYPES = ('*.java',)
 WORKFLOW_TYPES = ('*.yml', '*.yaml')
 GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/lcevc_dec_headers/*', 'conan/ffmpeg/[!conanfile.py]*'
              'include/**/', 'docs/sphinx/**', '.github/**/', 'wrappers/**/', '')
@@ -57,10 +58,37 @@ INCLUDE_GUARD_OVERRIDES = {'src/api/include/LCEVC/lcevc_dec.h': 'LCEVC_DEC_H',
                            'src/pixel_processing/src/upscale_macros': None}
 TRAILING_SPACE_GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/**/', 'include/**/',
                             'docs/', 'docs/sphinx/**', '.github/**/', 'licenses/**/', 'wrappers/', '')
+COLOR_RESET = '\033[0m'
+COLOR_RED = '\033[0;31m'
+COLOR_GREEN = '\033[0;32m'
+COLOR_YELLOW = '\033[0;33m'
 
 
 def run_cmd(cmd):
     return subprocess.run(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def colour(text: str, color: str):
+    return f'{color}{text}{COLOR_RESET}'
+
+
+def print_normal(msg: str):
+    print(f"lint.py: {msg}")
+
+
+def print_warn(msg: str):
+    print_normal(f"{colour('!>>', COLOR_YELLOW)} {msg}")
+
+
+def print_success(msg: str):
+    print_normal(f"{colour('!>>', COLOR_GREEN)} {msg}")
+
+
+def print_fail(tool: str, msg: str = ''):
+    body = f"{tool} {colour('FAILED', COLOR_RED)}"
+    if msg:
+        body = f"{body} {msg}"
+    print_warn(body)
 
 
 def get_changed_files(diff_main=False):
@@ -73,7 +101,7 @@ def get_changed_files(diff_main=False):
             current_branch = process.stdout.decode('utf-8').strip()
             remote_name = current_branch[:current_branch.find('/')]
         target_branch = os.environ.get('TARGET_BRANCH', f'{remote_name}/main')
-        print(f'Getting file diff from "{current_branch}" to "{target_branch}"')
+        print_normal(f'Getting file diff from "{current_branch}" to "{target_branch}"')
         process = run_cmd(['git', 'diff', '--name-only', current_branch, target_branch])
         assert process.returncode == 0, f"Failed to find changed files: {process.stderr.decode('utf-8')}"
         changed_files = process.stdout.decode('utf-8').splitlines()
@@ -83,7 +111,7 @@ def get_changed_files(diff_main=False):
         process = run_cmd(['git', 'diff', '--name-only', '--cached'])
         changed_files.extend(process.stdout.decode('utf-8').splitlines())
     changed_files = list(set([path for path in changed_files if os.path.isfile(path)]))
-    print(f'Linting {len(changed_files)} changed files only: {", ".join(changed_files)}')
+    print_normal(f'Linting {len(changed_files)} changed files only: {", ".join(changed_files)}')
     return changed_files
 
 
@@ -155,7 +183,7 @@ def format_include_guard(path, check_only=False):
         correct_guard = f"VN_LCEVC_{path_parts[1].upper()}_{path_parts[-1].replace('.h', '').upper()}_H"
 
     if not correct_guard:
-        print(f'\033[0;33m!>>\033[0m Auto include guard disabled in {path}')
+        print_warn(f'Auto include guard disabled in {path}')
         return 0
 
     with open(path, 'r') as f:
@@ -169,9 +197,8 @@ def format_include_guard(path, check_only=False):
         return 0
     if check_only:
         existing_guards_str = "'" + "', '".join(set(existing_guards)) + "'"
-        print(f"\033[0;33m!>>\033[0m Incorrect include guards in {path}, "
-              f"found {len(existing_guards)} guards of "
-              f"{existing_guards_str} - should be '{correct_guard}'")
+        print_warn(f"Incorrect include guards in {path}, found {len(existing_guards)} guards of "
+                   f"{existing_guards_str} - should be '{correct_guard}'")
         return 1
     else:
         def save_file(new_contents):
@@ -182,24 +209,23 @@ def format_include_guard(path, check_only=False):
                 file_contents = file_contents[:top_pos] + f"#ifndef {correct_guard}\n#define {correct_guard}\n\n" + \
                     file_contents[top_pos:] + f"\n#endif // {correct_guard}\n"
                 save_file(file_contents)
-                print(f"\033[0;32m!>>\033[0m Added new include guards in {path}")
+                print_success(f'Added new include guards in {path}')
                 return 0
             else:
-                print(f"\033[0;33m!>>\033[0m Please add include guards to {path} with "
-                      f"name '{correct_guard}'")
+                print_warn(f"Please add include guards to {path} with name '{correct_guard}'")
                 return 1
         if len(existing_guards) == 2 and (not bottom_guard or bottom_guard.groups()[0] is None):
             file_contents = file_contents[:file_contents.rfind(
                 '#endif')] + f'#endif // {correct_guard}\n'
             save_file(file_contents)
-            print(f"\033[0;32m!>>\033[0m Fixed bottom include guard comment in {path}")
+            print_success(f'Fixed bottom include guard comment in {path}')
         if any(guard != correct_guard for guard in existing_guards):
             for wrong_guard in set(existing_guards):
                 if not wrong_guard:
                     continue
                 file_contents = re.sub(wrong_guard, correct_guard, file_contents)
             save_file(file_contents)
-            print(f"\033[0;32m!>>\033[0m Fixed incorrect include guards in {path}")
+            print_success(f'Fixed incorrect include guards in {path}')
         return 0
 
 
@@ -212,10 +238,9 @@ def format_include_braces(path, check_only=False):
         if line.startswith('#include "LCEVC/'):
             include_path = re.search('#include "(.*)"', line).groups()[0]
             if check_only:
-                print(
-                    f'\033[0;33m!>>\033[0m Incorrect braces in {path}, should be #include <{include_path}>')
+                print_warn(f'Incorrect braces in {path}, should be #include <{include_path}>')
             else:
-                print(f"\033[0;32m!>>\033[0m Fixed include brace format in {path}")
+                print_success(f'Fixed include brace format in {path}')
                 file_contents[line_no] = f'#include <{include_path}>\n'
             errors += 1
     if check_only:
@@ -236,9 +261,9 @@ def copyright_file(path, check_only=False):
 
     if len(file_contents) < len(COPYRIGHT_MSG.splitlines()):
         if check_only:
-            print(f'\033[0;33m!>>\033[0m Incorrect copyright header in {path}')
+            print_warn(f'Incorrect copyright header in {path}')
             return False
-        print(f'\033[0;32m!>>\033[0m Added copyright header to {path}')
+        print_success(f'Added copyright header to {path}')
         with open(path, 'w', newline='') as f:
             f.writelines(copyright_msg)
             f.writelines(file_contents)
@@ -253,20 +278,19 @@ def copyright_file(path, check_only=False):
     if body_lines_match == len(copyright_msg) - 1:
         if file_contents[0] != copyright_msg[0]:
             if check_only:
-                print(f'\033[0;33m!>>\033[0m Incorrect copyright year in {path}, '
-                      f'should be {years}')
+                print_warn(f'Incorrect copyright year in {path}, should be {years}')
                 return False
             with open(path, 'w', newline='') as f:
                 f.writelines(copyright_msg)
                 f.writelines(file_contents[len(copyright_msg):])
-            print(f'\033[0;32m!>>\033[0m Updated copyright year in {path} to {years}')
+            print_success(f'Updated copyright year in {path} to {years}')
     elif body_lines_match != 0:
-        print(f'\033[0;33m!>>\033[0m Unknown partial copyright match in {path}, '
-              f'please manually delete incomplete notice and re-commit')
+        print_warn(f'Unknown partial copyright match in {path}, '
+                   f'please manually delete incomplete notice and re-commit')
         return False
     else:
         if check_only:
-            print(f'\033[0;33m!>>\033[0m Incorrect copyright header in {path}')
+            print_warn(f'Incorrect copyright header in {path}')
             return False
         leading_newlines = 0
         for line in file_contents:
@@ -277,7 +301,7 @@ def copyright_file(path, check_only=False):
             f.writelines(copyright_msg)
             f.write('\n')
             f.writelines(file_contents[leading_newlines:])
-        print(f'\033[0;32m!>>\033[0m Added copyright header to {path}')
+        print_success(f'Added copyright header to {path}')
 
     return True
 
@@ -290,8 +314,8 @@ def find_clang_format():
         if os.path.isfile(WIN_DEFAULT_CLANG_FORMAT_PATH):
             exe = WIN_DEFAULT_CLANG_FORMAT_PATH
         else:
-            print(f"Could not find clang format executable, either set it's location to '{CLANG_FORMAT_ENV_VAR}' "
-                  f"environment variable or install it to the default location '{WIN_DEFAULT_CLANG_FORMAT_PATH}'")
+            print_normal(f"Could not find clang format executable, either set it's location to '{CLANG_FORMAT_ENV_VAR}' "
+                         f"environment variable or install it to the default location '{WIN_DEFAULT_CLANG_FORMAT_PATH}'")
             exit(1)
     elif os.environ.get('CLANG_FORMAT_PATH'):
         exe = os.environ.get('CLANG_FORMAT_PATH')
@@ -301,24 +325,29 @@ def find_clang_format():
     try:
         process = run_cmd([exe, '--version'])
     except (FileNotFoundError, PermissionError):
-        print(f"Clang format executable '{exe}' not found, please install with"
-              f" 'apt install clang-format-14' or similar")
+        print_normal(f"Clang format executable '{exe}' not found, please install with"
+                     f" 'apt install clang-format-14' or similar")
         exit(1)
     if 'version 14.0.' not in process.stdout.decode('utf-8'):
-        print(f"Incorrect version of clang-format installed at '{exe}', version 14.0.x is required")
+        print_normal(
+            f"Incorrect version of clang-format installed at '{exe}', version 14.0.x is required")
         exit(1)
     return exe
 
 
-def find_formatter(exe, version):
+def find_formatter(exe, version, version_arg: str = '--version', stderr: bool = False):
     try:
-        process = run_cmd([exe, '--version'])
+        process = run_cmd([exe, version_arg])
     except (FileNotFoundError, PermissionError):
-        print(f"{exe} not found, ensure lint_requirements.txt are installed")
+        print_normal(
+            f"{exe} not found, ensure lint_requirements.txt are installed (google-java-format installed separately)")
         exit(1)
-    if version not in process.stdout.decode('utf-8'):
-        print(f"Incorrect version of {exe} is installed please use the version "
-              f"specified in lint_requirements.txt")
+    version_string = process.stderr.decode('utf-8') if stderr else process.stdout.decode('utf-8')
+    if version not in version_string:
+        # If it is found but has wrong version, even if skip is passed, error as it's more confusing
+        # for it to be on the path (user would expect it to work) but silently pass
+        print_normal(f"Incorrect version of {exe} is installed ({version_string})")
+        print_normal(f"Please use end= version specified in lint_requirements.txt ({version})")
         exit(1)
     return exe
 
@@ -351,14 +380,14 @@ def remove_trailing_spaces(file, check_only=False):
                     if original != stripped:
                         diff.append(f"Line {i}: '{original}'")
                 if diff:
-                    print(f'\033[0;33m!>>\033[0m Trailing spaces in {file}:\n' + '\n'.join(diff))
+                    print_warn(f'Trailing spaces in {file}:\n' + '\n'.join(diff))
                     return False
             else:
                 with open(file, 'w') as f:
                     f.write(stripped_content + '\n')
         return True
     except Exception as e:
-        print(f"Failed to remove trailing spaces on {file}: {e}")
+        print_normal(f"Failed to remove trailing spaces on {file}: {e}")
         return False
 
 
@@ -372,13 +401,13 @@ def lint_readme(check_only=False):
     cur_year = readme_content[str_loc:str_loc + 4]
     if cur_year != THIS_YEAR:
         if check_only:
-            print("\033[0;33m!>>\033[0m README copyright \033[0;31mFAILED\033[0m")
+            print_fail('README copyright')
             return False
         else:
             readme_content = readme_content[:str_loc] + THIS_YEAR + readme_content[str_loc + 4:]
             with open(readme_path, 'w') as f:
                 f.write(readme_content)
-            print('Updated README.md copyright year')
+            print_normal('Updated README.md copyright year')
     return True
 
 
@@ -396,6 +425,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    print_normal("lint.py: check mode" if args.check_only else "lint.py: fix mode")
     changed_files = get_changed_files(args.diff_main) if not args.all_files else False
     errors = 0
 
@@ -410,8 +440,7 @@ def main():
             cmd.insert(1, '-i')
         process = run_cmd(cmd)
         if args.check_only and process.returncode != 0:
-            print(f"\033[0;33m!>>\033[0m clang-format \033[0;31mFAILED\033[0m "
-                  f"on {process.stderr.decode('utf-8')}")
+            print_fail('clang-format', f"on {process.stderr.decode('utf-8')}")
             errors += 1
         if path.endswith('.h'):
             errors += format_include_guard(path, args.check_only)
@@ -425,24 +454,36 @@ def main():
             cmd.insert(1, '--in-place')
         process = run_cmd(cmd)
         if process.returncode != 0:
-            print(f"\033[0;33m!>>\033[0m cmake-format \033[0;31mFAILED\033[0m on {path}")
+            print_fail('cmake-format', f'on {path}')
             errors += 1
 
-    if args.check_only:
-        flake_exe = find_formatter('flake8', '7.1.0')
-        process = run_cmd([flake_exe])
+    flake_exe = find_formatter('flake8', '7.1.0')
+    autopep_exe = find_formatter('autopep8', '2.3')
+    python_files = get_paths(PYTHON_TYPES, changed_files)
+    if python_files:
+        process = run_cmd([flake_exe, '--exclude', '.venv'] + python_files)
         if process.returncode != 0:
-            print(f"\033[0;33m!>>\033[0m flake8 \033[0;31mFAILED\033[0m:\n"
-                  f"{process.stdout.decode('utf-8')}")
+            print_fail('flake8', f":\n{process.stdout.decode('utf-8')}")
             errors += 1
-    else:
-        autopep_exe = find_formatter('autopep8', '2.3')
-        python_files = get_paths(PYTHON_TYPES, changed_files)
-        if python_files:
-            process = run_cmd([autopep_exe, '-i', '--global-config', '.flake8'] + python_files)
-            if process.returncode != 0:
-                print(f"autopep8 failed: {process.stderr.decode('utf-8')}")
-                errors += 1
+        autopep_args = ['--diff', '--exit-code'] if args.check_only else ['-i']
+        process = run_cmd([autopep_exe] + autopep_args
+                          + ['--global-config', '.flake8'] + python_files)
+        if process.returncode != 0:
+            if args.check_only:
+                print_fail('autopep8', f":\n{process.stdout.decode('utf-8')}")
+            else:
+                print_normal(f"autopep8 failed: {process.stderr.decode('utf-8')}")
+            errors += 1
+
+    java_files = get_paths(JAVA_TYPES, changed_files)
+    if java_files:
+        java_format_exe = find_formatter("google-java-format", "1.",
+                                         version_arg="-version", stderr=True, )
+        java_args = ['--dry-run', '--set-exit-if-changed'] if args.check_only else ['--replace']
+        process = run_cmd([java_format_exe] + java_args + java_files)
+        if process.returncode != 0:
+            print_normal(f"google-java-format failed: {process.stdout.decode('utf-8')}")
+            errors += 1
 
     for path in get_paths(COPYRIGHT_TYPES, changed_files):
         if not copyright_file(path, args.check_only):
@@ -458,14 +499,13 @@ def main():
         cmd = ['zizmor', path]
         process = run_cmd(cmd)
         if process.returncode != 0:
-            print(f"\033[0;33m!>>\033[0m zizmor \033[0;31mFAILED\033[0m "
-                  f"on {process.stdout.decode('utf-8')}")
+            print_fail('zizmor', f"on {process.stdout.decode('utf-8')}")
             errors += 1
 
     if errors == 0:
-        print("~~~ Linting \033[0;32mPASSED\033[0m ~~~")
+        print_normal(f"~~~ Linting {colour('PASSED', COLOR_GREEN)} ~~~")
     else:
-        print(f"~~~ Linting \033[0;31mFAILED - {errors} errors\033[0m ~~~")
+        print_normal(f"~~~ Linting {colour(f'FAILED - {errors} errors', COLOR_RED)} ~~~")
 
     return errors
 

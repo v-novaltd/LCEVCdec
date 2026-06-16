@@ -15,6 +15,7 @@
 #ifndef VN_LCEVC_COMMON_DETAIL_DIAGNOSTICS_H
 #define VN_LCEVC_COMMON_DETAIL_DIAGNOSTICS_H
 
+#include <LCEVC/common/clock.h>
 #include <LCEVC/common/diagnostics_buffer.h>
 #include <LCEVC/common/platform.h>
 #include <LCEVC/common/threads.h>
@@ -86,10 +87,6 @@ typedef struct DiagnosticState
 
     bool initialized;
     LdcAtomicUint refCount;
-
-#if VN_OS(WINDOWS)
-    LARGE_INTEGER performanceCounterFrequency;
-#endif
 
     LdcDiagnosticsBuffer diagnosticsBuffer;
 
@@ -427,20 +424,7 @@ extern "C"
 
 // Get a time for diagnostic records
 //
-static inline uint64_t ldcDiagnosticGetTimestamp(void)
-{
-#if VN_OS(WINDOWS)
-    assert(ldcDiagnosticsState->performanceCounterFrequency.QuadPart != 0);
-
-    LARGE_INTEGER currentTime;
-    QueryPerformanceCounter(&currentTime);
-    return (currentTime.QuadPart * 1000000000) / ldcDiagnosticsState->performanceCounterFrequency.QuadPart;
-#else
-    struct timespec currentTime;
-    clock_gettime(CLOCK_MONOTONIC, &currentTime);
-    return ((uint64_t)(currentTime.tv_sec) * 1000000000) + (uint64_t)currentTime.tv_nsec;
-#endif
-}
+static inline uint64_t ldcDiagnosticGetTimestamp(void) { return ldcClockMonotonicNanoseconds(); }
 
 // Fill in LdcDiagRecord
 static inline void ldcDiagnosticsRecordSet(LdcDiagRecord* record, const LdcDiagSite* site)
@@ -462,7 +446,9 @@ static inline void ldcDiagnosticsRecordSetAll(LdcDiagRecord* record, const LdcDi
 }
 
 // Out of line utility to copy VA args into diag record variable data
-void ldcDiagnosticsCopyArguments(const LdcDiagSite* site, LdcDiagValue values[], va_list args);
+// Returns number of values actually copied.
+uint32_t ldcDiagnosticsCopyArguments(const LdcDiagSite* site, LdcDiagValue values[],
+                                     uint32_t valuesCount, va_list args);
 
 #if VN_SDK_FEATURE(DIAGNOSTICS_ASYNC)
 
@@ -491,7 +477,7 @@ static inline void ldcDiagEvent(const LdcDiagSite* site, size_t valuesSize, ...)
 
         va_list args;
         va_start(args, valuesSize);
-        ldcDiagnosticsCopyArguments(site, values, args);
+        ldcDiagnosticsCopyArguments(site, values, site->argumentCount, args);
         va_end(args);
 
         ldcDiagnosticsBufferPushEnd(&ldcDiagnosticsState->diagnosticsBuffer);

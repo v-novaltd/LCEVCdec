@@ -144,6 +144,8 @@ public:
         m_renderNv12 = nv12 ? 1 : 0;
     }
 
+    void setLimitedRange(bool limited) { m_limitedRange = limited ? 1 : 0; }
+
     void updateDitherState(const LdppDitherGlobal* global, const LdppDitherFrame* frame);
 
     VNNoCopyNoMove(RenderVulkan);
@@ -220,25 +222,25 @@ private:
     GLFWwindow* m_window = nullptr;
 #endif
 
-    VkSurfaceKHR m_surface;
-    VkSwapchainKHR m_swapChain;
+    VkSurfaceKHR m_surface{VK_NULL_HANDLE};
+    VkSwapchainKHR m_swapChain{VK_NULL_HANDLE};
     std::vector<VkImage> m_swapChainImages;
-    VkFormat m_swapChainImageFormat;
-    VkExtent2D m_swapChainExtent;
+    VkFormat m_swapChainImageFormat{VK_FORMAT_UNDEFINED};
+    VkExtent2D m_swapChainExtent{};
     std::vector<VkImageView> m_swapChainImageViews;
     std::vector<VkFramebuffer> m_swapChainFramebuffers;
-    VkRenderPass m_renderPass;
-    VkDescriptorSetLayout m_graphicsDescriptorSetLayout;
-    VkPipelineLayout m_graphicsPipelineLayout;
-    VkPipeline m_graphicsPipeline;
-    VkCommandPool m_graphicsCommandPool;
-    VkDescriptorPool m_graphicsDescriptorPool;
+    VkRenderPass m_renderPass{VK_NULL_HANDLE};
+    VkDescriptorSetLayout m_graphicsDescriptorSetLayout{VK_NULL_HANDLE};
+    VkPipelineLayout m_graphicsPipelineLayout{VK_NULL_HANDLE};
+    VkPipeline m_graphicsPipeline{VK_NULL_HANDLE};
+    VkCommandPool m_graphicsCommandPool{VK_NULL_HANDLE};
+    VkDescriptorPool m_graphicsDescriptorPool{VK_NULL_HANDLE};
     std::vector<VkDescriptorSet> m_graphicsDescriptorSets;
     std::vector<VkCommandBuffer> m_graphicsCommandBuffers;
-    VkBuffer m_vertexBuffer;
-    VmaAllocation m_vertexBufferAllocation;
-    VkBuffer m_indexBuffer;
-    VmaAllocation m_indexBufferAllocation;
+    VkBuffer m_vertexBuffer{VK_NULL_HANDLE};
+    VmaAllocation m_vertexBufferAllocation{VK_NULL_HANDLE};
+    VkBuffer m_indexBuffer{VK_NULL_HANDLE};
+    VmaAllocation m_indexBufferAllocation{VK_NULL_HANDLE};
     std::vector<VkBuffer> m_uniformBuffers;
     std::vector<VmaAllocation> m_uniformBuffersAllocations;
     std::vector<void*> m_uniformBuffersMapped;
@@ -251,6 +253,7 @@ private:
     uint32_t m_ditherRowOffsetCapacity = 0;
     int m_renderBit8 = 1;
     int m_renderNv12 = 0;
+    int m_limitedRange = 0;
     int m_ditherStrength = 0;
     int m_ditherEnabled = 0;
     int m_ditherShift = 0;

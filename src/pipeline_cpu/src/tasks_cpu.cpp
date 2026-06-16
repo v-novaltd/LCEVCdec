@@ -17,6 +17,7 @@
 #include "frame_cpu.h"
 #include "pipeline_cpu.h"
 
+#include <LCEVC/common/log.h>
 #include <LCEVC/pipeline/tasks_base.h>
 
 namespace lcevc_dec::pipeline_cpu {

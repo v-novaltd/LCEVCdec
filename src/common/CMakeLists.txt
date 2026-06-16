@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -14,7 +14,7 @@
 
 include("Sources.cmake")
 
-add_library(lcevc_dec_common STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
+add_library(lcevc_dec_common ${VN_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_common)
 
 target_include_directories(
@@ -26,6 +26,9 @@ target_link_libraries(lcevc_dec_common PUBLIC lcevc_dec::platform lcevc_dec::com
 
 add_library(lcevc_dec::common ALIAS lcevc_dec_common)
 
-lcevc_install(lcevc_dec_common)
-install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/common")
-install(FILES ${INTERFACES_DETAIL} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/common/detail")
+if (NOT BUILD_SHARED_LIBS)
+    lcevc_install(lcevc_dec_common)
+    install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/common")
+    install(FILES ${INTERFACES_DETAIL}
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/common/detail")
+endif ()

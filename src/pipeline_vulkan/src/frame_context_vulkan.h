@@ -99,7 +99,8 @@ private:
     VkDescriptorSet m_descriptorSetMidDstLoq0{}; // 3 buffers: 1.vertical + 2.base -> HORIZONTAL -> 3.output
     VkDescriptorSet m_descriptorSetConversionTo{}; // 2 buffers: 1.input -> CONVERSION -> 2.output plane
     VkDescriptorSet m_descriptorSetConversionFrom{}; // 2 buffers: 1.input -> CONVERSION -> 2.output plane
-    VkDescriptorSet m_descriptorSetAdd{};            // 2 buffers: 1.input -> ADD -> 2.output plane
+    VkDescriptorSet m_descriptorSetConversionFromImage{}; // 1 buffer + 1 storage image output
+    VkDescriptorSet m_descriptorSetAdd{}; // 2 buffers: 1.input -> ADD -> 2.output plane
     VkDescriptorSet m_descriptorSetApply[LOQEnhancedCount]{}; // LOQ0: 1.merged commands -> APPLY -> 2.output plane
 
     BufferVulkan* m_gpuCommandBuffer[LOQEnhancedCount] = {}; // merged command buffers for LOQ apply tiles

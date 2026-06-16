@@ -26,8 +26,10 @@
 
 /*------------------------------------------------------------------------------*/
 
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
 PlaneConvertFunction planeConvertGetFunctionScalar(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
                                                    uint32_t planeIndex, bool isNV12);
+#endif
 PlaneConvertFunction planeConvertGetFunctionSSE(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
                                                 uint32_t planeIndex, bool isNV12);
 PlaneConvertFunction planeConvertGetFunctionNEON(LdpFixedPoint srcFP, LdpFixedPoint dstFP, bool isNV12);
@@ -48,9 +50,11 @@ PlaneConvertFunction planeConvertGetFunction(LdpFixedPoint srcFP, LdpFixedPoint 
     }
 
     /* Fallback to a non-SIMD function */
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
     if (!res) {
         res = planeConvertGetFunctionScalar(srcFP, dstFP, planeIndex, isNV12);
     }
+#endif
 
     return res;
 }

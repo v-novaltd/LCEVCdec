@@ -14,27 +14,19 @@
 
 // Ported version of AVPlayer decoder unit tests
 //
-#include <find_assets_dir.h>
+#include "asset_loader.h"
+
 #include <gtest/gtest.h>
 #include <gtest/internal/gtest-internal.h>
-#include <LCEVC/api_utility/picture_layout.h>
-#include <LCEVC/common/limit.h>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/common/platform.h>
-#include <LCEVC/extract/extract.h>
 #include <LCEVC/lcevc_dec.h>
-#include <LCEVC/utility/base_decoder.h>
-#include <LCEVC/utility/md5.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <memory>
 #include <string>
-#include <string_view>
 #include <vector>
 
 using namespace lcevc_dec::utility;
@@ -42,211 +34,7 @@ using namespace lcevc_dec::utility;
 // Various helper objects and functions
 namespace {
 
-const std::filesystem::path kTestAssets{findAssetsDir("src/api/test/assets")};
-
 const uintptr_t kInvalidHandle = UINTPTR_MAX;
-const uint32_t kRowAlignment = 64;
-
-// This is a very simple standin for the AVPlayer code's PixelBuffer
-struct PixelBuffer
-{
-    uint32_t width = 0;
-    uint32_t height = 0;
-    uint32_t strides[3] = {0};
-
-    // Aspect ratio
-    uint32_t parH = 1;
-    uint32_t parV = 1;
-
-    std::vector<uint8_t> data;
-};
-
-// Compare PixelBuffers for testing
-bool operator==(const PixelBuffer& lhs, const PixelBuffer& rhs)
-{
-    if (lhs.width != rhs.width || lhs.height != rhs.height) {
-        return false;
-    }
-
-    const uint32_t heights[3] = {lhs.height, lhs.height / 2, lhs.height / 2};
-    const uint32_t widths[3] = {lhs.width, lhs.width / 2, lhs.width / 2};
-
-    const uint8_t* lhsData = lhs.data.data();
-    const uint8_t* rhsData = rhs.data.data();
-
-    for (uint32_t plane = 0; plane < 3; ++plane) {
-        for (uint32_t row = 0; row < heights[plane]; ++row) {
-            if (memcmp(lhsData, rhsData, widths[plane])) {
-                return false;
-            }
-            lhsData += lhs.strides[plane];
-            rhsData += rhs.strides[plane];
-        }
-    }
-    return true;
-}
-
-// Loads LCEVC media from a format supported by libav, alongside a file of decoded checksums
-//
-// The decoded checksums can be created from the test harness using --hash-type=md5 ---output-hash=<file.opl>
-//
-class AssetLoader
-{
-    struct Unit
-    {
-        // Decoded base image
-        PixelBuffer base;
-        // Enhacnement NALU
-        std::vector<uint8_t> enhancement;
-    };
-
-public:
-    AssetLoader(const std::filesystem::path& media, const std::filesystem::path& hashes,
-                uint32_t limit = UINT32_MAX)
-    {
-        loadUnits(media.string(), limit);
-        loadHashes(hashes.string(), limit);
-    }
-
-    size_t size() const { return m_hashes.size(); }
-
-    uint64_t timestamp(uint32_t index) const
-    {
-        EXPECT_LT(index, m_timestamps.size());
-        return m_timestamps[index];
-    }
-
-    const PixelBuffer& base(uint32_t index) const { return unit(index).base; }
-
-    const std::vector<uint8_t>& enhancement(uint32_t index) const
-    {
-        return unit(index).enhancement;
-    }
-
-    void checkDecoded(uint32_t index, const PixelBuffer& pb)
-    {
-        EXPECT_LT(index, m_hashes.size());
-        const PictureLayout layout(m_layout.format(), pb.width, pb.height);
-
-        // Make OPL string from PixelBuffer
-        std::stringstream ss;
-        ss << index << "," << layout.width() << "," << layout.height();
-        for (uint8_t plane = 0; plane < layout.planes(); ++plane) {
-            ss << "," << checksumPlane(layout, pb.data, plane);
-        }
-
-        EXPECT_EQ(ss.str(), m_hashes[index]);
-    }
-
-    static std::string checksumPlane(const PictureLayout& layout, const std::vector<uint8_t>& data,
-                                     uint8_t plane)
-    {
-        MD5 sum;
-
-        const uint8_t* ptr = data.data() + layout.planeOffset(plane);
-
-        // Add pixel data to checkum
-        for (uint32_t y = 0; y < layout.planeHeight(plane); ++y) {
-            sum.update(ptr, layout.rowSize(plane));
-            ptr += layout.rowStride(plane);
-        }
-
-        return sum.hexDigest();
-    }
-
-private:
-    // Populate units maps from media
-    void loadUnits(std::string_view file, uint32_t count)
-    {
-        std::unique_ptr<BaseDecoder> baseDecoder =
-            createBaseDecoderLibAV(file, "", LCEVC_ColorFormat_Unknown, false, false);
-
-        EXPECT_TRUE(!!baseDecoder);
-
-        while (m_units.size() < count) {
-            if (!baseDecoder->update()) {
-                break;
-            }
-
-            if (baseDecoder->hasEnhancement()) {
-                BaseDecoder::Data enhancement;
-                EXPECT_TRUE(baseDecoder->getEnhancement(enhancement));
-                EXPECT_EQ(m_units.count(enhancement.pts), 0);
-                m_units[enhancement.pts] = Unit();
-                std::vector<uint8_t>(enhancement.ptr, enhancement.ptr + enhancement.size)
-                    .swap(m_units[enhancement.pts].enhancement);
-
-                baseDecoder->clearEnhancement();
-            }
-
-            if (baseDecoder->hasImage()) {
-                BaseDecoder::Data base;
-                EXPECT_TRUE(baseDecoder->getImage(base));
-                EXPECT_EQ(m_units.count(base.pts), 1);
-
-                PixelBuffer& pb = m_units[base.pts].base;
-                pb.width = baseDecoder->layout().width();
-                pb.height = baseDecoder->layout().height();
-                EXPECT_LE(baseDecoder->layout().planes(), VNArraySize(pb.strides));
-
-                for (uint8_t plane = 0; plane < baseDecoder->layout().planes(); ++plane) {
-                    pb.strides[plane] = baseDecoder->layout().rowStride(plane);
-                }
-
-                std::vector<uint8_t>(base.ptr, base.ptr + base.size).swap(pb.data);
-
-                baseDecoder->clearImage();
-            }
-        }
-
-        EXPECT_LE(m_units.size(), count);
-
-        // Build index of unit timestamps
-        m_timestamps.reserve(m_units.size());
-        for (const auto& [key, value] : m_units) {
-            m_timestamps.push_back(key);
-        }
-
-        m_layout = baseDecoder->layout();
-    }
-
-    // Populate hashes from opl file
-    void loadHashes(std::string_view filename, uint32_t count)
-    {
-        std::ifstream file{std::string(filename)}; // Replace with your file name
-        EXPECT_TRUE(!!file);
-
-        std::string line;
-        std::getline(file, line); // Header
-
-        while (m_hashes.size() <= count && std::getline(file, line)) {
-            m_hashes.push_back(line);
-        }
-    }
-
-    const Unit& unit(uint32_t index) const
-    {
-        EXPECT_LT(index, m_timestamps.size());
-        const uint64_t ts = m_timestamps[index];
-        EXPECT_EQ(m_units.count(ts), 1);
-        return m_units.find(ts)->second;
-    }
-
-    // Source media
-    std::filesystem::path m_source;
-
-    // Layout of base image
-    PictureLayout m_layout;
-
-    // Units from source media with base and enhancement, indexed by timestamp
-    std::map<uint64_t, Unit> m_units;
-
-    // Table of unit timestamps
-    std::vector<uint64_t> m_timestamps;
-
-    // Table of output sizes and hashes as a string from OPL file
-    std::vector<std::string> m_hashes;
-};
 
 LCEVC_ReturnCode lcevcGetNaluType(LCEVC_DecoderHandle /*decoder*/, const std::vector<uint8_t>& nalu,
                                   uint64_t /*timestamp*/, int32_t format, int32_t codec,
@@ -289,53 +77,6 @@ void lcevcDecodeSkip(LCEVC_DecoderHandle decoder, uint64_t timestamp)
     EXPECT_EQ(LCEVC_Success, LCEVC_SynchronizeDecoder(decoder, false));
 }
 #endif
-
-LCEVC_PictureHandle allocPictureForPixelBuffer(LCEVC_DecoderHandle decoder, PixelBuffer* pixelBuffer)
-{
-    LCEVC_PictureDesc pd{};
-    EXPECT_EQ(LCEVC_Success,
-              LCEVC_DefaultPictureDesc(&pd, LCEVC_I420_8, pixelBuffer->width, pixelBuffer->height));
-    EXPECT_GE(PictureLayout::kMaxNumPlanes, 3);
-    PictureLayout layout(pd, pixelBuffer->strides);
-
-    LCEVC_PicturePlaneDesc planes[PictureLayout::kMaxNumPlanes] = {};
-    uint8_t* ptr = pixelBuffer->data.data();
-    for (uint8_t plane = 0; plane < layout.planes(); ++plane) {
-        planes[plane].firstSample = ptr + layout.planeOffset(plane);
-        planes[plane].rowByteStride = layout.rowStride(plane);
-    }
-
-    LCEVC_PictureHandle picture;
-    EXPECT_EQ(LCEVC_Success, LCEVC_AllocPictureExternal(decoder, &pd, nullptr, planes, &picture));
-    LCEVC_SetPictureUserData(decoder, picture, pixelBuffer);
-
-    return picture;
-}
-
-std::unique_ptr<PixelBuffer> allocPixelBuffer(LCEVC_DecoderHandle /*decoder*/, uint32_t width, uint32_t height)
-{
-    assert(width % 2 == 0);
-    LCEVC_PictureDesc pd{};
-    EXPECT_EQ(LCEVC_Success, LCEVC_DefaultPictureDesc(&pd, LCEVC_I420_8, width, height));
-    EXPECT_GE(PictureLayout::kMaxNumPlanes, 3);
-    uint32_t strides[PictureLayout::kMaxNumPlanes] = {
-        alignU32(width, kRowAlignment),
-        alignU32(width / 2, kRowAlignment),
-        alignU32(width / 2, kRowAlignment),
-    };
-    PictureLayout layout(pd, strides);
-
-    auto pb = std::make_unique<PixelBuffer>();
-    pb->width = layout.width();
-    pb->height = layout.height();
-    pb->strides[0] = layout.rowStride(0);
-    pb->strides[1] = layout.rowStride(1);
-    pb->strides[2] = layout.rowStride(2);
-
-    pb->data.resize(layout.size());
-
-    return pb;
-}
 
 std::unique_ptr<PixelBuffer> enhancePixelBufferInner(LCEVC_DecoderHandle decoder,
                                                      const PixelBuffer& base, uint64_t timestamp)
@@ -401,27 +142,6 @@ std::unique_ptr<PixelBuffer> enhancePixelBuffer(LCEVC_DecoderHandle decoder, con
         EXPECT_NE(pixelBuffer, nullptr);
     }
     return pixelBuffer;
-}
-
-// Feed NALU helper
-LCEVC_ReturnCode feedNalUnit(LCEVC_DecoderHandle decoder, const std::vector<uint8_t>& nalu,
-                             uint64_t timestamp, int32_t format, int32_t codec)
-{
-    // Extract data from NAL Unit
-    std::vector<uint8_t> enhancementData(nalu.size());
-    uint32_t actualSize = 0;
-    int32_t r = LCEVC_extractEnhancementFromNAL(
-        nalu.data(), static_cast<uint32_t>(nalu.size()), static_cast<LCEVC_NALFormat>(format),
-        static_cast<LCEVC_CodecType>(codec), enhancementData.data(),
-        static_cast<uint32_t>(enhancementData.size()), &actualSize);
-    if (r == 0) {
-        return LCEVC_NotFound;
-    }
-
-    // Pass to decoder
-    enhancementData.resize(actualSize);
-    return LCEVC_SendDecoderEnhancementData(decoder, timestamp, enhancementData.data(),
-                                            static_cast<uint32_t>(enhancementData.size()));
 }
 
 // Make a timestamp from seconds
@@ -938,16 +658,16 @@ TEST_F(LCEVCEnhancerTest, PropagateAttachmentsFromSourceShouldSetAspectRatioCorr
 
     const auto pb1PTS = genPTS(0.000);
     auto pb1 = loader.base(000);
-    pb1.parH = 1;
-    pb1.parV = 1; // set aspect ratio (1:1) like the Swift test
+    pb1.sampleAspectRatioNum = 1;
+    pb1.sampleAspectRatioDen = 1; // set aspect ratio (1:1) like the Swift test
 
     const auto& n1 = loader.enhancement(000);
     EXPECT_EQ(feedNalUnit(decoder, n1, pb1PTS, Format::mp4, Codec::h264), LCEVC_Success);
 
     const auto enh = enhancePixelBuffer(decoder, pb1, pb1PTS);
     // Verify attachments propagated
-    EXPECT_EQ(enh->parH, 1);
-    EXPECT_EQ(enh->parV, 1);
+    EXPECT_EQ(enh->sampleAspectRatioNum, 1);
+    EXPECT_EQ(enh->sampleAspectRatioDen, 1);
 }
 
 // ------------------- 1D Tests -------------------
@@ -962,8 +682,8 @@ TEST_F(LCEVCEnhancerTest, DecodeShouldReturnEnhancedImageFor1DTSStream)
 
     const auto pb1PTS = genPTS(0.000);
     auto pb1 = loader.base(000);
-    pb1.parH = 2;
-    pb1.parV = 1;
+    pb1.sampleAspectRatioNum = 2;
+    pb1.sampleAspectRatioDen = 1;
 
     auto pb2PTS = genPTS(0.033);
     const auto& pb2 = loader.base(001);

@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -16,6 +16,7 @@ list(
     APPEND
     SOURCES
     "src/diagnostics_ostream.cpp"
+    "src/test_clock.cpp"
     "src/test_configure.cpp"
     "src/test_cpp_tools.cpp"
     "src/test_deque.cpp"

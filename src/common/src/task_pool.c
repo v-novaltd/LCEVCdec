@@ -30,7 +30,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 // Forward declarations
 static void scheduleTask(LdcTaskPool* pool, LdcTask* task, LdcTask** head);
@@ -788,8 +787,8 @@ static void taskGroupReserve(struct LdcTaskGroup* group, uint32_t dependenciesRe
         const uint32_t ptrSize = group->dependenciesReserved * sizeof(void*);
 
         memcpy(newDependenciesMet, group->dependenciesMet, metSize);
-        memcpy(newWaitingTasks, group->waitingTasks, ptrSize);
-        memcpy(newDependencyValues, group->dependencyValues, ptrSize);
+        memcpy((void*)newWaitingTasks, (void*)group->waitingTasks, ptrSize);
+        memcpy((void*)newDependencyValues, (void*)group->dependencyValues, ptrSize);
 
         VNFree(group->pool->shortTermAllocator, &group->dependencyAllocation);
     }
@@ -1200,6 +1199,34 @@ static const char* depsSetAsString(char* dest, size_t destSize, const LdcTaskDep
     return dest;
 }
 
+static void taskGroupDump(LdcTaskPool* pool, const LdcTaskGroup* group)
+{
+    if (!group) {
+        return;
+    }
+
+    LdcMemoryAllocation allocation = {};
+    VNAllocateArray(pool->shortTermAllocator, &allocation, LdcTaskDependency,
+                    group->dependenciesCount, "metDeps");
+    LdcTaskDependency* metDeps = VNAllocationPtr(allocation, LdcTaskDependency);
+
+    const char* groupName = (group && group->name) ? group->name : "";
+
+    VNLogDebugF("  Group: %p %s Tasks:%d Waiting:%d Dependencies:%d", (void*)group, groupName,
+                group->tasksCount, group->waitingTasksCount, group->dependenciesCount);
+
+    uint32_t metDepsCount = 0;
+    for (uint32_t i = 0; i < group->dependenciesCount; ++i) {
+        if (dependencyMetBitGet(group, i)) {
+            metDeps[metDepsCount++] = i;
+        }
+    }
+    char tmp[256];
+    VNLogDebugF("     Met:[ %s]", depsSetAsString(tmp, sizeof(tmp) - 1, metDeps, metDepsCount, 0));
+
+    VNFree(pool->shortTermAllocator, &allocation);
+}
+
 static void taskPoolDump(LdcTaskPool* pool, const LdcTaskGroup* group)
 {
     static const char* stateNames[] = {
@@ -1214,9 +1241,8 @@ static void taskPoolDump(LdcTaskPool* pool, const LdcTaskGroup* group)
         if (!threads[id].part.task) {
             continue;
         }
-        const char* name = threads[id].part.task
-                               ? ((threads[id].part.task->name) ? threads[id].part.task->name : "")
-                               : "";
+        const char* name =
+            (threads[id].part.task && threads[id].part.task->name) ? (threads[id].part.task->name) : "";
         VNLogDebugF("  %d: %p (%d,%d) %s", id, (void*)threads[id].part.task, threads[id].part.start,
                     threads[id].part.count, name);
     }
@@ -1231,7 +1257,7 @@ static void taskPoolDump(LdcTaskPool* pool, const LdcTaskGroup* group)
             continue;
         }
         const char* taskName = task->name ? task->name : "";
-        const char* groupName = task->group ? (task->group->name) ? task->group->name : "" : "";
+        const char* groupName = (task->group && task->group->name) ? task->group->name : "";
 
         VNLogDebugF("  %3d: %p %7s Group:%p %s In:%08lx Out:%d Completed:%u Total:%d %s", id,
                     (void*)task, stateNames[task->state], (void*)task->group, groupName, task->inputs,
@@ -1245,23 +1271,7 @@ static void taskPoolDump(LdcTaskPool* pool, const LdcTaskGroup* group)
     }
 
     // Group
-    if (group) {
-        LdcTaskDependency* metDeps = alloca(group->dependenciesCount * sizeof(LdcTaskDependency));
-
-        const char* groupName = group ? (group->name ? group->name : "") : "";
-
-        VNLogDebugF("  Group: %p %s Tasks:%d Waiting:%d Dependencies:%d", (void*)group, groupName,
-                    group->tasksCount, group->waitingTasksCount, group->dependenciesCount);
-
-        uint32_t metDepsCount = 0;
-        for (uint32_t i = 0; i < group->dependenciesCount; ++i) {
-            if (dependencyMetBitGet(group, i)) {
-                metDeps[metDepsCount++] = i;
-            }
-        }
-        char tmp[256];
-        VNLogDebugF("     Met:[ %s]", depsSetAsString(tmp, sizeof(tmp) - 1, metDeps, metDepsCount, 0));
-    }
+    taskGroupDump(pool, group);
 }
 
 void ldcTaskPoolDump(LdcTaskPool* taskPool, const LdcTaskGroup* taskGroup)

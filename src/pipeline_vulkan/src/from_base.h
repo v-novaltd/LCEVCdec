@@ -16,6 +16,7 @@
 #define VN_LCEVC_PIPELINE_VULKAN_FROM_BASE_H
 
 #include "buffer_vulkan.h"
+#include "buffer_vulkan_vma.h"
 #include "frame_vulkan.h"
 #include "picture_lock_vulkan.h"
 #include "picture_vulkan.h"
@@ -37,7 +38,7 @@ struct Derived;
 template <>
 struct Derived<pipeline::BufferBase>
 {
-    typedef BufferVulkan Type;
+    typedef BufferVulkanVma Type;
 };
 template <>
 struct Derived<pipeline::PictureBase>
@@ -88,7 +89,7 @@ struct Derived<LdpFrame>
 template <>
 struct Derived<LdpBuffer>
 {
-    typedef BufferVulkan Type;
+    typedef BufferVulkanVma Type;
 };
 template <>
 struct Derived<LdpPictureLock>

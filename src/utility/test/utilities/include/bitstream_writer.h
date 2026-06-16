@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -11,8 +11,6 @@
  * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
-
-#pragma once
 
 #ifndef VN_LCEVC_UTILITY_BITSTREAM_WRITER_H
 #define VN_LCEVC_UTILITY_BITSTREAM_WRITER_H

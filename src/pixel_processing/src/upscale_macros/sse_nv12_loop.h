@@ -44,6 +44,11 @@
 #endif
 
 {
+#if DITHER == 1
+#error "Dithering not implemented for NV12 SSE"
+#else
+    VNUnused(dither);
+#endif
     const __m128i kRound = _mm_set1_epi32(0x2000);
     const __m128i kMin16 = _mm_set1_epi16(-0x4000); /* see saturateS15 for explanation */
     const __m128i kMax16 = _mm_set1_epi16(0x4000 - 1);

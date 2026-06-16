@@ -23,7 +23,7 @@ class EventSinkNull : public EventSink
 public:
     void enableEvents(const int32_t* events, uint32_t eventCount) override
     {
-        //   Always act as if events are diabled
+        //   Always act as if events are disabled
     }
     bool isEventEnabled(uint8_t) const override { return false; }
 

@@ -44,9 +44,11 @@ UpscaleFunction getUpscaleFunction(LdpFixedPoint srcFP, LdpFixedPoint dstFP, Int
         res = upscaleGetFunctionNEON(srcFP, dstFP, interleaving, is2d, pa, ditheringEnabled);
     }
 
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
     if (!res) {
         res = upscaleGetFunctionScalar(srcFP, dstFP, interleaving, is2d, pa, ditheringEnabled);
     }
+#endif
 
     return res;
 }
@@ -94,8 +96,7 @@ typedef struct UpscaleSlicedJobContext
  *         See `LdppUpscaleParams` docs for details on each param.
  */
 
-static LdppUpscaleParams generateUpscaleParams(const LdeKernel* kernel, LdpFixedPoint srcFp,
-                                               LdpFixedPoint dstFp)
+static LdppUpscaleParams generateUpscaleParams(const LdeKernel* kernel, LdpFixedPoint dstFp)
 {
     LdppUpscaleParams params = {0};
     params.kernel[0] = kernel->coeffs[0];
@@ -165,8 +166,7 @@ static bool upscaleSlicedJob(void* argument, uint32_t yStart, uint32_t count)
     }
     LdppDitherSlice* dither = context->frameDither ? &sliceDither : NULL;
     LdppUpscaleParams params =
-        generateUpscaleParams(&context->kernel, context->srcLayout->layoutInfo->fixedPoint,
-                              context->dstLayout->layoutInfo->fixedPoint);
+        generateUpscaleParams(&context->kernel, context->dstLayout->layoutInfo->fixedPoint);
     params.applyPA = context->applyPA ? 1 : 0;
 
     upscaleFunction(context->srcPlane.firstSample, context->dstPlane.firstSample,

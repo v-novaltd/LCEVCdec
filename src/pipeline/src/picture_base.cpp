@@ -90,14 +90,52 @@ void PictureBase::getDesc(LdpPictureDesc& desc) const
     desc.cropRight = margins.right;
 }
 
+const LdpPictureLayout* PictureBase::bufferPictureLayout() const
+{
+    if (buffer == nullptr) {
+        return nullptr;
+    }
+    return static_cast<const BufferBase*>(buffer)->getPictureLayout();
+}
+
+LdpPictureDesc PictureBase::resolvePictureDesc(const LdpPictureDesc& desc) const
+{
+    LdpPictureDesc effectiveDesc = desc;
+    const LdpPictureLayout* implicitLayout = bufferPictureLayout();
+    if (!implicitLayout) {
+        // Buffer does not have an implicit layout - provided one in good
+        return effectiveDesc;
+    }
+
+    // Extract details from buffer and make an appropriate PictureDesc - complain if
+    // dimensions are not what was expected
+    const uint32_t implicitWidth = ldpPictureLayoutWidth(implicitLayout);
+    const uint32_t implicitHeight = ldpPictureLayoutHeight(implicitLayout);
+    const LdpColorFormat implicitFormat = ldpPictureLayoutFormat(implicitLayout);
+
+    if ((desc.width != 0 && desc.width != implicitWidth) ||
+        (desc.height != 0 && desc.height != implicitHeight)) {
+        VNLogWarning("Picture desc dimensions %ux%u do not match external buffer dimensions %ux%u; "
+                     "using external buffer dimensions.",
+                     desc.width, desc.height, implicitWidth, implicitHeight);
+    }
+
+    effectiveDesc.width = implicitWidth;
+    effectiveDesc.height = implicitHeight;
+    if (implicitFormat != LdpColorFormatUnknown) {
+        effectiveDesc.colorFormat = implicitFormat;
+    }
+    return effectiveDesc;
+}
+
 bool PictureBase::descsMatch(const LdpPictureDesc& desc) const
 {
     if (ldpPictureLayoutPlanes(&layout) == 0) {
         return false; // Picture isn't initialized so cannot match
     }
-    LdpPictureDesc curDesc;
+    LdpPictureDesc curDesc{};
     getDesc(curDesc);
-    return desc == curDesc;
+    return resolvePictureDesc(desc) == curDesc;
 }
 
 bool PictureBase::setDesc(const LdpPictureDesc& newDesc)
@@ -108,11 +146,15 @@ bool PictureBase::setDesc(const LdpPictureDesc& newDesc)
     }
 
     if (!initializeDesc(newDesc, nullptr)) {
+        // Bad PictureDesc
         return false;
     }
 
-    if (!unbindMemory()) {
-        return false;
+    if (!m_hasExternalBuffer) {
+        // Release buffer if not owned
+        if (!unbindBuffer()) {
+            return false;
+        }
     }
 
     return true;
@@ -124,16 +166,17 @@ bool PictureBase::setDescAndBind(const LdpPictureDesc& newDesc, pipeline::Buffer
         return false;
     }
 
-    if (buffer) {
-        return true;
+    // Make sure there is a buffer
+    if (!buffer) {
+        return bindBuffer(usage);
     }
 
-    return bindMemory(usage);
+    return true;
 }
 
 bool PictureBase::getBufferDesc(LdpPictureBufferDesc& bufferDescOut) const
 {
-    if (!m_external) {
+    if (!m_hasExternalBufferDesc) {
         return false;
     }
     bufferDescOut = m_externaBufferDesc;
@@ -142,7 +185,7 @@ bool PictureBase::getBufferDesc(LdpPictureBufferDesc& bufferDescOut) const
 
 bool PictureBase::getPlaneDescArr(LdpPicturePlaneDesc planeDescArrOut[kLdpPictureMaxNumPlanes]) const
 {
-    if (!m_external) {
+    if (!m_hasExternalPlanes) {
         return false;
     }
 
@@ -155,66 +198,75 @@ bool PictureBase::getPlaneDescArr(LdpPicturePlaneDesc planeDescArrOut[kLdpPictur
 bool PictureBase::initializeDesc(const LdpPictureDesc& desc,
                                  const uint32_t rowStridesBytes[kLdpPictureMaxNumPlanes])
 {
-    // Note that error messages in this function just uses the name, rather than the full debug
-    // string. This is because the debug string reports format data that isn't meaningful until
-    // AFTER initializeDesc succeeds.
-
     if (isLocked()) {
         VNLogError("Picture is locked, so cannot set desc.");
         return false;
     }
 
-    if (desc.colorFormat == LdpColorFormatUnknown) {
+    const LdpPictureDesc effectiveDesc = resolvePictureDesc(desc);
+    const LdpPictureLayout* implicitLayout = bufferPictureLayout();
+
+    if (effectiveDesc.colorFormat == LdpColorFormatUnknown) {
         VNLogError("Invalid format, cannot set desc.");
         return false;
     }
 
-    colorRange = desc.colorRange;
-    colorPrimaries = desc.colorPrimaries;
-    matrixCoefficients = desc.matrixCoefficients;
-    transferCharacteristics = desc.transferCharacteristics;
-    hdrStaticInfo = desc.hdrStaticInfo;
-    sampleAspectRatio = {desc.sampleAspectRatioNum, desc.sampleAspectRatioDen};
+    colorRange = effectiveDesc.colorRange;
+    colorPrimaries = effectiveDesc.colorPrimaries;
+    matrixCoefficients = effectiveDesc.matrixCoefficients;
+    transferCharacteristics = effectiveDesc.transferCharacteristics;
+    hdrStaticInfo = effectiveDesc.hdrStaticInfo;
+    sampleAspectRatio = {effectiveDesc.sampleAspectRatioNum, effectiveDesc.sampleAspectRatioDen};
 
     if (rowStridesBytes) {
-        if (!ldpPictureDescCheckValidStrides(&desc, rowStridesBytes)) {
-            VNLogError("Invalid strides given for %dx%d plane", desc.width, desc.height);
+        if (!ldpPictureDescCheckValidStrides(&effectiveDesc, rowStridesBytes)) {
+            VNLogError("Invalid strides given for %dx%d plane", effectiveDesc.width, effectiveDesc.height);
             return false;
         }
-        ldpPictureLayoutInitializeDescStrides(&layout, &desc, rowStridesBytes);
+        ldpPictureLayoutInitializeDescStrides(&layout, &effectiveDesc, rowStridesBytes);
+    } else if (implicitLayout) {
+        layout = *implicitLayout;
     } else {
-        ldpPictureLayoutInitializeDesc(&layout, &desc, kBufferRowAlignment);
+        ldpPictureLayoutInitializeDesc(&layout, &effectiveDesc, kBufferRowAlignment);
     }
 
-    if (((desc.cropLeft + desc.cropRight) > desc.width) ||
-        ((desc.cropTop + desc.cropBottom) > desc.height)) {
+    if (((effectiveDesc.cropLeft + effectiveDesc.cropRight) > effectiveDesc.width) ||
+        ((effectiveDesc.cropTop + effectiveDesc.cropBottom) > effectiveDesc.height)) {
         VNLogError("Requested to crop out more than the whole picture. Requested crops are: left "
                    "%u, right %u, top %u, bottom %u. Size is %ux%u.",
-                   desc.cropLeft, desc.cropRight, desc.cropTop, desc.cropBottom, desc.width, desc.height);
+                   effectiveDesc.cropLeft, effectiveDesc.cropRight, effectiveDesc.cropTop,
+                   effectiveDesc.cropBottom, effectiveDesc.width, effectiveDesc.height);
         return false;
     }
-    margins = {desc.cropLeft, desc.cropTop, desc.cropRight, desc.cropBottom};
+    margins = {effectiveDesc.cropLeft, effectiveDesc.cropTop, effectiveDesc.cropRight,
+               effectiveDesc.cropBottom};
 
     return true;
 }
 
-void PictureBase::setExternal(const LdpPicturePlaneDesc* planeDescArr, const LdpPictureBufferDesc* bufferDesc)
+void PictureBase::setExternalBufferDesc(const LdpPictureBufferDesc* bufferDesc)
 {
-    m_external = true;
+    if (bufferDesc) {
+        // m_externalBuffer is only set when an externally-owned BufferBase is
+        // attached
+        m_externaBufferDesc = *bufferDesc;
+        m_hasExternalBufferDesc = true;
+    }
+}
+
+void PictureBase::setExternalPlaneDesc(const LdpPicturePlaneDesc* planeDescArr)
+{
+    m_hasExternalPlanes = true;
     for (uint32_t plane = 0; plane < ldpPictureLayoutPlanes(&layout); ++plane) {
         if (planeDescArr) {
             m_externalPlaneDescs[plane] = planeDescArr[plane];
             layout.rowStrides[plane] = planeDescArr[plane].rowByteStride;
         } else {
             m_externalPlaneDescs[plane].firstSample =
-                bufferDesc->data + ldpPictureLayoutPlaneOffset(&layout, plane);
+                m_externaBufferDesc.data + ldpPictureLayoutPlaneOffset(&layout, plane);
             m_externalPlaneDescs[plane].rowByteStride =
                 ldpPictureLayoutDefaultRowStride(&layout, plane, kBufferRowAlignment);
         }
-    }
-
-    if (bufferDesc) {
-        m_externaBufferDesc = *bufferDesc;
     }
 }
 
@@ -231,7 +283,7 @@ void PictureBase::getPlaneDescInternal(uint32_t plane, LdpPicturePlaneDesc& desc
 {
     assert(plane < kLdpPictureMaxNumPlanes);
 
-    if (!m_external) {
+    if (!m_hasExternalPlanes) {
         VNLogFatal("Cannot get PlaneDesc.");
         assert(0);
     } else {
@@ -239,9 +291,9 @@ void PictureBase::getPlaneDescInternal(uint32_t plane, LdpPicturePlaneDesc& desc
     }
 }
 
-bool PictureBase::bindMemory(pipeline::BufferUsage usage)
+bool PictureBase::bindBuffer(pipeline::BufferUsage usage)
 {
-    VNLogVerbose("BIND <%p>", (void*)this);
+    VNLogVerbose("bindBuffer <%p>", (void*)this);
 
     if (isLocked()) {
         return false;
@@ -254,11 +306,15 @@ bool PictureBase::bindMemory(pipeline::BufferUsage usage)
         return false;
     }
 
+    if (m_hasExternalBuffer) {
+        // Externally-owned buffers are already bound.
+        return m_externaBufferDesc.data != nullptr || m_externaBufferDesc.accelBuffer != nullptr;
+    }
+
     // No buffer - just make a new one
     if (buffer == nullptr) {
         buffer = m_pipeline.allocateBuffer(byteSize, usage);
         return buffer != nullptr;
-        return true;
     }
 
     // Existing buffer
@@ -281,20 +337,42 @@ bool PictureBase::bindMemory(pipeline::BufferUsage usage)
     return true;
 }
 
-bool PictureBase::unbindMemory()
+void PictureBase::setExternalBuffer(pipeline::BufferBase* externalBuffer)
 {
-    VNLogVerbose("UNBIND <%p>", (void*)this);
+    VNLogVerbose("setExternalBuffer <%p> <%p>", (void*)this, (void*)externalBuffer);
+
+    if (isLocked()) {
+        VNLogError("Picture is locked, so cannot set external buffer.");
+        return;
+    }
+
+    // Release any existing pipeline-owned buffer first.
+    if (buffer != nullptr && !m_hasExternalBuffer) {
+        m_pipeline.releaseBuffer(static_cast<BufferBase*>(buffer));
+    }
+    buffer = externalBuffer;
+    m_hasExternalBuffer = (externalBuffer != nullptr);
+
+    // If the new buffer hasan implicit picture layout, poke that into picture.
+    if (m_hasExternalBuffer && bufferPictureLayout()) {
+        LdpPictureDesc desc{};
+        getDesc(desc);
+        initializeDesc(desc, nullptr);
+    }
+}
+
+bool PictureBase::unbindBuffer()
+{
+    VNLogVerbose("unbindBuffer <%p>", (void*)this);
 
     if (isLocked()) {
         return false;
     }
-    bool ret = true;
-    if (buffer != nullptr) {
+    if (buffer != nullptr && !m_hasExternalBuffer) {
         m_pipeline.releaseBuffer(static_cast<BufferBase*>(buffer));
-        buffer = nullptr;
     }
-    return ret;
-
+    buffer = nullptr;
+    m_hasExternalBuffer = false;
     return true;
 }
 

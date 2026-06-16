@@ -37,9 +37,11 @@ SharpenFunction sharpenGetFunction(LdpFixedPoint fixedPoint)
         res = sharpenGetFunctionNEON(fixedPoint);
     }
 
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
     if (!res) {
         res = sharpenGetFunctionScalar(fixedPoint);
     }
+#endif
 
     return res;
 }

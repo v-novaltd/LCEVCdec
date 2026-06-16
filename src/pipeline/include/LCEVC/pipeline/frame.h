@@ -51,6 +51,8 @@ typedef struct LdpFrame
     uint32_t baseHeight;
     uint8_t baseBitdepth;
     LdpColorFormat baseFormat;
+    uint32_t baseSarNum;
+    uint32_t baseSarDen;
 
     // Final info about decoded frame
     LdpDecodeInformation decodeInformation;

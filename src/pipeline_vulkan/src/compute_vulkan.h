@@ -39,7 +39,9 @@ class VulkanFrameContext;
 struct VulkanApplyCommonArgs;
 struct VulkanApplyTileArgs;
 struct VulkanAddArgs;
-struct VulkanConversionArgs;
+struct VulkanConvertInArgs;
+struct PushConstantsConversion;
+struct VulkanConvertOutArgs;
 struct VulkanUpscaleArgs;
 
 // The various Vulkan compute steps for decoding
@@ -96,6 +98,7 @@ struct DescriptorSetLayouts
     VkDescriptorSetLayout horizontal{};
     VkDescriptorSetLayout apply{};
     VkDescriptorSetLayout conversion{};
+    VkDescriptorSetLayout convertOutImage{};
     VkDescriptorSetLayout add{};
 };
 
@@ -109,7 +112,18 @@ public:
     bool applyCommon(VulkanApplyCommonArgs* params);
     bool applyTile(VulkanApplyTileArgs* params);
     bool add(VulkanAddArgs* params);
-    bool conversion(VulkanConversionArgs* params);
+    bool convertIn(VulkanConvertInArgs* params);
+    bool convertOut(VulkanConvertOutArgs* params);
+
+private:
+    // Per-flavour helpers for convertOut(). The common preamble in
+    // convertOut() resolves source/destination buffers and primes a
+    // PushConstantsConversion; these methods finish off the dispatch for
+    // their respective destination flavour.
+    bool convertOutToImage(VulkanConvertOutArgs* params, PushConstantsConversion& constants);
+    bool convertOutToBuffer(VulkanConvertOutArgs* params, PushConstantsConversion& constants);
+
+public:
     bool upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs* params);
     bool upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArgs* params);
     bool upscaleFrame(const LdeKernel* kernel, VulkanUpscaleArgs* params);
@@ -135,6 +149,8 @@ private:
     // Compute
     bool createComputeBindingsAndPipelineLayout(ComputePipelineLayout& computePipelineLayout,
                                                 uint32_t numBuffers, uint32_t pushConstantsSize);
+    bool createConvertOutImageBindingsAndPipelineLayout(ComputePipelineLayout& computePipelineLayout,
+                                                        uint32_t pushConstantsSize);
 
     bool createComputePipeline(ComputePipeline& computePipeline,
                                const ComputePipelineLayout& computePipelineLayout,
@@ -144,6 +160,8 @@ private:
 
     bool createComputeCommandPool();
     void updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst, VkDescriptorSet descriptorSet);
+    void updateComputeImageDescriptorSets(BufferVulkan* src, BufferVulkan* dst,
+                                          VkDescriptorSet descriptorSet);
     void updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst1, BufferVulkan* dst2,
                                      VkDescriptorSet descriptorSet);
 
@@ -164,6 +182,7 @@ private:
     ComputePipelineLayout m_pipelineLayoutHorizontal{};
     ComputePipelineLayout m_pipelineLayoutApply{};
     ComputePipelineLayout m_pipelineLayoutConversion{};
+    ComputePipelineLayout m_pipelineLayoutConvertOutImage{};
     ComputePipelineLayout m_pipelineLayoutAdd{};
 
     // THe various compute pipelines with per step specializations for
@@ -182,6 +201,11 @@ private:
     ComputePipeline m_pipelineConversionFromInternal8BitNV12{};
     ComputePipeline m_pipelineConversionToInternal16Bit{};
     ComputePipeline m_pipelineConversionFromInternal16Bit{};
+    ComputePipeline m_pipelineConversionFromInternal16BitP010{};
+    ComputePipeline m_pipelineConversionFromInternalRgba8Image{};
+    ComputePipeline m_pipelineConversionFromInternalRgba10Image{};
+    ComputePipeline m_pipelineConversionFromInternalP010Image{};
+    ComputePipeline m_pipelineConversionFromInternalNv12Image{};
     ComputePipeline m_pipelineAdd{};
 
     DescriptorSetLayouts m_descriptorSetLayouts{};
@@ -189,12 +213,6 @@ private:
     VkCommandPool m_commandPool{};
 
     common::Mutex m_submitMutex;
-
-#if defined(ANDROID_BUFFERS)
-    AHardwareBuffer* srcHardwareBuffer[NUM_PLANES];
-    AHardwareBuffer* midHardwareBuffer[NUM_PLANES];
-    AHardwareBuffer* dstHardwareBuffer[NUM_PLANES];
-#endif
 };
 
 } // namespace lcevc_dec::pipeline_vulkan

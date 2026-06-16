@@ -56,7 +56,7 @@ namespace {
         LdpPicturePlaneDesc srcPlaneDescs[kLdpPictureMaxNumPlanes]{};
         if (srcPicture->getPlaneDescArr(srcPlaneDescs)) {
             if (srcPicture->buffer == nullptr) {
-                srcPicture->bindMemory(pipeline::BufferUsageIn);
+                srcPicture->bindBuffer(pipeline::BufferUsageIn);
             }
 
             auto* managedBuffer = fromPipeline(srcPicture->buffer);
@@ -107,19 +107,23 @@ namespace {
         LdpPictureDesc srcDesc;
         srcPicture->getDesc(srcDesc);
         srcDesc.colorFormat = pipeline->chromaToColorFormat(pipeline->getChroma());
-        auto* dstPicture = fromPipeline(pipeline->allocPicture(srcDesc));
-        dstPicture->bindMemory(pipeline::BufferUsageInternal);
+        LdpPicture* dstLdp = nullptr;
+        if (pipeline->allocPicture(srcDesc, dstLdp) != LdcReturnCodeSuccess || !dstLdp) {
+            VNLogError("allocPicture failed for ConvertToInternal");
+            return nullptr;
+        }
+        auto* dstPicture = fromPipeline(dstLdp);
+        dstPicture->bindBuffer(pipeline::BufferUsageInternal);
         context->getFrame()->addIntermediatePicture(dstPicture);
 
-        VulkanConversionArgs args{};
+        VulkanConvertInArgs args{};
         args.src = srcPicture;
         args.dst = dstPicture;
-        args.toInternal = true;
         args.bitDepth = context->getFrame()->baseBitdepth;
         args.chroma = pipeline->getChroma();
         args.context = context;
 
-        if (!pipeline->backend().conversion(&args)) {
+        if (!pipeline->backend().convertIn(&args)) {
             VNLogError("Conversion to internal failed");
         }
 
@@ -133,7 +137,7 @@ namespace {
     // Concert a picture plane from internal fixed point to output picture pixel format.
     //
     void* vConvertFromInternal(PipelineVulkan* pipeline, VulkanFrameContext* context,
-                               uint32_t baseDepth, uint8_t intermediatePtr)
+                               uint32_t bitDepth, uint8_t intermediatePtr)
     {
         if (pipeline->isSkipped(context->getFrame())) {
             return nullptr;
@@ -147,24 +151,28 @@ namespace {
         PictureVulkan* op = fromPipeline(context->getFrame()->outputPicture);
         op->setDescAndBind(dstDesc, pipeline::BufferUsageOut);
 
-        VulkanConversionArgs args{};
+        // sharpeningStrength() and the crop check both touch globalConfig,
+        // which is null in the unscaled-passthrough path.
+        const auto* gc = context->getFrame()->globalConfig;
+        VulkanConvertOutArgs args{};
         args.src = srcPicture;
         args.dst = fromPipeline(context->getFrame()->outputPicture);
-        args.toInternal = false;
-        args.bitDepth = context->getFrame()->getEnhancementBitDepth();
+        args.bitDepth = bitDepth;
         args.chroma = pipeline->getChroma();
-        args.sharpenStrength = context->getFrame()->sharpeningStrength(0);
+        args.sharpenStrength = gc ? context->getFrame()->sharpeningStrength(0) : 0.0f;
         args.context = context;
 
-        if (!pipeline->backend().conversion(&args)) {
+        if (!pipeline->backend().convertOut(&args)) {
             VNLogError("Conversion from internal failed");
         }
 
-        if (context->getFrame()->globalConfig->cropEnabled) {
-            args.dst->margins.left = context->getFrame()->globalConfig->crop.left;
-            args.dst->margins.right = context->getFrame()->globalConfig->crop.right;
-            args.dst->margins.top = context->getFrame()->globalConfig->crop.top;
-            args.dst->margins.bottom = context->getFrame()->globalConfig->crop.bottom;
+        // Crop only applies when there's an LCEVC global configuration; the
+        // unscaled-passthrough path runs without one.
+        if (gc && gc->cropEnabled) {
+            args.dst->margins.left = gc->crop.left;
+            args.dst->margins.right = gc->crop.right;
+            args.dst->margins.top = gc->crop.top;
+            args.dst->margins.bottom = gc->crop.bottom;
         }
 
         return nullptr;
@@ -189,8 +197,13 @@ namespace {
         LdpPictureDesc desc{};
         ldpDefaultPictureDesc(&desc, LdpColorFormatI420_8, 2, 2);
 
-        PictureVulkan* ip = fromPipeline(pipeline->allocPicture(desc));
-        ip->bindMemory(pipeline::BufferUsageInternal);
+        LdpPicture* ipLdp = nullptr;
+        if (pipeline->allocPicture(desc, ipLdp) != LdcReturnCodeSuccess || !ipLdp) {
+            VNLogError("allocPicture failed for Upscale");
+            return nullptr;
+        }
+        PictureVulkan* ip = fromPipeline(ipLdp);
+        ip->bindBuffer(pipeline::BufferUsageInternal);
         context->getFrame()->setIntermediatePicture(intermediatePtr - 1, ip);
 
         upscaleArgs.dst = context->getFrame()->getIntermediatePicture(intermediatePtr - 1);
@@ -296,7 +309,7 @@ namespace {
     void* vApplyAddTemporal(PipelineVulkan* pipeline, VulkanFrameContext* context, uint8_t intermediatePtr)
     {
         if (pipeline->isFlushed(context->getFrame()) || context->getFrame()->isPassthrough()) {
-            // Just move temporal buffer along pipline
+            // Just move temporal buffer along pipeline
             pipeline->transferTemporalBuffer(context->getFrame(), 0); // TODO - check this
             return nullptr;
         }
@@ -496,7 +509,7 @@ namespace {
 
         assert(enhancementTileIdx == frame->enhancementTileCount);
 
-        vConvertFromInternal(pipeline, frameContext, globalConfig.baseDepth, intermediatePtr);
+        vConvertFromInternal(pipeline, frameContext, frame->getEnhancementBitDepth(), intermediatePtr);
 
         // end Vulkan recording state
         pipeline->backend().compute().endCompute(frameContext);
@@ -512,6 +525,58 @@ namespace {
         const TaskVulkanDecodeData data{pipeline, frame};
 
         frame->taskAddSink(inputs, inputsCount, taskVulkanDecode, &data, sizeof(data), "VulkanDecode");
+    }
+
+    //// VulkanPassthrough
+    //
+    // Vulkan-native unscaled passthrough: convertIn -> convertOut on the GPU,
+    // skipping upscale/apply.  Used when there's no LCEVC global config (e.g.
+    // VVC-only stream) or pass-through is forced unscaled.  The scaled
+    // pass-through case is handled by the enhancement task graph already
+    // (skipped tiles -> upscale-only).
+    //
+    void* taskVulkanPassthrough(LdcTask* task, const LdcTaskPart* /*part*/)
+    {
+        assert(task->dataSize == sizeof(TaskVulkanDecodeData));
+        const TaskVulkanDecodeData& data{VNTaskData(task, TaskVulkanDecodeData)};
+        PipelineVulkan* const pipeline{data.pipeline};
+        FrameVulkan* const frame{data.frame};
+
+        if (pipeline->isFlushed(frame) || pipeline->isSkipped(frame) ||
+            frame->basePicture == nullptr || frame->outputPicture == nullptr) {
+            frame->signalComputeTaskDone();
+            return nullptr;
+        }
+
+        auto& compute = pipeline->backend().compute();
+        VulkanFrameContext* frameContext = compute.acquireFrameContext(frame);
+        if (!frameContext) {
+            VNLogError("Failed to acquire Vulkan frame context (passthrough)");
+            frame->signalComputeTaskDone();
+            return nullptr;
+        }
+
+        // Derive chroma from the base picture, since globalConfig may be null.
+        pipeline->setChroma(ldpPictureLayoutChroma(&frame->basePicture->layout));
+
+        // No enhancement tiles in passthrough.
+        compute.beginCompute(frameContext, /*tileCountTotal=*/0);
+
+        vConvertToInternal(pipeline, frameContext, frame->baseBitdepth, frame->baseBitdepth);
+        vConvertFromInternal(pipeline, frameContext, frame->baseBitdepth, static_cast<uint8_t>(LOQ2));
+
+        compute.endCompute(frameContext);
+        pipeline->addCompletionContext(frameContext);
+
+        return nullptr;
+    }
+
+    void addTaskVulkanPassthrough(PipelineVulkan* pipeline, FrameVulkan* frame,
+                                  const LdcTaskDependency* inputs, uint32_t inputsCount)
+    {
+        const TaskVulkanDecodeData data{pipeline, frame};
+        frame->taskAddSink(inputs, inputsCount, taskVulkanPassthrough, &data, sizeof(data),
+                           "VulkanPassthrough");
     }
 
     void generateTasksEnhancement(PipelineVulkan* pipeline, FrameVulkan* frame, uint64_t previousTimestamp)
@@ -548,28 +613,28 @@ namespace {
         pipeline::addTaskBaseDone(pipeline, frame, &computeDone, 1);
     }
 
-    // Fill out a task group for a simple unscaled pass-through configuration
+    // Fill out a task group for a simple unscaled pass-through configuration.
+    //
+    // Runs a single Vulkan-native task that does convertIn -> convertOut on
+    // the GPU.  The previous implementation used the generic per-plane CPU
+    // passthrough task, which can't read Vulkan-resident base pictures or
+    // write to AHB-imported output images.
     //
     void generateTasksPassthrough(PipelineVulkan* pipeline, FrameVulkan* frame)
     {
         VNTraceScopedArgs("timestamp", frame->timestamp);
 
-        uint8_t numImagePlanes{kLdpPictureMaxNumPlanes};
-        if (frame->basePicture) {
-            VNLogDebugF("No base for passthrough: ts:%" PRIx64, frame->timestamp);
-            numImagePlanes = ldpPictureLayoutPlanes(&frame->basePicture->layout);
-        }
+        // Wait for both base and output pictures, then run the GPU passthrough.
+        // Compute completion will signal computeTaskDone, which OutputDone /
+        // BaseDone depend on (mirroring the enhancement path).
+        LdcTaskDependency computeDone{frame->taskDependencyAdd()};
+        frame->setComputeTaskDone(computeDone);
 
-        LdcTaskDependency outputPlanes[kLdpPictureMaxNumPlanes] = {};
+        const LdcTaskDependency inputs[] = {frame->depBasePicture(), frame->depOutputPicture()};
+        addTaskVulkanPassthrough(pipeline, frame, inputs, static_cast<uint32_t>(VNArraySize(inputs)));
 
-        for (uint8_t plane = 0; plane < numImagePlanes; ++plane) {
-            outputPlanes[plane] = pipeline::addTaskPassthrough(
-                pipeline, frame, plane, frame->depOutputPicture(), frame->depBasePicture());
-        }
-
-        // Send output and base when all planes are ready
-        pipeline::addTaskOutputDone(pipeline, frame, outputPlanes, numImagePlanes);
-        pipeline::addTaskBaseDone(pipeline, frame, outputPlanes, numImagePlanes);
+        pipeline::addTaskOutputDone(pipeline, frame, &computeDone, 1);
+        pipeline::addTaskBaseDone(pipeline, frame, &computeDone, 1);
     }
 
 } // anonymous namespace

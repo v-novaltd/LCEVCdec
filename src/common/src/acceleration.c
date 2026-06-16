@@ -17,8 +17,10 @@
 //
 #include <assert.h>
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 static LdcAcceleration defaultAcceleration = {0};
 static const LdcAcceleration* currentAcceleration = &defaultAcceleration;
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 #if (VN_SDK_FEATURE(SSE) || VN_SDK_FEATURE(AVX2)) && !VN_ARCH(WASM)
 #include <stdint.h>
@@ -27,6 +29,7 @@ static const LdcAcceleration* currentAcceleration = &defaultAcceleration;
 #endif
 
 /*! \brief Helper function for loading CPUID. */
+// NOLINTNEXTLINE(readability-non-const-parameter): this is a false positive from clang
 static void loadCPUInfo(int32_t cpuInfo[4], int32_t field)
 {
 #if VN_COMPILER(MSVC)

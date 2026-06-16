@@ -23,7 +23,9 @@ typedef struct LdppDitherSlice LdppDitherSlice;
 typedef void (*SharpenFunction)(uint8_t* src, uint32_t stride, uint32_t width, uint32_t height,
                                 float strength, LdppDitherSlice* dither);
 
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
 SharpenFunction sharpenGetFunctionScalar(LdpFixedPoint fixedPoint);
+#endif
 SharpenFunction sharpenGetFunctionSSE(LdpFixedPoint fixedPoint);
 SharpenFunction sharpenGetFunctionNEON(LdpFixedPoint fixedPoint);
 

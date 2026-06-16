@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -14,7 +14,7 @@
 
 include("Sources.cmake")
 
-add_library(lcevc_dec_pixel_processing STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
+add_library(lcevc_dec_pixel_processing ${VN_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_pixel_processing)
 
 target_include_directories(
@@ -28,5 +28,7 @@ target_link_libraries(
 
 add_library(lcevc_dec::pixel_processing ALIAS lcevc_dec_pixel_processing)
 
-lcevc_install(lcevc_dec_pixel_processing)
-install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/pixel_processing")
+if (NOT BUILD_SHARED_LIBS)
+    lcevc_install(lcevc_dec_pixel_processing)
+    install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/pixel_processing")
+endif ()

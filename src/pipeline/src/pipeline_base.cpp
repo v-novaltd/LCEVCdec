@@ -12,10 +12,13 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include <LCEVC/common/return_code.h>
 #include <LCEVC/pipeline/buffer_base.h>
 #include <LCEVC/pipeline/pipeline_base.h>
+#include <LCEVC/pipeline/types.h>
 //
 #include <LCEVC/common/limit.h>
+#include <LCEVC/common/log.h>
 #include <LCEVC/pipeline/frame_base.h>
 #include <LCEVC/pipeline/picture_base.h>
 
@@ -114,7 +117,7 @@ LdcReturnCode PipelineBase::sendDecoderEnhancementData(uint64_t timestamp, const
     // Invalid if this timestamp is already present in decoder.
     //
     // NB: API clients are expected to make distinct timestamps over discontinuities using utility library
-    if (findFrame(timestamp) != nullptr) {
+    if (findFrame(timestamp, true) != nullptr) {
         VNLogDebug("sendDecoderEnhancementData: ts:%" PRIx64 " Duplicate Frame", timestamp);
         return LdcReturnCodeInvalidParam;
     }
@@ -162,7 +165,7 @@ LdcReturnCode PipelineBase::sendDecoderBase(uint64_t timestamp, LdpPicture* base
     VNLogDebug("sendDecoderBase: ts:%" PRIx64 " %p", timestamp, (void*)basePicture);
 
     // Find the frame associated with PTS
-    FrameBase* frame{findFrame(timestamp)};
+    FrameBase* frame{findFrame(timestamp, true)};
     if (frame) {
         // Enhancement exists
         if (LdcReturnCode ret = frame->setBasePicture(
@@ -202,6 +205,11 @@ LdcReturnCode PipelineBase::sendDecoderBase(uint64_t timestamp, LdpPicture* base
         bp = m_basePicturePending[0];
         m_basePicturePending.removeIndex(0);
         m_eventSink->generate(pipeline::EventCanSendBase);
+    }
+
+    // Keep record of highest sent frame timestamp
+    if (m_sendLimit == kInvalidTimestamp || pipeline::compareTimestamps(timestamp, m_sendLimit)) {
+        m_sendLimit = timestamp;
     }
 
     // New pass-through frame - no enhancement
@@ -321,14 +329,14 @@ void PipelineBase::getCapacity(LdpPipelineCapacity* capacity)
     capacity->outputAvailable = m_outputPictureAvailableBuffer.capacity();
 }
 
-// Dig out info about a current timestamp
+// Get the resolution for a timestamp
 LdcReturnCode PipelineBase::peekDecoder(uint64_t timestamp, uint32_t& widthOut, uint32_t& heightOut)
 {
     // Flush everything up to given timestamp
     process(timestamp);
 
     // Find the frame associated with PTS
-    const FrameBase* frame{findFrame(timestamp)};
+    const FrameBase* frame{findFrame(timestamp, false)};
     if (!frame) {
         return LdcReturnCodeNotFound;
     }
@@ -346,6 +354,44 @@ LdcReturnCode PipelineBase::peekDecoder(uint64_t timestamp, uint32_t& widthOut, 
         widthOut = frame->globalConfig->width;
         heightOut = frame->globalConfig->height;
     }
+    return LdcReturnCodeSuccess;
+}
+
+// Get a picture description for a timestamp
+LdcReturnCode PipelineBase::peekDecoderPictureDesc(uint64_t timestamp, LdpPictureDesc* desc)
+{
+    // Flush everything up to given timestamp
+    process(timestamp);
+
+    // Find the frame associated with PTS
+    const FrameBase* frame{findFrame(timestamp, false)};
+    if (!frame) {
+        return LdcReturnCodeNotFound;
+    }
+    if (!frame->globalConfig) {
+        if (configuration().passthroughMode == PassthroughMode::Disable) {
+            return LdcReturnCodeNotFound;
+        }
+        return LdcReturnCodeAgain;
+    }
+
+    if (!frame->baseDataValid()) {
+        return LdcReturnCodeAgain;
+    }
+
+    // There is a frame - get the description
+    //
+    (*desc) = frame->getOutputPictureDesc(configuration().passthroughMode);
+
+    // Figure correct return code given frame state
+    if (isFlushed(frame)) {
+        return LdcReturnCodeFlushed;
+    }
+
+    if (frame->deadline < threadTimeMicroseconds(0)) {
+        return LdcReturnCodeTimeout;
+    }
+
     return LdcReturnCodeSuccess;
 }
 
@@ -553,21 +599,51 @@ uint32_t PipelineBase::findAllocatedPicture(const PictureBase* frame) const
     return UINT32_MAX;
 }
 
-LdpPicture* PipelineBase::allocPicture(const LdpPictureDesc& desc)
+LdcReturnCode PipelineBase::allocPicture(const LdpPictureDesc& desc, LdpPicture*& pictureOut)
 {
+    pictureOut = nullptr;
     PictureBase* picture{allocatePicture()};
+    if (!picture) {
+        return LdcReturnCodeError;
+    }
     picture->setDesc(desc);
-    return picture;
+    pictureOut = picture;
+    return LdcReturnCodeSuccess;
 }
 
-LdpPicture* PipelineBase::allocPictureExternal(const LdpPictureDesc& desc,
-                                               const LdpPicturePlaneDesc* planeDescArr,
-                                               const LdpPictureBufferDesc* buffer)
+LdcReturnCode PipelineBase::allocPictureExternal(const LdpPictureDesc& desc,
+                                                 const LdpPicturePlaneDesc* planeDescArr,
+                                                 const LdpPictureBufferDesc* buffer, LdpPicture*& pictureOut)
 {
+    pictureOut = nullptr;
     PictureBase* picture{allocatePicture()};
+    if (!picture) {
+        return LdcReturnCodeError;
+    }
+    picture->setExternalBufferDesc(buffer);
     picture->setDesc(desc);
-    picture->setExternal(planeDescArr, buffer);
-    return picture;
+    picture->setExternalPlaneDesc(planeDescArr);
+
+    if (buffer && buffer->accelBuffer) {
+        // Give pipeline opportunity to deal with implementation specific accelBuffer
+        const LdcReturnCode rc = storeAccelBuffer(picture, desc, buffer->accelBuffer);
+        if (rc != LdcReturnCodeSuccess) {
+            // Pipeline can't handle this
+            VNLogVerbose("Pipeline does not support accel buffer (rc=%d)", static_cast<int>(rc));
+            releasePicture(picture);
+            return rc;
+        }
+    }
+
+    pictureOut = picture;
+    return LdcReturnCodeSuccess;
+}
+
+LdcReturnCode PipelineBase::storeAccelBuffer(PictureBase* /*picture*/, const LdpPictureDesc& /*desc*/,
+                                             LdpAccelBuffer* /*accelBuffer*/)
+{
+    // Default action - the pipeline does not support accel buffers.
+    return LdcReturnCodeNotSupported;
 }
 
 void PipelineBase::freePicture(LdpPicture* ldpPicture)
@@ -584,11 +660,11 @@ void PipelineBase::freePicture(LdpPicture* ldpPicture)
 
 // Find existing Frame for a timestamp, or return nullptr if it does not exist.
 //
-FrameBase* PipelineBase::findFrame(uint64_t timestamp)
+FrameBase* PipelineBase::findFrame(uint64_t timestamp, bool ignoreSkipped)
 {
     for (uint32_t i = 0; i < m_allocatedFrames.size(); ++i) {
         FrameBase* const frame{m_allocatedFrames[i]};
-        if (isSkipped(frame)) {
+        if (ignoreSkipped && isSkipped(frame)) {
             continue;
         }
 
@@ -608,7 +684,7 @@ uint32_t PipelineBase::findAllocatedFrame(const FrameBase* frame) const
         }
     }
 
-    VNLogError("Cound not find frame!");
+    VNLogError("Could not find frame!");
     return UINT32_MAX;
 }
 

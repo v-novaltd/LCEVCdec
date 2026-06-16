@@ -14,6 +14,7 @@
 
 #include <LCEVC/pipeline/tasks_base.h>
 //
+#include <LCEVC/common/log.h>
 #include <LCEVC/enhancement/decode.h>
 #include <LCEVC/pipeline/frame_base.h>
 #include <LCEVC/pipeline/pipeline_base.h>
@@ -556,7 +557,7 @@ static void* taskApplyAddTemporal(LdcTask* task, const LdcTaskPart* /*part*/)
     VNTraceScopedArgs("timestamp", frame->timestamp, "plane", data.planeIndex);
 
     if (pipeline->isSkipped(frame) || frame->isPassthrough()) {
-        // Just move temporal buffer along pipline
+        // Just move temporal buffer along pipeline
         pipeline->transferTemporalBuffer(frame, data.planeIndex);
         return nullptr;
     }
@@ -664,9 +665,10 @@ struct TaskWaitForManyData
 static void* taskWaitForMany(LdcTask* task, const LdcTaskPart* /*part*/)
 {
     assert(task->dataSize == sizeof(TaskWaitForManyData));
+#if VN_SDK_FEATURE(TRACING)
     const TaskWaitForManyData& data{VNTaskData(task, TaskWaitForManyData)};
     const FrameBase* const frame{data.frame};
-
+#endif
     VNTraceScopedArgs("timestamp", frame->timestamp);
 
     VNLogDebug("taskWaitForMany ts:%" PRIx64 "", VNTaskData(task, TaskWaitForManyData).frame->timestamp);

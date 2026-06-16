@@ -18,6 +18,7 @@
 #include <LCEVC/common/class_utils.hpp>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/pipeline/buffer.h>
+#include <LCEVC/pipeline/picture_layout.h>
 
 namespace lcevc_dec::pipeline {
 
@@ -39,6 +40,9 @@ public:
 
     virtual uint32_t size() const = 0;
     virtual BufferUsage usage() const = 0;
+
+    // Return any picture layout that is implicit in the underlying buffer
+    virtual const LdpPictureLayout* getPictureLayout() const { return nullptr; }
 
     virtual bool map(LdpBufferMapping* mapping, int32_t offset, uint32_t size, LdpAccess access) = 0;
     virtual void unmap(const LdpBufferMapping* mapping) = 0;

@@ -191,7 +191,7 @@ bool DecoderContext::initializeDecoder()
     if (!m_pipeline) {
         return false;
     }
-    VNLogInfo("Initialzed LCEVCdec API");
+    VNLogInfo("Initialized LCEVCdec API");
 
     m_pipelineBuilder.reset();
     return true;

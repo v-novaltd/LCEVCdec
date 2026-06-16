@@ -17,7 +17,12 @@
 #include "add.h"
 #include "apply.h"
 #include "buffer_vulkan.h"
-#include "conversion.h"
+#include "convert_in.h"
+#include "convert_out.h"
+#include "convert_out_image_nv12.h"
+#include "convert_out_image_p010.h"
+#include "convert_out_image_rgba10.h"
+#include "convert_out_image_rgba8.h"
 #include "frame_context_vulkan.h"
 #include "frame_vulkan.h"
 #include "from_base.h"
@@ -27,6 +32,7 @@
 #include "upscale_horizontal.h"
 #include "upscale_vertical.h"
 
+#include <LCEVC/build_config.h> // NOLINT(misc-include-cleaner) - needed for VN_SDK_FEATURE in #if
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/log.h>
 #include <LCEVC/common/memory.h>
@@ -35,6 +41,9 @@
 #include <LCEVC/pipeline/types.h>
 #include <LCEVC/pipeline_vulkan/types_vulkan.h>
 #include <vulkan/vulkan_core.h>
+#if VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
+#include <zlib.h> // NOLINT(misc-include-cleaner)
+#endif
 
 #include <cstddef>
 #include <cstdint>
@@ -69,6 +78,12 @@ struct PushConstantsApply
     uint32_t tileWidth;
     uint32_t commandOffset; // offset into merged command buffer for this tile in uint32s
     uint32_t commandCount;  // number of commands in this tile
+    // Reciprocal of blocksInRow as ceil(2^32 / blocksInRow). The shader recovers
+    // block / blocksInRow via umulExtended, avoiding a per-command integer divide.
+    // Zero is a sentinel meaning blocksInRow == 1 (single column of blocks).
+    uint32_t blocksInRowMagic;
+    uint32_t dds;
+    uint32_t rasterOrder;
 };
 
 struct PushConstantsConversion
@@ -83,6 +98,9 @@ struct PushConstantsConversion
     uint32_t containerOffsetV; // used with nv12 as input or output offset for V-plane
     uint32_t shift;            // 5 for 10bit, 3 for 12bit, and 1 for 14bit
     uint32_t sharpenStrength;  // 0 disables sharpening, otherwise U16 strength
+    uint32_t nv21Swap;         // non-zero -> swap U/V order in 8-bit semi-planar chroma write
+    // Note: convert_out_image_*.comp shaders alias `shift` and `sharpenStrength`
+    // as chromaWidthShift / chromaHeightShift and do not read `nv21Swap`.
 };
 
 struct PushConstantsAdd
@@ -246,6 +264,55 @@ bool ComputeVulkan::createComputeBindingsAndPipelineLayout(ComputePipelineLayout
     return true;
 }
 
+bool ComputeVulkan::createConvertOutImageBindingsAndPipelineLayout(ComputePipelineLayout& computePipelineLayout,
+                                                                   uint32_t pushConstantsSize)
+{
+    std::array<VkDescriptorSetLayoutBinding, 3> layoutBindings{};
+    layoutBindings[0].binding = 0;
+    layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    layoutBindings[0].descriptorCount = 1;
+    layoutBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    layoutBindings[1].binding = 1;
+    layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    layoutBindings[1].descriptorCount = 1;
+    layoutBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    layoutBindings[2].binding = 2;
+    layoutBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    layoutBindings[2].descriptorCount = 1;
+    layoutBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutCreateInfo setLayoutCreateInfo{};
+    setLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    setLayoutCreateInfo.bindingCount = static_cast<uint32_t>(layoutBindings.size());
+    setLayoutCreateInfo.pBindings = layoutBindings.data();
+
+    if (vkCreateDescriptorSetLayout(m_backend.getDevice(), &setLayoutCreateInfo, nullptr,
+                                    &computePipelineLayout.descriptorSetLayout) != VK_SUCCESS) {
+        VNLogError("failed to create image conversion descriptor set layout!");
+        return false;
+    }
+
+    VkPushConstantRange range{};
+    range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    range.offset = 0;
+    range.size = pushConstantsSize;
+
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
+    pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutCreateInfo.setLayoutCount = 1;
+    pipelineLayoutCreateInfo.pSetLayouts = &computePipelineLayout.descriptorSetLayout;
+    pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+    pipelineLayoutCreateInfo.pPushConstantRanges = &range;
+
+    if (vkCreatePipelineLayout(m_backend.getDevice(), &pipelineLayoutCreateInfo, nullptr,
+                               &computePipelineLayout.pipelineLayout) != VK_SUCCESS) {
+        VNLogError("failed to create image conversion pipeline layout");
+        return false;
+    }
+
+    return true;
+}
+
 bool ComputeVulkan::createComputePipeline(ComputePipeline& computePipeline,
                                           const ComputePipelineLayout& computePipelineLayout,
                                           const unsigned char* shader, size_t shaderSize,
@@ -256,6 +323,26 @@ bool ComputeVulkan::createComputePipeline(ComputePipeline& computePipeline,
     computePipeline.workgroup = workgroup;
     computePipeline.packing = packing;
 
+#if VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
+    // Detect size-prefixed zlib compression: compressed blobs start with a LE uint32 uncompressed
+    // size rather than the SPIR-V magic 0x07230203.
+    std::vector<uint8_t> decompressed;
+    if (shaderSize >= 4) {
+        uint32_t firstWord;
+        memcpy(&firstWord, shader, 4);
+        if (firstWord != 0x07230203u) {
+            decompressed.resize(firstWord);
+            uLongf len = firstWord;
+            if (uncompress(decompressed.data(), &len, shader + 4, static_cast<uLong>(shaderSize - 4)) != Z_OK) {
+                VNLogError("Failed to decompress shader SPIR-V for %s", name);
+                return false;
+            }
+            shader = reinterpret_cast<const unsigned char*>(decompressed.data());
+            shaderSize = static_cast<size_t>(len);
+        }
+    }
+#endif
+
     VkShaderModuleCreateInfo shaderModuleCreateInfo{};
     shaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 
@@ -263,9 +350,10 @@ bool ComputeVulkan::createComputePipeline(ComputePipeline& computePipeline,
     shaderModuleCreateInfo.codeSize = shaderSize;
 
     VkShaderModule shaderModule = VK_NULL_HANDLE;
-    if (vkCreateShaderModule(m_backend.getDevice(), &shaderModuleCreateInfo, nullptr, &shaderModule) !=
-        VK_SUCCESS) {
-        VNLogError("failed to create shader module");
+    if (VkResult r = vkCreateShaderModule(m_backend.getDevice(), &shaderModuleCreateInfo, nullptr,
+                                          &shaderModule);
+        r != VK_SUCCESS) {
+        VNLogError("failed to create shader module for %s: %d", name, static_cast<int32_t>(r));
         return false;
     }
 
@@ -303,9 +391,10 @@ bool ComputeVulkan::createComputePipeline(ComputePipeline& computePipeline,
     pipelineCreateInfo.stage.pName = "main";
     pipelineCreateInfo.layout = computePipelineLayout.pipelineLayout;
 
-    if (vkCreateComputePipelines(m_backend.getDevice(), VK_NULL_HANDLE, 1, &pipelineCreateInfo,
-                                 nullptr, &computePipeline.pipeline) != VK_SUCCESS) {
-        VNLogError("failed to create compute pipeline");
+    if (VkResult r = vkCreateComputePipelines(m_backend.getDevice(), VK_NULL_HANDLE, 1,
+                                              &pipelineCreateInfo, nullptr, &computePipeline.pipeline);
+        r != VK_SUCCESS) {
+        VNLogError("failed to create compute pipeline %s: %d", name, static_cast<int32_t>(r));
         vkDestroyShaderModule(m_backend.getDevice(), shaderModule, nullptr);
         return false;
     }
@@ -330,6 +419,43 @@ void ComputeVulkan::updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan*
         writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[i].pBufferInfo = &bufferInfos[i];
     }
+
+    vkUpdateDescriptorSets(m_backend.getDevice(), static_cast<uint32_t>(writes.size()),
+                           writes.data(), 0, nullptr);
+}
+
+void ComputeVulkan::updateComputeImageDescriptorSets(BufferVulkan* src, BufferVulkan* dst,
+                                                     VkDescriptorSet descriptorSet)
+{
+    VkDescriptorBufferInfo bufferInfo{src->getVkBuffer(), 0, src->size()};
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageView = dst->getVkImageView(0);
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkDescriptorImageInfo imageInfoPlane1{};
+    imageInfoPlane1.imageView = dst->getVkImageView(1);
+    imageInfoPlane1.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    std::array<VkWriteDescriptorSet, 3> writes{};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = descriptorSet;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorCount = 1;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[0].pBufferInfo = &bufferInfo;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = descriptorSet;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorCount = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writes[1].pImageInfo = &imageInfo;
+
+    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[2].dstSet = descriptorSet;
+    writes[2].dstBinding = 2;
+    writes[2].descriptorCount = 1;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writes[2].pImageInfo = &imageInfoPlane1;
 
     vkUpdateDescriptorSets(m_backend.getDevice(), static_cast<uint32_t>(writes.size()),
                            writes.data(), 0, nullptr);
@@ -418,6 +544,11 @@ bool ComputeVulkan::init()
         return false;
     }
 
+    if (!createConvertOutImageBindingsAndPipelineLayout(m_pipelineLayoutConvertOutImage,
+                                                        sizeof(PushConstantsConversion))) {
+        return false;
+    }
+
     if (!createComputeBindingsAndPipelineLayout(m_pipelineLayoutAdd, 2, sizeof(PushConstantsAdd))) {
         return false;
     }
@@ -445,59 +576,85 @@ bool ComputeVulkan::init()
         return false;
     }
 
-    if (!createComputePipeline(m_pipelineApplyDd, m_pipelineLayoutApply, apply_spv, sizeof(apply_spv),
-                               "applyDd", {64, 1}, {1, 1}, {{SPECID_DDS, 0}, {SPECID_RASTER_ORDER, 0}})) {
+    if (!createComputePipeline(m_pipelineApplyDd, m_pipelineLayoutApply, apply_spv,
+                               sizeof(apply_spv), "applyDd", {64, 1}, {1, 1}, {})) {
         return false;
     }
-    if (!createComputePipeline(m_pipelineApplyDds, m_pipelineLayoutApply, apply_spv, sizeof(apply_spv),
-                               "applyDds", {64, 1}, {1, 1}, {{SPECID_DDS, 1}, {SPECID_RASTER_ORDER, 0}})) {
+    if (!createComputePipeline(m_pipelineApplyDds, m_pipelineLayoutApply, apply_spv,
+                               sizeof(apply_spv), "applyDds", {64, 1}, {1, 1}, {})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineApplyDdRaster, m_pipelineLayoutApply, apply_spv,
-                               sizeof(apply_spv), "applyDdRaster", {64, 1}, {1, 1},
-                               {{SPECID_DDS, 0}, {SPECID_RASTER_ORDER, 1}})) {
+                               sizeof(apply_spv), "applyDdRaster", {64, 1}, {1, 1}, {})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineApplyDdsRaster, m_pipelineLayoutApply, apply_spv,
-                               sizeof(apply_spv), "applyDdsRaster", {64, 1}, {1, 1},
-                               {{SPECID_DDS, 1}, {SPECID_RASTER_ORDER, 1}})) {
+                               sizeof(apply_spv), "applyDdsRaster", {64, 1}, {1, 1}, {})) {
         return false;
     }
 
     if (!createComputePipeline(m_pipelineConversionToInternal8Bit, m_pipelineLayoutConversion,
-                               conversion_spv, sizeof(conversion_spv), "conversionIn8",
+                               convert_in_spv, sizeof(convert_in_spv), "conversionIn8",
                                {workgroupWidth, workgroupHeight}, {4, 1},
-                               {{SPECID_TO_INTERNAL, 1}, {SPECID_8_BIT, 1}, {SPECID_NV12, 0}})) {
+                               {{SPECID_8_BIT, 1}, {SPECID_NV12, 0}})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionToInternal8BitNV12, m_pipelineLayoutConversion,
-                               conversion_spv, sizeof(conversion_spv), "conversionIn8Nv12",
+                               convert_in_spv, sizeof(convert_in_spv), "conversionIn8Nv12",
                                {workgroupWidth, workgroupHeight}, {4, 1},
-                               {{SPECID_TO_INTERNAL, 1}, {SPECID_8_BIT, 1}, {SPECID_NV12, 1}})) {
+                               {{SPECID_8_BIT, 1}, {SPECID_NV12, 1}})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternal8Bit, m_pipelineLayoutConversion,
-                               conversion_spv, sizeof(conversion_spv), "conversionOut8",
+                               convert_out_spv, sizeof(convert_out_spv), "conversionOut8",
                                {workgroupWidth, workgroupHeight}, {4, 1},
-                               {{SPECID_TO_INTERNAL, 0}, {SPECID_8_BIT, 1}, {SPECID_NV12, 0}})) {
+                               {{SPECID_8_BIT, 1}, {SPECID_NV12, 0}})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternal8BitNV12, m_pipelineLayoutConversion,
-                               conversion_spv, sizeof(conversion_spv), "conversionOut8Nv12",
+                               convert_out_spv, sizeof(convert_out_spv), "conversionOut8Nv12",
                                {workgroupWidth, workgroupHeight}, {4, 1},
-                               {{SPECID_TO_INTERNAL, 0}, {SPECID_8_BIT, 1}, {SPECID_NV12, 1}})) {
+                               {{SPECID_8_BIT, 1}, {SPECID_NV12, 1}})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionToInternal16Bit, m_pipelineLayoutConversion,
-                               conversion_spv, sizeof(conversion_spv), "conversionIn16",
+                               convert_in_spv, sizeof(convert_in_spv), "conversionIn16",
                                {workgroupWidth, workgroupHeight}, {2, 1},
-                               {{SPECID_TO_INTERNAL, 1}, {SPECID_8_BIT, 0}, {SPECID_NV12, 0}})) {
+                               {{SPECID_8_BIT, 0}, {SPECID_NV12, 0}})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternal16Bit, m_pipelineLayoutConversion,
-                               conversion_spv, sizeof(conversion_spv), "conversionOut16",
+                               convert_out_spv, sizeof(convert_out_spv), "conversionOut16",
                                {workgroupWidth, workgroupHeight}, {2, 1},
-                               {{SPECID_TO_INTERNAL, 0}, {SPECID_8_BIT, 0}, {SPECID_NV12, 0}})) {
+                               {{SPECID_8_BIT, 0}, {SPECID_NV12, 0}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternal16BitP010,
+                               m_pipelineLayoutConversion, convert_out_spv, sizeof(convert_out_spv),
+                               "conversionOut16P010", {workgroupWidth, workgroupHeight}, {2, 1},
+                               {{SPECID_8_BIT, 0}, {SPECID_NV12, 1}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalRgba8Image,
+                               m_pipelineLayoutConvertOutImage, convert_out_image_rgba8_spv,
+                               sizeof(convert_out_image_rgba8_spv), "conversionOutRgba8Image",
+                               {workgroupWidth, workgroupHeight}, {1, 1}, {})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalP010Image, m_pipelineLayoutConvertOutImage,
+                               convert_out_image_p010_spv, sizeof(convert_out_image_p010_spv),
+                               "conversionOutP010Image", {workgroupWidth, workgroupHeight}, {1, 1}, {})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalNv12Image, m_pipelineLayoutConvertOutImage,
+                               convert_out_image_nv12_spv, sizeof(convert_out_image_nv12_spv),
+                               "conversionOutNv12Image", {workgroupWidth, workgroupHeight}, {1, 1}, {})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalRgba10Image,
+                               m_pipelineLayoutConvertOutImage, convert_out_image_rgba10_spv,
+                               sizeof(convert_out_image_rgba10_spv), "conversionOutRgba10Image",
+                               {workgroupWidth, workgroupHeight}, {1, 1}, {})) {
         return false;
     }
 
@@ -526,6 +683,7 @@ bool ComputeVulkan::init()
     m_descriptorSetLayouts.horizontal = m_pipelineLayoutHorizontal.descriptorSetLayout;
     m_descriptorSetLayouts.apply = m_pipelineLayoutApply.descriptorSetLayout;
     m_descriptorSetLayouts.conversion = m_pipelineLayoutConversion.descriptorSetLayout;
+    m_descriptorSetLayouts.convertOutImage = m_pipelineLayoutConvertOutImage.descriptorSetLayout;
     m_descriptorSetLayouts.add = m_pipelineLayoutAdd.descriptorSetLayout;
 
     return true;
@@ -633,6 +791,12 @@ bool ComputeVulkan::applyTile(VulkanApplyTileArgs* params)
     constants.tileWidth = params->tileWidth;
     constants.commandOffset = toUint32Units(offset);
     constants.commandCount = buffer.commandCount;
+    const uint32_t applyWidth = constants.tileWidth != 0 ? constants.tileWidth : constants.srcWidth;
+    const uint32_t blocksInRow = (applyWidth + 31u) / 32u;
+    constants.blocksInRowMagic =
+        blocksInRow <= 1u ? 0u : static_cast<uint32_t>(((uint64_t{1} << 32) + blocksInRow - 1u) / blocksInRow);
+    constants.dds = params->dds ? 1 : 0;
+    constants.rasterOrder = params->tuRasterOrder ? 1 : 0;
 
     vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutApply.pipelineLayout,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsApply), &constants);
@@ -681,43 +845,24 @@ bool ComputeVulkan::add(VulkanAddArgs* params)
     return true;
 }
 
-bool ComputeVulkan::conversion(VulkanConversionArgs* params)
+bool ComputeVulkan::convertIn(VulkanConvertInArgs* params)
 {
     PictureVulkan* srcPicture = params->src;
     BufferVulkan* srcBuffer = fromPipeline(srcPicture->buffer);
     const LdpColorFormat srcFormat = ldpPictureLayoutFormat(&srcPicture->layout);
-    const bool srcBit8 = ldpPictureLayoutSampleSize(&srcPicture->layout) == 1;
+    const bool is8bit = ldpPictureLayoutSampleSize(&srcPicture->layout) == 1;
 
     PictureVulkan* dstPicture = params->dst;
     BufferVulkan* dstBuffer = fromPipeline(dstPicture->buffer);
-    const LdpColorFormat dstFormat = ldpPictureLayoutFormat(&dstPicture->layout);
-    const bool dstBit8 = ldpPictureLayoutSampleSize(&dstPicture->layout) == 1;
 
-    const bool is8bit = params->toInternal ? static_cast<int>(srcBit8) : static_cast<int>(dstBit8);
-
-    const bool srcNv12 = srcFormat == LdpColorFormatNV12_8;
-    const bool dstNv12 = dstFormat == LdpColorFormatNV12_8;
-    const bool srcNv21 = srcFormat == LdpColorFormatNV21_8;
-    const bool dstNv21 = dstFormat == LdpColorFormatNV21_8;
-    const bool nv12 = srcNv12 || srcNv21 || dstNv12 || dstNv21;
-
-    int sharpenStrengthInt = 0;
-    if (!params->toInternal) {
-        float strength = params->sharpenStrength;
-        if (strength < 0.0f) {
-            strength = 0.0f;
-        } else if (strength > 1.0f) {
-            strength = 1.0f;
-        }
-        sharpenStrengthInt = static_cast<int>(strength * 65535.0f);
-    }
+    const bool isNv12 = srcFormat == LdpColorFormatNV12_8 || srcFormat == LdpColorFormatNV21_8;
 
     PushConstantsConversion constants{};
 
     constants.width = srcPicture->layout.width;
     constants.height = srcPicture->layout.height;
     constants.shift = 15 - params->bitDepth;
-    constants.sharpenStrength = params->toInternal ? 0 : sharpenStrengthInt;
+    constants.sharpenStrength = 0;
 
     setContainerStrides(constants, 0, srcPicture, dstPicture, nullptr);
 
@@ -725,50 +870,35 @@ bool ComputeVulkan::conversion(VulkanConversionArgs* params)
 
     constants.containerStrideV = 0; // used to signal no nv12
     constants.containerOffsetV = 0;
-    if (params->toInternal) {
-        updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetConversionTo);
 
-        if (is8bit) {
-            context->bind(&m_pipelineLayoutConversion,
-                          nv12 ? &m_pipelineConversionToInternal8BitNV12 : &m_pipelineConversionToInternal8Bit,
-                          context->m_descriptorSetConversionTo);
-        } else {
-            context->bind(&m_pipelineLayoutConversion, &m_pipelineConversionToInternal16Bit,
-                          context->m_descriptorSetConversionTo);
-        }
+    updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetConversionTo);
 
+    if (is8bit) {
+        context->bind(&m_pipelineLayoutConversion,
+                      isNv12 ? &m_pipelineConversionToInternal8BitNV12 : &m_pipelineConversionToInternal8Bit,
+                      context->m_descriptorSetConversionTo);
     } else {
-        updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetConversionFrom);
-
-        if (is8bit) {
-            context->bind(&m_pipelineLayoutConversion,
-                          nv12 ? &m_pipelineConversionFromInternal8BitNV12 : &m_pipelineConversionFromInternal8Bit,
-                          context->m_descriptorSetConversionFrom);
-        } else {
-            context->bind(&m_pipelineLayoutConversion, &m_pipelineConversionFromInternal16Bit,
-                          context->m_descriptorSetConversionFrom);
-        }
+        context->bind(&m_pipelineLayoutConversion, &m_pipelineConversionToInternal16Bit,
+                      context->m_descriptorSetConversionTo);
     }
 
     vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConversion.pipelineLayout,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion), &constants);
 
-    context->dispatch(constants.width, constants.height, "convert_y"); // Y
+    context->dispatch(constants.width, constants.height, "convert_in_y"); // Y
 
     if (params->chroma != LdeChroma::CTMonochrome) {
         int widthShift{};
         int heightShift{};
         getSubsamplingShifts(params->chroma, widthShift, heightShift);
 
-        if (!nv12) {
+        if (!isNv12) {
             constants.width = srcPicture->layout.width >> widthShift;
         } else {
-            // for nv12 src, these will be used as V-plane outputs, otherwise V-plane inputs
-            const PictureVulkan* vPlanePicture = srcNv12 ? dstPicture : srcPicture;
             constants.containerStrideV =
-                toUint32Units(ldpPictureLayoutRowStride(&vPlanePicture->layout, 2));
+                toUint32Units(ldpPictureLayoutRowStride(&dstPicture->layout, 2));
             constants.containerOffsetV =
-                toUint32Units(ldpPictureLayoutPlaneOffset(&vPlanePicture->layout, 2));
+                toUint32Units(ldpPictureLayoutPlaneOffset(&dstPicture->layout, 2));
         }
         const uint32_t chromaHeight = srcPicture->layout.height >> heightShift;
         constants.height = chromaHeight;
@@ -777,14 +907,180 @@ bool ComputeVulkan::conversion(VulkanConversionArgs* params)
 
         vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConversion.pipelineLayout,
                            VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion), &constants);
-        context->dispatch(constants.width, chromaHeight, "convert_u"); // U
+        context->dispatch(constants.width, chromaHeight, "convert_in_u"); // U
 
-        if (!nv12) {
+        if (!isNv12) {
             setContainerStrides(constants, 2, srcPicture, dstPicture, nullptr);
             vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConversion.pipelineLayout,
                                VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion),
                                &constants);
-            context->dispatch(constants.width, chromaHeight, "convert_v"); // V
+            context->dispatch(constants.width, chromaHeight, "convert_in_v"); // V
+        }
+    }
+
+    context->insertComputeBarrier();
+
+    return true;
+}
+
+bool ComputeVulkan::convertOut(VulkanConvertOutArgs* params)
+{
+    PictureVulkan* srcPicture = params->src;
+    PictureVulkan* dstPicture = params->dst;
+    BufferVulkan* dstBuffer = fromPipeline(dstPicture->buffer);
+    const LdpColorFormat dstFormat = ldpPictureLayoutFormat(&dstPicture->layout);
+
+    PushConstantsConversion constants{};
+    constants.width = srcPicture->layout.width;
+    constants.height = srcPicture->layout.height;
+    constants.shift = 15 - params->bitDepth;
+    constants.sharpenStrength =
+        static_cast<uint32_t>(clampF32(params->sharpenStrength, 0.0f, 1.0f) * 65535.0f);
+    setContainerStrides(constants, 0, srcPicture, dstPicture, nullptr);
+
+    // Figure if writing to image or buffer ...
+    const bool dstHasImage = dstBuffer->getVkImage() != VK_NULL_HANDLE;
+    const bool dstIsImageFormat =
+        dstFormat == LdpColorFormatRGBA_8 || dstFormat == LdpColorFormatRGBA_10_2_LE ||
+        dstFormat == LdpColorFormatP010_10 || dstFormat == LdpColorFormatNV12_8;
+    if (dstHasImage && dstIsImageFormat) {
+        return convertOutToImage(params, constants);
+    }
+    return convertOutToBuffer(params, constants);
+}
+
+bool ComputeVulkan::convertOutToImage(VulkanConvertOutArgs* params, PushConstantsConversion& constants)
+{
+    PictureVulkan* srcPicture = params->src;
+    BufferVulkan* srcBuffer = fromPipeline(srcPicture->buffer);
+    PictureVulkan* dstPicture = params->dst;
+    BufferVulkan* dstBuffer = fromPipeline(dstPicture->buffer);
+    const LdpColorFormat dstFormat = ldpPictureLayoutFormat(&dstPicture->layout);
+    VulkanFrameContext* context = params->context;
+
+    const bool dstIsP010Image = dstFormat == LdpColorFormatP010_10;
+    const bool dstIsNv12Image = dstFormat == LdpColorFormatNV12_8;
+    const bool dstIsRgba10Image = dstFormat == LdpColorFormatRGBA_10_2_LE;
+    const bool dstIsTwoPlaneYuvImage = dstIsP010Image || dstIsNv12Image;
+
+    if (params->chroma == LdeChroma::CTMonochrome) {
+        VNLogError("convertOut: VkImage output requires chroma planes");
+        return false;
+    }
+    if (dstBuffer->getVkImageView(0) == VK_NULL_HANDLE ||
+        (dstIsTwoPlaneYuvImage && dstBuffer->getVkImageView(1) == VK_NULL_HANDLE)) {
+        VNLogError("convertOut: VkImage output has no suitable image view");
+        return false;
+    }
+
+    int widthShift{};
+    int heightShift{};
+    getSubsamplingShifts(params->chroma, widthShift, heightShift);
+
+    // The image-output shaders alias `shift`/`sharpenStrength` as the chroma
+    // sub-sampling shifts, and consume all three plane stride/offset slots
+    // straight from the src layout.
+    constants.containerStrideIn = toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, 0));
+    constants.containerOffsetIn = toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, 0));
+    constants.containerStrideOut = toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, 1));
+    constants.containerOffsetOut = toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, 1));
+    constants.containerStrideV = toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, 2));
+    constants.containerOffsetV = toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, 2));
+    constants.shift = static_cast<uint32_t>(widthShift);
+    constants.sharpenStrength = static_cast<uint32_t>(heightShift);
+
+    // Transition the (possibly imported) destination image into GENERAL
+    // layout so the convert-out compute shader can write to it.
+    BufferVulkan::imageLayoutTransition(
+        context->m_commandBuffer, dstBuffer->getVkImage(), VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_GENERAL, /*srcAccess=*/0, VK_ACCESS_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+
+    updateComputeImageDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetConversionFromImage);
+
+    const ComputePipeline* convertOutPipeline = &m_pipelineConversionFromInternalRgba8Image;
+    const char* convertOutLabel = "convert_out_image_rgba8";
+    if (dstIsP010Image) {
+        convertOutPipeline = &m_pipelineConversionFromInternalP010Image;
+        convertOutLabel = "convert_out_image_p010";
+    } else if (dstIsNv12Image) {
+        convertOutPipeline = &m_pipelineConversionFromInternalNv12Image;
+        convertOutLabel = "convert_out_image_nv12";
+    } else if (dstIsRgba10Image) {
+        convertOutPipeline = &m_pipelineConversionFromInternalRgba10Image;
+        convertOutLabel = "convert_out_image_rgba10";
+    }
+    context->bind(&m_pipelineLayoutConvertOutImage, convertOutPipeline,
+                  context->m_descriptorSetConversionFromImage);
+
+    vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConvertOutImage.pipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion), &constants);
+    context->dispatch(constants.width, constants.height, convertOutLabel);
+    context->insertComputeBarrier();
+    return true;
+}
+
+bool ComputeVulkan::convertOutToBuffer(VulkanConvertOutArgs* params, PushConstantsConversion& constants)
+{
+    PictureVulkan* srcPicture = params->src;
+    BufferVulkan* srcBuffer = fromPipeline(srcPicture->buffer);
+    PictureVulkan* dstPicture = params->dst;
+    BufferVulkan* dstBuffer = fromPipeline(dstPicture->buffer);
+    const LdpColorFormat dstFormat = ldpPictureLayoutFormat(&dstPicture->layout);
+    const bool is8bit = ldpPictureLayoutSampleSize(&dstPicture->layout) == 1;
+    const bool nv12 = dstFormat == LdpColorFormatNV12_8 || dstFormat == LdpColorFormatNV21_8;
+    const bool p010 = dstFormat == LdpColorFormatP010_10;
+    const bool semiPlanar = nv12 || p010;
+    VulkanFrameContext* context = params->context;
+
+    constants.containerStrideV = 0; // used to signal no nv12
+    constants.containerOffsetV = 0;
+    updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetConversionFrom);
+
+    if (is8bit) {
+        context->bind(&m_pipelineLayoutConversion,
+                      nv12 ? &m_pipelineConversionFromInternal8BitNV12 : &m_pipelineConversionFromInternal8Bit,
+                      context->m_descriptorSetConversionFrom);
+    } else {
+        context->bind(&m_pipelineLayoutConversion,
+                      p010 ? &m_pipelineConversionFromInternal16BitP010 : &m_pipelineConversionFromInternal16Bit,
+                      context->m_descriptorSetConversionFrom);
+    }
+
+    vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConversion.pipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion), &constants);
+
+    context->dispatch(constants.width, constants.height, "convert_out_y"); // Y
+
+    if (params->chroma != LdeChroma::CTMonochrome) {
+        int widthShift{};
+        int heightShift{};
+        getSubsamplingShifts(params->chroma, widthShift, heightShift);
+
+        if (!semiPlanar) {
+            constants.width = srcPicture->layout.width >> widthShift;
+        } else {
+            constants.containerStrideV =
+                toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, 2));
+            constants.containerOffsetV =
+                toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, 2));
+        }
+        const uint32_t chromaHeight = srcPicture->layout.height >> heightShift;
+        constants.height = chromaHeight;
+        constants.sharpenStrength = 0;
+        setContainerStrides(constants, 1, srcPicture, dstPicture, nullptr);
+        constants.nv21Swap = (is8bit && dstFormat == LdpColorFormatNV21_8) ? 1u : 0u;
+
+        vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConversion.pipelineLayout,
+                           VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion), &constants);
+        context->dispatch(constants.width, chromaHeight, "convert_out_u"); // U
+
+        if (!semiPlanar) {
+            setContainerStrides(constants, 2, srcPicture, dstPicture, nullptr);
+            vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConversion.pipelineLayout,
+                               VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion),
+                               &constants);
+            context->dispatch(constants.width, chromaHeight, "convert_out_v"); // V
         }
     }
 
@@ -991,13 +1287,6 @@ void ComputeVulkan::destroyComputePipeline(ComputePipeline& computePipeline)
 void ComputeVulkan::destroy()
 {
     vkDeviceWaitIdle(m_backend.getDevice());
-    for (int i = 0; i < NUM_PLANES; ++i) {
-#if defined(ANDROID_BUFFERS)
-        AHardwareBuffer_release(srcHardwareBuffer[i]);
-        AHardwareBuffer_release(midHardwareBuffer[i]);
-        AHardwareBuffer_release(dstHardwareBuffer[i]);
-#endif
-    }
 
     for (auto& context : m_frameContexts) {
         context.destroy(m_commandPool);
@@ -1008,6 +1297,7 @@ void ComputeVulkan::destroy()
     destroyComputePipelineLayout(m_pipelineLayoutHorizontal);
     destroyComputePipelineLayout(m_pipelineLayoutApply);
     destroyComputePipelineLayout(m_pipelineLayoutConversion);
+    destroyComputePipelineLayout(m_pipelineLayoutConvertOutImage);
     destroyComputePipelineLayout(m_pipelineLayoutAdd);
 
     destroyComputePipeline(m_pipelineVertical);
@@ -1024,6 +1314,10 @@ void ComputeVulkan::destroy()
     destroyComputePipeline(m_pipelineConversionToInternal8BitNV12);
     destroyComputePipeline(m_pipelineConversionFromInternal16Bit);
     destroyComputePipeline(m_pipelineConversionToInternal16Bit);
+    destroyComputePipeline(m_pipelineConversionFromInternalRgba8Image);
+    destroyComputePipeline(m_pipelineConversionFromInternalRgba10Image);
+    destroyComputePipeline(m_pipelineConversionFromInternalP010Image);
+    destroyComputePipeline(m_pipelineConversionFromInternalNv12Image);
     destroyComputePipeline(m_pipelineAdd);
 }
 

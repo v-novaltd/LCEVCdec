@@ -24,6 +24,7 @@ venv
 CMakeUserPresets.json
 conan_imports_manifest.txt
 imgui.ini
+/*.yuv
 
 .gitbranch
 .gitdate

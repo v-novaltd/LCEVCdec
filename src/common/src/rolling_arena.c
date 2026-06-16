@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -26,7 +26,7 @@
 #include <string.h>
 
 // Minimum alignment of allocations in bytes
-#define kMinAlignment 64
+#define VN_MIN_ALIGNMENT 64
 
 static const LdcMemoryAllocatorFunctions kRollingArenaFunctions;
 
@@ -71,7 +71,7 @@ static void rollingArenaAddBuffer(LdcMemoryAllocatorRollingArena* arena, uint32_
     VNMetricUInt32("allocatedBufferSize", arena->allocatedBufferSize);
 
     // Allocate the new memory buffer
-    VNAllocateAlignedArray(arena->parentAllocator, &buffer->memory, uint8_t, kMinAlignment,
+    VNAllocateAlignedArray(arena->parentAllocator, &buffer->memory, uint8_t, VN_MIN_ALIGNMENT,
                            bufferSize, "RollingArenaBuffer");
     VNCheck(VNIsAllocated(buffer->memory));
     buffer->allocationCount = 0;
@@ -84,7 +84,7 @@ static void rollingArenaAddBuffer(LdcMemoryAllocatorRollingArena* arena, uint32_
 }
 
 LdcMemoryAllocator* ldcRollingArenaInitialize(LdcMemoryAllocatorRollingArena* rollingArenaAllocator,
-                                              LdcMemoryAllocator* bufferCount,
+                                              LdcMemoryAllocator* parentAllocator,
                                               uint32_t initialCount, uint32_t initialSize)
 {
     VNCheck(VNIsPowerOfTwo(initialCount));
@@ -100,7 +100,7 @@ LdcMemoryAllocator* ldcRollingArenaInitialize(LdcMemoryAllocatorRollingArena* ro
     // Configure the arena
     VNClear(arena);
     arena->allocator.functions = &kRollingArenaFunctions;
-    arena->parentAllocator = bufferCount;
+    arena->parentAllocator = parentAllocator;
     VNCheck(threadMutexInitialize(&arena->mutex) == ThreadResultSuccess);
 
     // Initialise slot table
@@ -146,7 +146,7 @@ static inline void* internalAllocate(LdcMemoryAllocator* allocator, LdcMemoryAll
     assert(size > 0);
 
     // Extra size for alignment
-    uintptr_t align = (allocation->alignment > kMinAlignment) ? allocation->alignment : kMinAlignment;
+    uintptr_t align = (allocation->alignment > VN_MIN_ALIGNMENT) ? allocation->alignment : VN_MIN_ALIGNMENT;
     const size_t alignedSize = size + align - 1;
 
     // Get buffer region
@@ -179,7 +179,7 @@ static inline void* internalAllocate(LdcMemoryAllocator* allocator, LdcMemoryAll
             }
             rollingArenaAddBuffer(arena, nextSize);
         }
-    } while (offset == ~0);
+    } while (offset == (uint32_t)~0);
 
     // Get slot for this allocation
     if (((arena->slotFront + 1) & arena->slotsMask) == arena->slotBack) {
@@ -203,6 +203,8 @@ static inline void* internalAllocate(LdcMemoryAllocator* allocator, LdcMemoryAll
     arena->slots[slot].bufferIndex = arena->bufferCount - 1;
 #if VN_SDK_FEATURE(MEMORY_DIAGNOSTICS)
     arena->slots[slot].site = site;
+#else
+    VNUnused(site);
 #endif
     // Mark active buffer as having another allocation
     arena->buffers[arena->bufferCount - 1].allocationCount++;
@@ -219,8 +221,7 @@ static inline void* internalAllocate(LdcMemoryAllocator* allocator, LdcMemoryAll
     return ptr;
 }
 
-static inline void internalFree(LdcMemoryAllocator* allocator, LdcMemoryAllocation* allocation,
-                                const LdcDiagSite* site)
+static inline void internalFree(LdcMemoryAllocator* allocator, const LdcMemoryAllocation* allocation)
 {
     assert(allocator);
     assert(allocation);
@@ -246,10 +247,11 @@ static inline void internalFree(LdcMemoryAllocator* allocator, LdcMemoryAllocati
         // Allocation is in active buffer ...
         if (beginOffset == arena->bufferBack) {
             // Oldest slot in active buffer  - bump buffer back over empty slots
-            uint32_t s = slot;
-            while (s != arena->slotFront && (arena->slots[s].beginOffset == arena->slots[s].endOffset)) {
-                arena->bufferBack = arena->slots[s].endOffset;
-                s = (s + 1) & arena->slotsMask;
+            uint32_t curSlot = slot;
+            while (curSlot != arena->slotFront &&
+                   (arena->slots[curSlot].beginOffset == arena->slots[curSlot].endOffset)) {
+                arena->bufferBack = arena->slots[curSlot].endOffset;
+                curSlot = (curSlot + 1) & arena->slotsMask;
             }
         }
     }
@@ -305,10 +307,11 @@ static void rollingArenaFree(LdcMemoryAllocator* allocator, LdcMemoryAllocation*
 {
     assert(allocator);
     assert(allocation);
+    VNUnused(site);
     LdcMemoryAllocatorRollingArena* arena = (LdcMemoryAllocatorRollingArena*)allocator;
     threadMutexLock(&arena->mutex);
 
-    internalFree(allocator, allocation, site);
+    internalFree(allocator, allocation);
 
     arena->allocatedBytes -= (uint32_t)allocation->size;
     arena->allocations -= 1;
@@ -362,7 +365,7 @@ static void rollingArenaReallocate(LdcMemoryAllocator* allocator, LdcMemoryAlloc
         memcpy(newPtr, allocation->ptr, preservedSize);
 
         // Release old slot
-        internalFree(allocator, allocation, site);
+        internalFree(allocator, allocation);
 
         // Update allocation
         *allocation = newAllocation;

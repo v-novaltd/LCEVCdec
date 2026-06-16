@@ -12,9 +12,4 @@
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
-if (NOT ANDROID_VENDOR)
-    set_target_properties(lcevc_dec::platform PROPERTIES INTERFACE_LINK_LIBRARIES "android;EGL;z")
-else ()
-    set_target_properties(lcevc_dec::platform PROPERTIES INTERFACE_LINK_LIBRARIES
-                                                         "nativewindow;EGL;z")
-endif ()
+set_target_properties(lcevc_dec::platform PROPERTIES INTERFACE_LINK_LIBRARIES "android;z")

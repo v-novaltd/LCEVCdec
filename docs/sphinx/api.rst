@@ -121,6 +121,8 @@ For a list of options settable with this function, see :ref:`configurable option
 
 .. doxygenfunction:: LCEVC_PeekDecoder
 
+.. doxygenfunction:: LCEVC_PeekDecoderPictureDesc
+
 .. doxygenfunction:: LCEVC_SkipDecoder
 
 .. doxygenfunction:: LCEVC_SynchronizeDecoder
@@ -158,8 +160,10 @@ Option                      Type       Default          Description
                                                         Debugger (e.g. the Visual Studio console).
 ``disable_simd``            boolean    false            If true, no SIMD (SSE, NEON, etc.) will be used.
 ``passthrough_mode``        int        0                Determines if the Decoder runs in passthrough mode never (-1),
-                                                        always (1), or only when LCEVC Enhancement data is missing (0).
-                                                        Passthrough mode means that no LCEVC is applied whatsoever: the
+                                                        always (1), only when LCEVC Enhancement data is missing (0), or
+                                                        when LCEVC Enhancement data is missing but with upscaling still
+                                                        applied such that the output resolution does not drop (2).
+                                                        Passthrough mode means that no LCEVC enhancement applied: the
                                                         base is simply copied to the output picture.
 ``default_max_reorder``     int        16               The number of frames to buffer in the re-ordering queue. Can be
                                                         set lower for latency-critical applications where b-frames are
@@ -199,10 +203,10 @@ Option                      Type       Default          Description
 =========================== ========== ================ ===============================================================
 ``vulkan_device``           int        -1               If greater or equal to zero - choose the indexed Vulkan device,
                                                         otherwise choose the 'best' device.
-``vulkan_validation``       boolean    isDebugBuild     True if any available Vulkan vaildation layer should be used.
+``vulkan_validation``       boolean    isDebugBuild     True if any available Vulkan validation layer should be used.
 ``vulkan_timestamps``       int        0                If greater than 0, the number of shader timestamps to record
                                                         and report in Debug log.
-``vulkan_contexts``         int        4                The number of distinct coupule contexts that can be in-flight.
+``vulkan_contexts``         int        4                The number of distinct Vulkan contexts that can be in-flight.
 ``will_render``             bool       false            Informs the Vulkan pipeline at initialization to setup for
 =========================== ========== ================ ===============================================================
 
@@ -256,7 +260,7 @@ Note that, even at the Verbose level, some types of logs should *never* be seen.
 
 At the Debug and Verbose level, timestamps are provided in nanoseconds. At all other levels, timestamps are provided in microseconds.
 
-Logging is enabled as soon as the ``log_level`` option is set. The ``LCEVC_CreateDecoder`` function cannot produce any logging messages - it will ony allocate memory, and use its the return code to show success. The real work of creating the decoder will happen during ``LCEVC_InitializeDecoder``, and will produce the requested diagnostics and status through the configured logging.
+Logging is enabled as soon as the ``log_level`` option is set. The ``LCEVC_CreateDecoder`` function cannot produce any logging messages - it will only allocate memory, and use its return code to show success. The real work of creating the decoder will happen during ``LCEVC_InitializeDecoder``, and will produce the requested diagnostics and status through the configured logging.
 
 ``events``
 ..........

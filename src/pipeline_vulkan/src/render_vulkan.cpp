@@ -22,8 +22,12 @@
 #include "render_fragment.h"
 #include "render_vertex.h"
 
+#include <LCEVC/build_config.h>
 #include <LCEVC/pipeline_vulkan/types_vulkan.h>
 #include <LCEVC/pixel_processing/dither.h>
+#if VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
+#include <zlib.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -93,6 +97,7 @@ struct UniformBufferObject
     int ditherEnabled;
     int ditherShift;
     int ditherBufferSize;
+    int limitedRange;
 };
 
 const std::vector<Vertex> g_vertices = {{{-1.0f, -1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
@@ -517,6 +522,24 @@ bool RenderVulkan::createRenderPass()
 
 VkShaderModule RenderVulkan::createShaderModule(const unsigned char* code, size_t size)
 {
+#if VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
+    std::vector<uint8_t> decompressed;
+    if (size >= 4) {
+        uint32_t firstWord;
+        memcpy(&firstWord, code, 4);
+        if (firstWord != 0x07230203u) {
+            decompressed.resize(firstWord);
+            uLongf len = firstWord;
+            if (uncompress(decompressed.data(), &len, code + 4, static_cast<uLong>(size - 4)) != Z_OK) {
+                VNLogError("failed to decompress shader module!");
+                return VK_NULL_HANDLE;
+            }
+            code = reinterpret_cast<const unsigned char*>(decompressed.data());
+            size = static_cast<size_t>(len);
+        }
+    }
+#endif
+
     VkShaderModuleCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = size;
@@ -1061,6 +1084,7 @@ void RenderVulkan::updateUniformBuffer(uint32_t currentImage)
     ubo.ditherEnabled = m_ditherEnabled;
     ubo.ditherShift = m_ditherShift;
     ubo.ditherBufferSize = m_ditherBufferSize;
+    ubo.limitedRange = m_limitedRange;
 
 #if VN_OS(ANDROID)
     float c = 0.0f;

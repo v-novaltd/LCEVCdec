@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -41,7 +41,7 @@ typedef struct LdcTaskPool
     // Number of not done tasks
     uint32_t pendingTaskCount;
 
-    // True if multithreaded - tasks are handled by seperate thread workers
+    // True if multithreaded - tasks are handled by separate thread workers
     bool multiThreaded;
 
     // Thread workers are running
@@ -185,7 +185,7 @@ typedef struct LdcTaskGroup
     uint32_t blockedTasksCount;
     LdcTask* blockedTasks;
 
-    // Reserved dependcy slots
+    // Reserved dependency slots
     uint32_t dependenciesReserved;
 
     // Allocation for dependency data

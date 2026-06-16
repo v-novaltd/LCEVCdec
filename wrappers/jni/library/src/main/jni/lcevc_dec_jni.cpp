@@ -12,42 +12,97 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include "lcevc_dec_jni.h"
-
 #include <android/log.h>
+#include <android/native_window_jni.h>
 #include <LCEVC/extract/extract.h>
 #include <LCEVC/lcevc_dec.h>
+#include <sys/system_properties.h>
+#include <unistd.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <mutex>
-#include <string_view>
-#include <thread>
 #include <unordered_map>
+#include <vector>
 
-constexpr const char* TAG = "LCEVCdec";
+constexpr const char* DEC_TAG = "LCEVCdec";
+constexpr const char* JNI_TAG = "lcevc_dec_jni";
 
-// save Java VM context
-static JavaVM* gJavaVM = nullptr;
-static jobject gClassLoader = nullptr;
-static jmethodID gFindClassMethod = nullptr;
-static jclass gDecoderInfoClass = nullptr;
-static jobject gDecoderInfoObject = nullptr;
-static jstring gDecoderInfoClassNameJS = nullptr;
-static std::string gDecoderInfoClassName = std::string(QUOTE(JAVA_PACKAGE_NAME)) +
-                                           std::string("_") + std::string(QUOTE(JAVA_CLASS_NAME)) +
-                                           std::string("$") + std::string("DecodeInformation");
+constexpr const char* kColorParamsClassName =
+    "com/vnova/lcevc/decoder/dec/LcevcNativeAdapter$ColorParams";
+constexpr const char* kDecoderInfoClassName =
+    "com/vnova/lcevc/decoder/dec/LcevcNativeAdapter$DecodeInformation";
 
-static jstring gColorParamsClassNameJS = nullptr;
-static std::string gColorParamsClassName = std::string(QUOTE(JAVA_PACKAGE_NAME)) +
-                                           std::string("_") + std::string(QUOTE(JAVA_CLASS_NAME)) +
-                                           std::string("$") + std::string("ColorParams");
-static std::string gColorParamsFieldName = "";
+#define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, JNI_TAG, __VA_ARGS__))
+#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN, JNI_TAG, __VA_ARGS__))
+#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, JNI_TAG, __VA_ARGS__))
+#define LOGD(...) ((void)__android_log_print(ANDROID_LOG_DEBUG, JNI_TAG, __VA_ARGS__))
+#define LOGV(...) ((void)__android_log_print(ANDROID_LOG_VERBOSE, JNI_TAG, __VA_ARGS__))
 
-static std::mutex gPictureMapMutex;
-static std::unordered_map<uintptr_t, LCEVC_DecoderHandle> gPictureDecoderMap;
+#define NATIVE_FUNC(RETURN_TYPE, NAME, ...)                                                      \
+    extern "C" JNIEXPORT RETURN_TYPE Java_com_vnova_lcevc_decoder_dec_LcevcNativeAdapter_##NAME( \
+        JNIEnv* env, jobject thiz, ##__VA_ARGS__)
+
+constexpr android_LogPriority logLevelCharToAndroidLogLevel(char level)
+{
+    switch (level) {
+        case '1': return ANDROID_LOG_FATAL;
+        case '2': return ANDROID_LOG_ERROR;
+        case '3': return ANDROID_LOG_WARN;
+        case '4': return ANDROID_LOG_INFO;
+        case '5': return ANDROID_LOG_DEBUG;
+        case '6': return ANDROID_LOG_VERBOSE;
+        default: return ANDROID_LOG_UNKNOWN;
+    }
+}
+
+void logEventCallback(LCEVC_DecoderHandle, LCEVC_Event event, LCEVC_PictureHandle,
+                      const LCEVC_DecodeInformation*, const uint8_t* data, uint32_t dataSize, void*)
+{
+    if (event != LCEVC_Log) {
+        return;
+    }
+    const std::string_view messageWithLevel(reinterpret_cast<const char*>(data), dataSize);
+    const android_LogPriority level = logLevelCharToAndroidLogLevel(messageWithLevel.at(0));
+    const std::string_view message = messageWithLevel.substr(2);
+    __android_log_print(level, DEC_TAG, "%s", message.data());
+}
+
+bool checkJniException(JNIEnv* env)
+{
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe(); // writes to logcat
+        env->ExceptionClear();
+        return true;
+    }
+    return false;
+}
+
+static void setIntField(JNIEnv* env, jobject object, jclass cls, const char* name, jint value)
+{
+    const jfieldID fieldId = env->GetFieldID(cls, name, "I");
+    env->SetIntField(object, fieldId, value);
+}
+
+static void setFloatField(JNIEnv* env, jobject object, jclass cls, const char* name, jfloat value)
+{
+    const jfieldID fieldId = env->GetFieldID(cls, name, "F");
+    env->SetFloatField(object, fieldId, value);
+}
+
+static void getIntField(JNIEnv* env, jobject object, jclass cls, const char* name, uint32_t& value)
+{
+    const jfieldID fieldId = env->GetFieldID(cls, name, "I");
+    value = static_cast<uint32_t>(env->GetIntField(object, fieldId));
+}
+
+static void getFloatField(JNIEnv* env, jobject object, jclass cls, const char* name, float& value)
+{
+    const jfieldID fieldId = env->GetFieldID(cls, name, "F");
+    value = static_cast<float>(env->GetFloatField(object, fieldId));
+}
 
 static uint32_t greatestCommonDivisor(uint32_t a, uint32_t b)
 {
@@ -77,27 +132,23 @@ static void setSampleAspectRatioFromPixelAspectRatio(float pixelAspectRatio, uin
     den /= gcd;
 }
 
-void logEventCallback(LCEVC_DecoderHandle, LCEVC_Event event, LCEVC_PictureHandle,
-                      const LCEVC_DecodeInformation*, const uint8_t* data, uint32_t dataSize, void*)
+// Client context for decoder instance and callback metadata
+struct ClientContext
 {
-    if (event != LCEVC_Log) {
-        return;
-    }
-    const std::string_view messageWithLevel(reinterpret_cast<const char*>(data), dataSize);
-    const android_LogPriority level = logLevelCharToAndroidLogLevel(messageWithLevel.at(0));
-    const std::string_view message = messageWithLevel.substr(2);
-    __android_log_print(level, TAG, "%s", message.data());
-}
+    LCEVC_DecoderHandle decoder = {0};
+    jobject client = nullptr;
+    ANativeWindow* nativeWindow = nullptr;
+};
 
-bool checkJniException(JNIEnv* env)
-{
-    if (env->ExceptionCheck()) {
-        env->ExceptionDescribe(); // writes to logcat
-        env->ExceptionClear();
-        return true;
-    }
-    return false;
-}
+// save Java VM context
+static jobject gClassLoader = nullptr;
+static jmethodID gFindClassMethod = nullptr;
+static jclass gDecoderInfoClass = nullptr;
+static jobject gDecoderInfoObject = nullptr;
+static jstring gDecoderInfoClassNameJS = nullptr;
+
+static std::mutex gPictureMapMutex;
+static std::unordered_map<uintptr_t, LCEVC_DecoderHandle> gPictureDecoderMap;
 
 // we need this to be called in the JNI_Onload function
 // because we need to create a class, on a different thread and FindClass only
@@ -123,36 +174,27 @@ static jclass findClass(JNIEnv* env, jstring name)
     return static_cast<jclass>(env->CallObjectMethod(gClassLoader, gFindClassMethod, name));
 }
 
-static void setJavaDecodeInformationFromLcevc(JNIEnv* env, jclass cls, jobject jInfo,
-                                              const LCEVC_DecodeInformation* info)
+static bool setJavaDecodeInformation(JNIEnv* env, jclass cls, jobject jInfo,
+                                     LCEVC_DecoderHandle decoder, jlong timestamp)
 {
-    if (info != nullptr) {
-        jfieldID fieldId;
-        SET_INT_FIELD(jInfo, cls, "width", info->baseWidth);
-        SET_INT_FIELD(jInfo, cls, "height", info->baseHeight);
-        SET_FLOAT_FIELD(jInfo, cls, "sarNum", 1.0f);
-        SET_FLOAT_FIELD(jInfo, cls, "sarDen", 1.0f);
-        SET_INT_FIELD(jInfo, cls, "bitdepth", info->baseBitdepth);
-        SET_BOOL_FIELD(jInfo, cls, "skipRequested", info->skipped);
-        SET_BOOL_FIELD(jInfo, cls, "lcevcEnhanced", info->enhanced);
-        SET_BOOL_FIELD(jInfo, cls, "lcevcAvailable", info->hasEnhancement);
-    }
-}
-
-static void setJavaDecodeInformationSarFromPicture(JNIEnv* env, jclass cls, jobject jInfo,
-                                                   LCEVC_DecoderHandle decoder, LCEVC_PictureHandle picture)
-{
-    jfieldID fieldId;
+    const uint64_t timestampU64 = static_cast<uint64_t>(timestamp);
 
     LCEVC_PictureDesc desc = {};
-    if (picture.hdl != 0 && LCEVC_GetPictureDesc(decoder, picture, &desc) == LCEVC_Success) {
-        SET_FLOAT_FIELD(jInfo, cls, "sarNum", static_cast<float>(desc.sampleAspectRatioNum));
-        SET_FLOAT_FIELD(jInfo, cls, "sarDen", static_cast<float>(desc.sampleAspectRatioDen));
-        return;
+    LCEVC_ReturnCode peekPictureDescRet = LCEVC_PeekDecoderPictureDesc(decoder, timestampU64, &desc);
+    if (peekPictureDescRet != LCEVC_Success) {
+        LOGE("setJavaDecodeInformation: LCEVC_PeekDecoderPictureDesc failed with %d", peekPictureDescRet);
+        return false;
     }
+    LOGD("setJavaDecodeInformation: LCEVC_PeekDecoderPictureDesc reported width=%u height=%u "
+         "sarNum=%u sarDen=%u",
+         desc.width, desc.height, desc.sampleAspectRatioNum, desc.sampleAspectRatioDen);
 
-    SET_FLOAT_FIELD(jInfo, cls, "sarNum", 1.0f);
-    SET_FLOAT_FIELD(jInfo, cls, "sarDen", 1.0f);
+    setIntField(env, jInfo, cls, "width", static_cast<jint>(desc.width));
+    setIntField(env, jInfo, cls, "height", static_cast<jint>(desc.height));
+    setFloatField(env, jInfo, cls, "sarNum", static_cast<float>(desc.sampleAspectRatioNum));
+    setFloatField(env, jInfo, cls, "sarDen", static_cast<float>(desc.sampleAspectRatioDen));
+
+    return true;
 }
 
 static bool createJavaDecodeInformation(JNIEnv* env, jclass& decodeClass, jobject& decodeObject)
@@ -163,37 +205,16 @@ static bool createJavaDecodeInformation(JNIEnv* env, jclass& decodeClass, jobjec
         if (constr != nullptr) {
             decodeObject = env->NewObject(decodeClass, constr);
             if (decodeObject == nullptr) {
-                LOGE("Failed NewObject");
+                LOGE("createJavaDecodeInformation: Failed NewObject");
             }
         } else {
-            LOGE("Failed GetMethodID for init");
+            LOGE("createJavaDecodeInformation: Failed GetMethodID for init");
         }
     } else {
-        LOGE("Failed FindClass");
+        LOGE("createJavaDecodeInformation: Failed FindClass");
     }
     checkJniException(env);
     return decodeObject != nullptr;
-}
-
-static jobject createJavaColorParams(JNIEnv* env)
-{
-    jobject ret = nullptr;
-    jfieldID fID;
-    const jclass cls = findClass(env, gColorParamsClassNameJS);
-    if (cls != nullptr) {
-        jmethodID constr = env->GetMethodID(cls, "<init>", "()V");
-        if (constr != nullptr) {
-            if ((ret = env->NewObject(cls, constr)) == nullptr) {
-                LOGE("Failed NewObject");
-            }
-        } else {
-            LOGE("Failed GetMethodID for init");
-        }
-    } else {
-        LOGE("Failed FindClass");
-    }
-    checkJniException(env);
-    return ret;
 }
 
 static int sdkVersion()
@@ -324,29 +345,69 @@ inline int64_t getPtsFromUniqueTimestamp(const uint64_t timestamp)
     return encodedPts - (1LL << 47);
 }
 
+void notifyPictureReleased(JNIEnv* env, jlong instance, ClientContext* context,
+                           LCEVC_ReturnCode result, uint64_t timestamp, LCEVC_PictureHandle picture)
+{
+    jobject client = env->NewLocalRef(context->client);
+    if (client == nullptr) {
+        return;
+    }
+
+    jclass cls = env->GetObjectClass(client);
+    jmethodID methodID = env->GetMethodID(cls, "onPictureReleased", "(JIJJJ)V");
+    if (methodID != nullptr) {
+        env->CallVoidMethod(client, methodID, static_cast<jlong>(instance), static_cast<jint>(result),
+                            static_cast<jlong>(timestamp), static_cast<jlong>(picture.hdl),
+                            static_cast<jlong>(getPtsFromUniqueTimestamp(timestamp)));
+    } else {
+        LOGE("notifyPictureReleased: failed to find onPictureReleased");
+    }
+    env->DeleteLocalRef(client);
+    checkJniException(env);
+}
+
+LCEVC_ReturnCode receiveDecoderPictureAndNotify(JNIEnv* env, jlong instance, ClientContext* context,
+                                                uint64_t fallbackTimestamp,
+                                                LCEVC_PictureHandle expectedPicture, const char* operation)
+{
+    LCEVC_PictureHandle decodedPicture{};
+    LCEVC_DecodeInformation decodeInformation{};
+    const LCEVC_ReturnCode ret =
+        LCEVC_ReceiveDecoderPicture(context->decoder, &decodedPicture, &decodeInformation);
+    if (ret != LCEVC_Success && ret != LCEVC_Flushed) {
+        return ret;
+    }
+
+    if (expectedPicture.hdl != 0 && decodedPicture.hdl != expectedPicture.hdl) {
+        LOGW("receiveDecoderPictureAndNotify: %s received picture %lu, expected %lu", operation,
+             static_cast<unsigned long>(decodedPicture.hdl),
+             static_cast<unsigned long>(expectedPicture.hdl));
+    }
+
+    const uint64_t callbackTimestamp =
+        decodeInformation.timestamp != 0 ? decodeInformation.timestamp : fallbackTimestamp;
+    LOGD("receiveDecoderPictureAndNotify: %s received decoder picture %lu", operation,
+         static_cast<unsigned long>(decodedPicture.hdl));
+    notifyPictureReleased(env, instance, context, ret, callbackTimestamp, decodedPicture);
+    return ret;
+}
+
 jint JNI_OnLoad(JavaVM* vm, void* reserved)
 {
     JNIEnv* env;
-    LOGD("JNI_OnLoad, starting VM: %p", vm);
+    LOGD("JNI_OnLoad: starting VM: %p", vm);
     if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
         return -1;
     }
 
-    gJavaVM = vm;
-
-    std::replace(gColorParamsClassName.begin(), gColorParamsClassName.end(), '_', '/');
-    gColorParamsClassNameJS =
-        reinterpret_cast<jstring>(env->NewGlobalRef(env->NewStringUTF(gColorParamsClassName.c_str())));
-    gColorParamsFieldName = "L" + gColorParamsClassName + ";";
-    std::replace(gDecoderInfoClassName.begin(), gDecoderInfoClassName.end(), '_', '/');
     gDecoderInfoClassNameJS =
-        reinterpret_cast<jstring>(env->NewGlobalRef(env->NewStringUTF(gDecoderInfoClassName.c_str())));
-    getClassLoader(env, gDecoderInfoClassName.c_str()); // setup the global class loader
+        reinterpret_cast<jstring>(env->NewGlobalRef(env->NewStringUTF(kDecoderInfoClassName)));
+    getClassLoader(env, kDecoderInfoClassName); // setup the global class loader
 
     createJavaDecodeInformation(env, gDecoderInfoClass, gDecoderInfoObject);
     gDecoderInfoClass = reinterpret_cast<jclass>(env->NewGlobalRef(gDecoderInfoClass));
     gDecoderInfoObject = reinterpret_cast<jobject>(env->NewGlobalRef(gDecoderInfoObject));
-    LOGD("JNI_OnLoad, running API level %d, decoder info c lass %p object %p", sdkVersion(),
+    LOGD("JNI_OnLoad: running API level %d, decoder info c lass %p object %p", sdkVersion(),
          gDecoderInfoClass, gDecoderInfoObject);
 
     return JNI_VERSION_1_6;
@@ -354,7 +415,7 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved)
 
 NATIVE_FUNC(jlong, lcevcCreateDecoder)
 {
-    LOGI("LCEVCdec JNI lcevcCreateDecoder");
+    LOGV("lcevcCreateDecoder: entering");
 
     ClientContext* context = new ClientContext(); // Zero initialised
 
@@ -363,6 +424,7 @@ NATIVE_FUNC(jlong, lcevcCreateDecoder)
 
     LCEVC_ReturnCode ret = LCEVC_CreateDecoder(&context->decoder, LCEVC_AccelContextHandle{});
     LCEVC_ConfigureDecoderInt(context->decoder, "threads", 2);
+    LCEVC_ConfigureDecoderInt(context->decoder, "passthrough_mode", 2);
     LCEVC_ConfigureDecoderString(context->decoder, "pipeline", "vulkan");
     LCEVC_ConfigureDecoderBool(context->decoder, "will_render", true);
 
@@ -376,9 +438,9 @@ NATIVE_FUNC(jlong, lcevcCreateDecoder)
     }
 
     if (ret == LCEVC_Success) {
-        LOGD("Created decoder context %p", context);
-        LOGI("Using LCEVCdec version %d.%d.%d", LCEVC_DEC_VERSION_MAJOR, LCEVC_DEC_VERSION_MINOR,
-             LCEVC_DEC_VERSION_PATCH);
+        LOGD("lcevcCreateDecoder: Created decoder context %p", context);
+        LOGI("lcevcCreateDecoder: Using LCEVCdec version %d.%d.%d", LCEVC_DEC_VERSION_MAJOR,
+             LCEVC_DEC_VERSION_MINOR, LCEVC_DEC_VERSION_PATCH);
         return reinterpret_cast<jlong>(context);
     }
 
@@ -387,7 +449,7 @@ NATIVE_FUNC(jlong, lcevcCreateDecoder)
 
 NATIVE_FUNC(jint, lcevcDestroyDecoder, jlong instance)
 {
-    LOGI("LCEVCdec JNI Destroy");
+    LOGV("lcevcDestroyDecoder: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
     if (context == nullptr) {
@@ -424,10 +486,13 @@ NATIVE_FUNC(jint, lcevcDestroyDecoder, jlong instance)
     return LCEVC_Success;
 }
 
-NATIVE_FUNC(jint, lcevcSendDecoderBase, jlong instance, jlong timeStamp, jlong timeoutUs,
-            jlong inputPictureHandle, jlong outputPictureHandle)
+NATIVE_FUNC(jint, lcevcSendDecoderBase, jlong instance, jlong timeStamp, jlong inputPictureHandle,
+            jlong outputPictureHandle)
 {
-    LOGI("LCEVCdec JNI lcevcSendDecoderBase");
+    // Always wait for send call to finish rather than letting it timeout.
+    constexpr uint32_t kSendBaseTimeout = std::numeric_limits<uint32_t>::max();
+
+    LOGV("lcevcSendDecoderBase: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
     if (context == nullptr) {
@@ -436,45 +501,47 @@ NATIVE_FUNC(jint, lcevcSendDecoderBase, jlong instance, jlong timeStamp, jlong t
     LCEVC_PictureHandle const inputPicture = {static_cast<uintptr_t>(inputPictureHandle)};
     LCEVC_PictureHandle const outputPicture = {static_cast<uintptr_t>(outputPictureHandle)};
 
-    LOGD("sendBase: timeStamp %" PRId64 " input %lu, output %lu", timeStamp,
+    LOGD("lcevcSendDecoderBase: timeStamp %" PRId64 " input %lu, output %lu", timeStamp,
          static_cast<unsigned long>(inputPicture.hdl), static_cast<unsigned long>(outputPicture.hdl));
-
-    uint32_t timeout = static_cast<uint32_t>(timeoutUs);
     LCEVC_ReturnCode ret =
-        LCEVC_SendDecoderBase(context->decoder, timeStamp, inputPicture, timeout, nullptr);
+        LCEVC_SendDecoderBase(context->decoder, timeStamp, inputPicture, kSendBaseTimeout, nullptr);
     if (ret != LCEVC_Success) {
-        LOGE("SendBase returned %d", ret);
+        LOGE("lcevcSendDecoderBase: LCEVC_SendDecoderBase returned %d", ret);
         return ret;
     }
 
     ret = LCEVC_SendDecoderPicture(context->decoder, outputPicture);
     if (ret != LCEVC_Success) {
-        LOGE("SendOutput returned %d", ret);
+        LOGE("lcevcSendDecoderBase: LCEVC_SendDecoderPicture returned %d", ret);
         return ret;
     }
 
     jobject client = env->NewLocalRef(context->client);
     if (client != nullptr) {
         jclass cls = env->GetObjectClass(client);
-        std::string methodSig = std::string("(JIJ") + "L" + gDecoderInfoClassName + ";)V";
+        std::string methodSig = std::string("(JIJ") + "L" + kDecoderInfoClassName + ";)V";
         jmethodID methodID = env->GetMethodID(cls, "onDecodeCompleted", methodSig.c_str());
         if (methodID != nullptr) {
-            LCEVC_DecodeInformation const decodeInformation = {};
-            setJavaDecodeInformationFromLcevc(env, gDecoderInfoClass, gDecoderInfoObject, &decodeInformation);
-            setJavaDecodeInformationSarFromPicture(env, gDecoderInfoClass, gDecoderInfoObject,
-                                                   context->decoder, outputPicture);
-            env->CallVoidMethod(client, methodID, static_cast<jlong>(instance),
-                                static_cast<jint>(LCEVC_Success), static_cast<jlong>(timeStamp),
-                                gDecoderInfoObject);
+            if (setJavaDecodeInformation(env, gDecoderInfoClass, gDecoderInfoObject,
+                                         context->decoder, timeStamp)) {
+                env->CallVoidMethod(client, methodID, static_cast<jlong>(instance),
+                                    static_cast<jint>(LCEVC_Success), timeStamp, gDecoderInfoObject);
+            } else {
+                LOGE("lcevcSendDecoderBase: failed to set decode information");
+            }
         } else {
-            LOGE("LCEVCdec JNI lcevcSendDecoderBase: failed to find onDecodeCompleted");
+            LOGE("lcevcSendDecoderBase: failed to find onDecodeCompleted");
         }
         env->DeleteLocalRef(client);
     }
 
     LCEVC_PictureHandle doneBasePicture;
-    if (LCEVC_ReceiveDecoderBase(context->decoder, &doneBasePicture) == LCEVC_Success) {
-        LOGD("ReceiveDecoderBase");
+
+    if (const int result = LCEVC_ReceiveDecoderBase(context->decoder, &doneBasePicture);
+        result != LCEVC_Success) {
+        LOGW("lcevcSendDecoderBase: LCEVC_ReceiveDecoderBase returned %d", result);
+    } else {
+        LOGD("lcevcSendDecoderBase: LCEVC_ReceiveDecoderBase returned success");
     }
 
     return 0;
@@ -483,7 +550,7 @@ NATIVE_FUNC(jint, lcevcSendDecoderBase, jlong instance, jlong timeStamp, jlong t
 NATIVE_FUNC(jint, lcevcRenderSendPicture, jlong instance, jlong timeStamp, jlong pictureHandle,
             jobject renderInfo, jlong delayUs)
 {
-    LOGI("LCEVCdec JNI Render");
+    LOGV("lcevcRenderSendPicture: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
     if (context == nullptr) {
@@ -495,20 +562,30 @@ NATIVE_FUNC(jint, lcevcRenderSendPicture, jlong instance, jlong timeStamp, jlong
     if (renderInfo != nullptr) {
         jclass renderInfoClass = env->GetObjectClass(renderInfo);
         if (renderInfoClass != nullptr) {
-            jfieldID fieldId;
-            GET_INT_FIELD(renderInfo, renderInfoClass, "rotation", rotation);
+            getIntField(env, renderInfo, renderInfoClass, "rotation", rotation);
         }
     }
     info.rotation = rotation;
     uint64_t delay = static_cast<uint64_t>(delayUs);
     LCEVC_PictureHandle picture = {static_cast<uintptr_t>(pictureHandle)};
-    LCEVC_RenderSendPicture(context->decoder, timeStamp, picture, &info, delay);
-
-    LCEVC_PictureHandle decodedPicture;
-    LCEVC_DecodeInformation decodeInformation;
-    if (LCEVC_ReceiveDecoderPicture(context->decoder, &decodedPicture, &decodeInformation) == LCEVC_Success) {
-        LOGD("ReceiveDecoderPicture");
+    LCEVC_ReturnCode ret = LCEVC_RenderSendPicture(context->decoder, timeStamp, picture, &info, delay);
+    if (ret != LCEVC_Success) {
+        LOGE("lcevcRenderSendPicture: LCEVC_RenderSendPicture returned %d", ret);
+        return ret;
     }
+
+    LCEVC_PictureHandle decodedPicture{};
+    LCEVC_DecodeInformation decodeInformation{};
+    ret = LCEVC_ReceiveDecoderPicture(context->decoder, &decodedPicture, &decodeInformation);
+    if (ret != LCEVC_Success && ret != LCEVC_Flushed) {
+        LOGE("lcevcRenderSendPicture: LCEVC_ReceiveDecoderPicture after render returned %d", ret);
+        return ret;
+    }
+    LOGD("lcevcRenderSendPicture: LCEVC_ReceiveDecoderPicture received decoder picture %lu",
+         static_cast<unsigned long>(decodedPicture.hdl));
+    const uint64_t callbackTimestamp = decodeInformation.timestamp != 0
+                                           ? decodeInformation.timestamp
+                                           : static_cast<uint64_t>(timeStamp);
 
     jobject client = env->NewLocalRef(context->client);
     if (client != nullptr) {
@@ -516,17 +593,37 @@ NATIVE_FUNC(jint, lcevcRenderSendPicture, jlong instance, jlong timeStamp, jlong
         jmethodID methodID = env->GetMethodID(cls, "onRenderCompleted", "(JIJJJ)V");
         if (methodID != nullptr) {
             env->CallVoidMethod(client, methodID, static_cast<jlong>(instance),
-                                static_cast<jint>(LCEVC_Success), static_cast<jlong>(timeStamp),
-                                static_cast<jlong>(pictureHandle),
-                                static_cast<jlong>(getPtsFromUniqueTimestamp(timeStamp)));
+                                static_cast<jint>(ret), static_cast<jlong>(callbackTimestamp),
+                                static_cast<jlong>(decodedPicture.hdl),
+                                static_cast<jlong>(getPtsFromUniqueTimestamp(callbackTimestamp)));
         } else {
-            LOGE("LCEVCdec JNI Render: failed to find onRenderCompleted");
+            LOGE("lcevcRenderSendPicture: failed to find onRenderCompleted");
         }
         env->DeleteLocalRef(client);
     }
     checkJniException(env);
 
-    return 0;
+    return ret;
+}
+
+NATIVE_FUNC(jint, lcevcReleaseDecoderPicture, jlong instance, jlong timeStamp, jlong pictureHandle)
+{
+    LOGV("lcevcReleaseDecoderPicture: entering");
+
+    ClientContext* context = reinterpret_cast<ClientContext*>(instance);
+    if (context == nullptr) {
+        return LCEVC_InvalidParam;
+    }
+
+    LCEVC_PictureHandle picture = {static_cast<uintptr_t>(pictureHandle)};
+    const LCEVC_ReturnCode ret =
+        receiveDecoderPictureAndNotify(env, instance, context, static_cast<uint64_t>(timeStamp),
+                                       picture, "LCEVC_ReceiveDecoderPicture");
+    if (ret != LCEVC_Success && ret != LCEVC_Flushed) {
+        LOGE("lcevcReleaseDecoderPicture: LCEVC_ReceiveDecoderPicture returned %d", ret);
+    }
+
+    return ret;
 }
 
 NATIVE_FUNC(jint, lcevcSendDecoderEnhancementData, jlong instance, jlong timestamp,
@@ -555,22 +652,29 @@ NATIVE_FUNC(jint, lcevcSendDecoderEnhancementData, jlong instance, jlong timesta
             enhancementData.data(), static_cast<uint32_t>(enhancementData.size()), &actualSize);
         enhancementData.resize(actualSize);
         if (r < 0) {
-            LOGW("Couldn't find LCEVC data in input data (%d bytes)", dataSize);
+            LOGW("lcevcSendDecoderEnhancementData: Couldn't find LCEVC data in input data (%d "
+                 "bytes)",
+                 dataSize);
             return r;
         }
-        LOGD("Extracted %d LCEVC bytes from NALU (%d bytes)", actualSize, dataSize);
+        LOGD("lcevcSendDecoderEnhancementData: Extracted %d LCEVC bytes from NALU (%d bytes)",
+             actualSize, dataSize);
     }
 
-    LCEVC_SendDecoderEnhancementData(context->decoder, timestamp, enhancementData.data(),
-                                     enhancementData.size());
+    LCEVC_ReturnCode const ret = LCEVC_SendDecoderEnhancementData(
+        context->decoder, timestamp, enhancementData.data(), enhancementData.size());
+    if (ret != LCEVC_Success) {
+        LOGE("lcevcSendDecoderEnhancementData: LCEVC_SendDecoderEnhancementData returned %d", ret);
+        return ret;
+    }
 
-    LOGI("LCEVCdec JNI SendDecoderEnhancementData");
-    return 0;
+    LOGV("lcevcSendDecoderEnhancementData: entering");
+    return LCEVC_Success;
 }
 
 NATIVE_FUNC(jint, lcevcFlushDecoder, jlong instance)
 {
-    LOGI("LCEVCdec JNI FlushDecoder");
+    LOGV("lcevcFlushDecoder: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
     if (context == nullptr) {
@@ -578,13 +682,42 @@ NATIVE_FUNC(jint, lcevcFlushDecoder, jlong instance)
     }
 
     const LCEVC_ReturnCode ret = LCEVC_FlushDecoder(context->decoder);
+    if (ret != LCEVC_Success) {
+        return ret;
+    }
 
-    return ret;
+    for (;;) {
+        const LCEVC_ReturnCode receiveRet =
+            receiveDecoderPictureAndNotify(env, instance, context, 0, {}, "LCEVC_ReceiveDecoderPicture");
+        if (receiveRet == LCEVC_Again) {
+            break;
+        }
+        if (receiveRet != LCEVC_Success && receiveRet != LCEVC_Flushed) {
+            LOGW("lcevcFlushDecoder: LCEVC_ReceiveDecoderPicture after flush returned %d", receiveRet);
+            break;
+        }
+    }
+
+    LCEVC_PictureHandle picture{};
+    for (;;) {
+        const LCEVC_ReturnCode receiveRet = LCEVC_ReceiveDecoderBase(context->decoder, &picture);
+        if (receiveRet == LCEVC_Again) {
+            break;
+        }
+        if (receiveRet != LCEVC_Success && receiveRet != LCEVC_Flushed) {
+            LOGW("lcevcFlushDecoder: LCEVC_ReceiveDecoderBase after flush returned %d", receiveRet);
+            break;
+        }
+        LOGD("lcevcFlushDecoder: LCEVC_ReceiveDecoderBase drained flushed decoder base %lu",
+             static_cast<unsigned long>(picture.hdl));
+    }
+
+    return LCEVC_Success;
 }
 
 NATIVE_FUNC(jint, lcevcSynchronizeDecoder, jlong instance, jboolean dropPending)
 {
-    LOGI("LCEVCdec JNI SynchronizeDecoder");
+    LOGV("lcevcSynchronizeDecoder: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
     if (context == nullptr) {
@@ -599,39 +732,53 @@ NATIVE_FUNC(jint, lcevcSynchronizeDecoder, jlong instance, jboolean dropPending)
 
 NATIVE_FUNC(jint, lcevcRenderSetWindow, jlong instance, jobject surface, jboolean secure)
 {
-    LOGI("LCEVCdec JNI RenderSetWindow");
+    LOGV("lcevcRenderSetWindow: entering");
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
-    if (context != nullptr) {
-        ANativeWindow* nativeWindow = nullptr;
-        if (context->nativeWindow) {
-            ANativeWindow_release(context->nativeWindow);
-        }
-        if (surface != nullptr) {
-            nativeWindow = ANativeWindow_fromSurface(env, surface);
-        }
-        if (nativeWindow) {
-            int width = ANativeWindow_getWidth(nativeWindow);
-            int height = ANativeWindow_getHeight(nativeWindow);
-            int format = ANativeWindow_getFormat(nativeWindow);
-            LOGI("ANativeWindow %p size=%dx%d format=%d", nativeWindow, width, height, format);
-
-            if (width <= 0 || height <= 0) {
-                LOGI("Surface not ready yet (size=%dx%d), skipping RenderSetWindow", width, height);
-                ANativeWindow_release(nativeWindow);
-                return 0; // or another "not ready" code you already handle
-            }
-        }
-        context->nativeWindow = nativeWindow;
-        return LCEVC_RenderSetWindow(context->decoder, nativeWindow, secure);
+    if (context == nullptr) {
+        return LCEVC_InvalidParam;
+    }
+    if (context->decoder.hdl == 0) {
+        LOGE("lcevcRenderSetWindow: called with decoder with invalid handle");
+        return LCEVC_InvalidParam;
+    }
+    if (surface == nullptr) {
+        LOGW("lcevcRenderSetWindow: called with null surface");
+        return LCEVC_InvalidParam;
     }
 
-    LOGI("LCEVCdec JNI RenderSetWindow");
-    return 0;
+    ANativeWindow* nativeWindow = ANativeWindow_fromSurface(env, surface);
+    if (nativeWindow == nullptr) {
+        LOGW("lcevcRenderSetWindow: ANativeWindow_fromSurface returned null");
+        return LCEVC_InvalidParam;
+    }
+
+    const int width = ANativeWindow_getWidth(nativeWindow);
+    const int height = ANativeWindow_getHeight(nativeWindow);
+    const int format = ANativeWindow_getFormat(nativeWindow);
+    LOGI("lcevcRenderSetWindow: ANativeWindow %p size=%dx%d format=%d", nativeWindow, width, height, format);
+
+    if (width <= 0 || height <= 0) {
+        LOGI("lcevcRenderSetWindow: Surface not ready yet (size=%dx%d), skipping RenderSetWindow",
+             width, height);
+        ANativeWindow_release(nativeWindow);
+        return LCEVC_Again;
+    }
+
+    ANativeWindow* oldWindow = context->nativeWindow;
+    context->nativeWindow = nativeWindow;
+    const LCEVC_ReturnCode ret = LCEVC_RenderSetWindow(context->decoder, nativeWindow, secure);
+    if (oldWindow) {
+        ANativeWindow_release(oldWindow);
+    }
+    if (ret != LCEVC_Success) {
+        LOGW("lcevcRenderSetWindow: LCEVC_RenderSetWindow returned %d", ret);
+    }
+    return ret;
 }
 
 NATIVE_FUNC(jlong, lcevcAllocPicture, jlong instance, jobject pictureDescObj)
 {
-    LOGI("LCEVCdec JNI AllocPicture");
+    LOGV("lcevcAllocPicture: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
     if (context == nullptr) {
@@ -641,7 +788,6 @@ NATIVE_FUNC(jlong, lcevcAllocPicture, jlong instance, jobject pictureDescObj)
         return LCEVC_InvalidParam;
     }
     LCEVC_PictureDesc desc = {0};
-    jfieldID fieldId;
     jclass jPictureDesc = env->GetObjectClass(pictureDescObj);
 
     jobject objectField;
@@ -652,20 +798,20 @@ NATIVE_FUNC(jlong, lcevcAllocPicture, jlong instance, jobject pictureDescObj)
     uint32_t height = 0;
     float pixelAspectRatio = 1.0f;
 
-    GET_INT_FIELD(pictureDescObj, jPictureDesc, "colorFormat", objectValue);
+    getIntField(env, pictureDescObj, jPictureDesc, "colorFormat", objectValue);
     format = static_cast<LCEVC_ColorFormat>(objectValue);
-    GET_INT_FIELD(pictureDescObj, jPictureDesc, "width", width);
-    GET_INT_FIELD(pictureDescObj, jPictureDesc, "height", height);
-    GET_FLOAT_FIELD(pictureDescObj, jPictureDesc, "pixelAspectRatio", pixelAspectRatio);
+    getIntField(env, pictureDescObj, jPictureDesc, "width", width);
+    getIntField(env, pictureDescObj, jPictureDesc, "height", height);
+    getFloatField(env, pictureDescObj, jPictureDesc, "pixelAspectRatio", pixelAspectRatio);
 
-    LOGD("Making a default desc %dx%d, format %d", width, height, format);
+    LOGD("lcevcAllocPicture: LCEVC_DefaultPictureDesc request %dx%d, format %d", width, height, format);
     if (LCEVC_DefaultPictureDesc(&desc, format, width, height) != LCEVC_Success) {
-        LOGE("Could not get a default picture desc");
+        LOGE("lcevcAllocPicture: LCEVC_DefaultPictureDesc failed");
         return -1;
     }
 
-    GET_INT_FIELD(pictureDescObj, jPictureDesc, "sampleAspectRatioNum", desc.sampleAspectRatioNum);
-    GET_INT_FIELD(pictureDescObj, jPictureDesc, "sampleAspectRatioDen", desc.sampleAspectRatioDen);
+    getIntField(env, pictureDescObj, jPictureDesc, "sampleAspectRatioNum", desc.sampleAspectRatioNum);
+    getIntField(env, pictureDescObj, jPictureDesc, "sampleAspectRatioDen", desc.sampleAspectRatioDen);
     if (desc.sampleAspectRatioNum == 0 && desc.sampleAspectRatioDen == 0) {
         setSampleAspectRatioFromPixelAspectRatio(pixelAspectRatio, desc.sampleAspectRatioNum,
                                                  desc.sampleAspectRatioDen);
@@ -678,20 +824,22 @@ NATIVE_FUNC(jlong, lcevcAllocPicture, jlong instance, jobject pictureDescObj)
         }
     }
 
-    fieldId = env->GetFieldID(jPictureDesc, "colorParams", gColorParamsFieldName.c_str());
+    const std::string colorParamsFieldName = std::string("L") + kColorParamsClassName + ";";
+    jfieldID fieldId = env->GetFieldID(jPictureDesc, "colorParams", colorParamsFieldName.c_str());
     objectField = env->GetObjectField(pictureDescObj, fieldId);
-    LOGD("fieldId %p object %p for <%s>", fieldId, objectField, gColorParamsFieldName.c_str());
+    LOGD("lcevcAllocPicture: fieldId %p object %p for <%s>", fieldId, objectField,
+         colorParamsFieldName.c_str());
     if (objectField != nullptr) {
         jPictureDesc = env->GetObjectClass(objectField);
         uint32_t value = 0;
 
-        GET_INT_FIELD(objectField, jPictureDesc, "colorRange", value);
+        getIntField(env, objectField, jPictureDesc, "colorRange", value);
         desc.colorRange = static_cast<LCEVC_ColorRange>(value);
-        GET_INT_FIELD(objectField, jPictureDesc, "colorPrimaries", value);
+        getIntField(env, objectField, jPictureDesc, "colorPrimaries", value);
         desc.colorPrimaries = static_cast<LCEVC_ColorPrimaries>(value);
-        GET_INT_FIELD(objectField, jPictureDesc, "transferCharacteristics", value);
+        getIntField(env, objectField, jPictureDesc, "transferCharacteristics", value);
         desc.transferCharacteristics = static_cast<LCEVC_TransferCharacteristics>(value);
-        GET_INT_FIELD(objectField, jPictureDesc, "matrixCoefficients", value);
+        getIntField(env, objectField, jPictureDesc, "matrixCoefficients", value);
         desc.matrixCoefficients = static_cast<LCEVC_MatrixCoefficients>(value);
 
         fieldId = env->GetFieldID(jPictureDesc, "hdrStaticInfo", "[B");
@@ -702,7 +850,7 @@ NATIVE_FUNC(jlong, lcevcAllocPicture, jlong instance, jobject pictureDescObj)
         }
     }
 
-    LOGI("LCEVCdec JNI picture format: %d width: %d height %d", format, width, height);
+    LOGV("lcevcAllocPicture: picture format: %d width: %d height %d", format, width, height);
 
     LCEVC_PictureHandle handle = {};
     if (LCEVC_AllocPicture(context->decoder, &desc, &handle) == LCEVC_Success) {
@@ -710,17 +858,18 @@ NATIVE_FUNC(jlong, lcevcAllocPicture, jlong instance, jobject pictureDescObj)
             std::lock_guard<std::mutex> const lock(gPictureMapMutex);
             gPictureDecoderMap[handle.hdl] = context->decoder;
         }
-        LOGD("Allocated picture %lu (%p)", static_cast<unsigned long>(handle.hdl), &handle);
+        LOGD("lcevcAllocPicture: LCEVC_AllocPicture allocated picture %lu (%p)",
+             static_cast<unsigned long>(handle.hdl), &handle);
         return handle.hdl;
     }
 
-    LOGE("Failed to allocate a picture desc");
+    LOGE("lcevcAllocPicture: LCEVC_AllocPicture failed");
     return -1;
 }
 
 NATIVE_FUNC(jint, lcevcFreePicture, jlong instance, jlong pictureHandle)
 {
-    LOGI("LCEVCdec JNI FreePicture");
+    LOGV("lcevcFreePicture: entering");
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
     if (context == nullptr || pictureHandle == 0) {
         return LCEVC_InvalidParam;
@@ -733,89 +882,11 @@ NATIVE_FUNC(jint, lcevcFreePicture, jlong instance, jlong pictureHandle)
     return LCEVC_FreePicture(context->decoder, pictureHdl);
 }
 
-NATIVE_FUNC(jint, lcevcGetPicturePlaneCount, jlong instance, jlong pictureHandle)
-{
-    LOGI("LCEVCdec JNI GetPicturePlaneCount");
-    ClientContext* context = reinterpret_cast<ClientContext*>(instance);
-
-    uint32_t count = 0;
-    if (pictureHandle == 0) {
-        return 0;
-    }
-    LCEVC_PictureHandle const pictureHdl = {static_cast<uintptr_t>(pictureHandle)};
-    if (LCEVC_GetPicturePlaneCount(context->decoder, pictureHdl, &count) != LCEVC_Success) {
-        LOGE("Failed to get plane count for picture %lu", static_cast<unsigned long>(pictureHdl.hdl));
-        return 0;
-    }
-    LOGD("Found %d planes for picture %lu", count, static_cast<unsigned long>(pictureHdl.hdl));
-
-    return static_cast<jint>(count);
-}
-
-NATIVE_FUNC(jint, lcevcGetPictureDesc, jlong instance, jlong pictureHandle, jobject pictureDescObj)
-{
-    LOGI("LCEVCdec JNI GetPictureDesc");
-    ClientContext* context = reinterpret_cast<ClientContext*>(instance);
-
-    LCEVC_PictureHandle pictureHdl = {static_cast<uintptr_t>(pictureHandle)};
-    LOGD("Getting picture %lu", static_cast<unsigned long>(pictureHdl.hdl));
-    if (pictureDescObj == nullptr) {
-        return LCEVC_InvalidParam;
-    }
-    LCEVC_PictureDesc desc = {};
-    LCEVC_ReturnCode ret = LCEVC_GetPictureDesc(context->decoder, pictureHdl, &desc);
-    if (ret != LCEVC_Success) {
-        return ret;
-    }
-
-    jfieldID fieldId;
-    jclass cls;
-    jobject objField;
-
-    cls = env->GetObjectClass(pictureDescObj);
-
-    SET_INT_FIELD(pictureDescObj, cls, "colorFormat", desc.colorFormat);
-    SET_INT_FIELD(pictureDescObj, cls, "width", desc.width);
-    SET_INT_FIELD(pictureDescObj, cls, "height", desc.height);
-    SET_INT_FIELD(pictureDescObj, cls, "sampleAspectRatioNum", desc.sampleAspectRatioNum);
-    SET_INT_FIELD(pictureDescObj, cls, "sampleAspectRatioDen", desc.sampleAspectRatioDen);
-    SET_FLOAT_FIELD(pictureDescObj, cls, "pixelAspectRatio",
-                    static_cast<float>(desc.sampleAspectRatioNum) /
-                        static_cast<float>(desc.sampleAspectRatioDen));
-
-    fieldId = env->GetFieldID(cls, "colorParams", gColorParamsFieldName.c_str());
-    LOGD("gColorParamsFieldName: %s", gColorParamsFieldName.c_str());
-    objField = env->GetObjectField(pictureDescObj, fieldId);
-    LOGD("fieldId %p object %p for <%s>", fieldId, objField, gColorParamsFieldName.c_str());
-    if (objField == nullptr) {
-        objField = createJavaColorParams(env);
-        env->SetObjectField(pictureDescObj, fieldId, objField);
-    }
-    if (objField != nullptr) {
-        cls = env->GetObjectClass(objField);
-        SET_INT_FIELD(objField, cls, "colorRange", static_cast<uint32_t>(desc.colorRange));
-        SET_INT_FIELD(objField, cls, "colorPrimaries", static_cast<uint32_t>(desc.colorPrimaries));
-        SET_INT_FIELD(objField, cls, "transferCharacteristics",
-                      static_cast<uint32_t>(desc.transferCharacteristics));
-        SET_INT_FIELD(objField, cls, "matrixCoefficients", static_cast<uint32_t>(desc.matrixCoefficients));
-
-        fieldId = env->GetFieldID(cls, "hdrStaticInfo", "[B");
-        jbyteArray barr = static_cast<jbyteArray>(env->GetObjectField(objField, fieldId));
-        if (barr == nullptr) {
-            barr = env->NewByteArray(sizeof(LCEVC_HDRStaticInfo));
-            env->SetObjectField(objField, fieldId, barr);
-        }
-        env->SetByteArrayRegion(barr, 0, sizeof(LCEVC_HDRStaticInfo),
-                                reinterpret_cast<const jbyte*>(&desc.hdrStaticInfo));
-    }
-    return LCEVC_Success;
-}
-
 // Special more efficient function to set all the planes for a picture buffer in a single JNI call
 NATIVE_FUNC(jint, lcevcPictureSetPlaneBuffers, jlong pictureHandle, jobject inputBuffer,
             jintArray inputOffsets, jintArray inputByteStrides)
 {
-    LOGI("LCEVCdec JNI PictureSetPlaneBuffers");
+    LOGV("lcevcPictureSetPlaneBuffers: entering");
     if (pictureHandle == 0 || inputBuffer == nullptr || inputOffsets == nullptr ||
         inputByteStrides == nullptr) {
         return LCEVC_InvalidParam;
@@ -827,7 +898,7 @@ NATIVE_FUNC(jint, lcevcPictureSetPlaneBuffers, jlong pictureHandle, jobject inpu
         std::lock_guard<std::mutex> lock(gPictureMapMutex);
         auto it = gPictureDecoderMap.find(pictureHdl.hdl);
         if (it == gPictureDecoderMap.end()) {
-            LOGE("PictureSetPlaneBuffers: unknown picture handle %lu",
+            LOGE("lcevcPictureSetPlaneBuffers: unknown picture handle %lu",
                  static_cast<unsigned long>(pictureHdl.hdl));
             return LCEVC_InvalidParam;
         }
@@ -836,7 +907,7 @@ NATIVE_FUNC(jint, lcevcPictureSetPlaneBuffers, jlong pictureHandle, jobject inpu
 
     LCEVC_PictureDesc desc = {};
     if (LCEVC_GetPictureDesc(decoderHdl, pictureHdl, &desc) != LCEVC_Success) {
-        LOGE("PictureSetPlaneBuffers: failed to get picture desc %lu",
+        LOGE("lcevcPictureSetPlaneBuffers: LCEVC_GetPictureDesc failed for picture %lu",
              static_cast<unsigned long>(pictureHdl.hdl));
         return LCEVC_Error;
     }
@@ -844,19 +915,19 @@ NATIVE_FUNC(jint, lcevcPictureSetPlaneBuffers, jlong pictureHandle, jobject inpu
     const int32_t numPlanes = env->GetArrayLength(inputOffsets);
     const int32_t numStrides = env->GetArrayLength(inputByteStrides);
     if (numPlanes != numStrides) {
-        LOGE("PictureSetPlaneBuffers: offsets/strides length mismatch %d vs %d", numPlanes, numStrides);
+        LOGE("lcevcPictureSetPlaneBuffers: offsets/strides length mismatch %d vs %d", numPlanes, numStrides);
         return LCEVC_InvalidParam;
     }
 
     const uint32_t expectedPlanes = formatPlaneCount(desc.colorFormat);
     if (static_cast<uint32_t>(numPlanes) < expectedPlanes) {
-        LOGE("PictureSetPlaneBuffers: expected %u planes, got %d", expectedPlanes, numPlanes);
+        LOGE("lcevcPictureSetPlaneBuffers: expected %u planes, got %d", expectedPlanes, numPlanes);
         return LCEVC_InvalidParam;
     }
 
     auto* buffer = reinterpret_cast<uint8_t*>(env->GetDirectBufferAddress(inputBuffer));
     if (buffer == nullptr) {
-        LOGE("PictureSetPlaneBuffers: direct buffer address is null");
+        LOGE("lcevcPictureSetPlaneBuffers: direct buffer address is null");
         return LCEVC_InvalidParam;
     }
 
@@ -869,7 +940,7 @@ NATIVE_FUNC(jint, lcevcPictureSetPlaneBuffers, jlong pictureHandle, jobject inpu
         if (strides != nullptr) {
             env->ReleaseIntArrayElements(inputByteStrides, strides, 0);
         }
-        LOGE("PictureSetPlaneBuffers: failed to read offsets/strides");
+        LOGE("lcevcPictureSetPlaneBuffers: failed to read offsets/strides");
         return LCEVC_InvalidParam;
     }
 
@@ -877,7 +948,7 @@ NATIVE_FUNC(jint, lcevcPictureSetPlaneBuffers, jlong pictureHandle, jobject inpu
     if (LCEVC_LockPicture(decoderHdl, pictureHdl, LCEVC_Access_Write, &lock) != LCEVC_Success) {
         env->ReleaseIntArrayElements(inputOffsets, offsets, 0);
         env->ReleaseIntArrayElements(inputByteStrides, strides, 0);
-        LOGE("PictureSetPlaneBuffers: failed to lock picture %lu",
+        LOGE("lcevcPictureSetPlaneBuffers: LCEVC_LockPicture failed for picture %lu",
              static_cast<unsigned long>(pictureHdl.hdl));
         return LCEVC_Error;
     }
@@ -886,8 +957,9 @@ NATIVE_FUNC(jint, lcevcPictureSetPlaneBuffers, jlong pictureHandle, jobject inpu
     for (uint32_t planeIndex = 0; planeIndex < expectedPlanes; ++planeIndex) {
         LCEVC_PicturePlaneDesc plane = {};
         if (LCEVC_GetPictureLockPlaneDesc(decoderHdl, lock, planeIndex, &plane) != LCEVC_Success) {
-            LOGE("PictureSetPlaneBuffers: failed to get plane desc %u for %lu", planeIndex,
-                 static_cast<unsigned long>(pictureHdl.hdl));
+            LOGE("lcevcPictureSetPlaneBuffers: LCEVC_GetPictureLockPlaneDesc failed for plane %u "
+                 "of %lu",
+                 planeIndex, static_cast<unsigned long>(pictureHdl.hdl));
             continue;
         }
 
@@ -895,7 +967,8 @@ NATIVE_FUNC(jint, lcevcPictureSetPlaneBuffers, jlong pictureHandle, jobject inpu
         uint32_t planeHeight = 0;
         if (!validatePlaneFormat(desc.colorFormat, desc.width, desc.height, planeIndex, planeWidth,
                                  planeHeight)) {
-            LOGE("PictureSetPlaneBuffers: unsupported format %d for plane %u", desc.colorFormat, planeIndex);
+            LOGE("lcevcPictureSetPlaneBuffers: unsupported format %d for plane %u",
+                 desc.colorFormat, planeIndex);
             continue;
         }
 

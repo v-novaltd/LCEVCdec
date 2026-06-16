@@ -349,7 +349,7 @@ bool sendEnhancement(const LCEVC_DecoderHandle decoder, BaseDecoder& baseDecoder
             outputPic.pendingTimestamps.push_back(enhancementTimestamp);
         }
 
-        // Record the sucessfully written enhancement timestamp
+        // Record the successfully written enhancement timestamp
         timestamp = enhancementTimestamp;
 
         return true;
@@ -546,7 +546,7 @@ static int decode(const Config& cfg)
             if (trickplay->action == Peek) {
                 uint32_t width = 0;
                 uint32_t height = 0;
-                VN_LCEVC_CHECK(LCEVC_PeekDecoder(decoder, trickplay->timestamp, &width, &height));
+                VN_LCEVC_AGAIN(LCEVC_PeekDecoder(decoder, trickplay->timestamp, &width, &height));
             } else if (trickplay->action == Skip) {
                 VN_LCEVC_CHECK(LCEVC_SkipDecoder(decoder, trickplay->timestamp));
             } else if (trickplay->action == Synchronize) {

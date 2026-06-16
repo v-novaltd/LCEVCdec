@@ -22,6 +22,7 @@
 
 #include <assert.h>
 #include <LCEVC/common/check.h>
+#include <LCEVC/common/limit.h>
 #include <LCEVC/common/log.h>
 #include <LCEVC/enhancement/config_parser.h>
 #include <stdbool.h>
@@ -74,7 +75,7 @@ void calculateTileChunkIndices(LdeFrameConfig* frameConfig, const LdeGlobalConfi
     for (uint8_t plane = 0; plane < globalConfig->numPlanes; ++plane) {
         /* num_layers chunks per plane-loq-tile */
         if (frameConfig->entropyEnabled) {
-            for (uint8_t loq = 0; loq < LOQEnhancedCount; ++loq) {
+            for (uint8_t loq = 0; loq < (uint8_t)LOQEnhancedCount; ++loq) {
                 const uint32_t tileCount = globalConfig->numTiles[plane][loq];
                 const uint32_t chunkCount = tileCount * globalConfig->numLayers;
 
@@ -83,8 +84,7 @@ void calculateTileChunkIndices(LdeFrameConfig* frameConfig, const LdeGlobalConfi
             }
         }
 
-        /* one chunk per plane-loq-tile */
-        if (temporalChunkEnabled(frameConfig, globalConfig)) {
+        if (frameConfig->temporalSignallingPresent) {
             const uint32_t chunkCount = globalConfig->numTiles[plane][LOQ0];
 
             frameConfig->tileChunkTemporalIndex[plane] = offset;
@@ -193,8 +193,8 @@ static bool parseBlockPictureConfigMisc(ByteStream* stream, LdeQuantMatrixMode q
                                         bool ditherControlPresent, LdeFrameConfig* frameConfig,
                                         const LdeGlobalConfig* globalConfig)
 {
-    uint8_t data;
-    uint16_t data16;
+    uint8_t data = 0;
+    uint16_t data16 = 0;
 
     if (frameConfig->pictureType == PTField) {
         VNCheckB(bytestreamReadU8(stream, &data));
@@ -209,8 +209,10 @@ static bool parseBlockPictureConfigMisc(ByteStream* stream, LdeQuantMatrixMode q
         VNCheckB(bytestreamReadU16(stream, &data16));
 
         /* step_width_sublayer1: 15 bits
-         * level1_filtering_enabled_flag: 1 bit */
-        frameConfig->stepWidths[LOQ1] = (data16 >> 1) & 0x7FFF;
+         * level1_filtering_enabled_flag: 1 bit
+         * A step width of 0 is invalid (the dequant process takes log(stepWidth)); clamp into the
+         * valid [QMinStepWidth, QMaxStepWidth] range at parse time. */
+        frameConfig->stepWidths[LOQ1] = clampS32((data16 >> 1) & 0x7FFF, QMinStepWidth, QMaxStepWidth);
         frameConfig->deblockEnabled = data16 & 0x0001;
     } else {
         frameConfig->stepWidths[LOQ1] = QMaxStepWidth;
@@ -272,7 +274,7 @@ static bool parseBlockPictureConfigMisc(ByteStream* stream, LdeQuantMatrixMode q
 /* 7.3.6 (Table-10) & 7.4.3.4 */
 bool parseBlockPictureConfig(ByteStream* stream, LdeFrameConfig* frameConfig, const LdeGlobalConfig* globalConfig)
 {
-    uint8_t data;
+    uint8_t data = 0;
 
     /* no_enhancement_bit_flag: 1 bit. (it's a "no enhancement" bit, so invert for "enabled"). */
     VNCheckB(bytestreamReadU8(stream, &data));
@@ -314,8 +316,9 @@ bool parseBlockPictureConfig(ByteStream* stream, LdeFrameConfig* frameConfig, co
         uint16_t data16 = 0;
         VNCheckB(bytestreamReadU16(stream, &data16));
 
-        /* step_width_sublayer2: 15 bits */
-        frameConfig->stepWidths[LOQ0] = (data16 >> 1) & 0x7FFF;
+        /* step_width_sublayer2: 15 bits. A step width of 0 is invalid (dequant takes
+         * log(stepWidth)); clamp into the valid [QMinStepWidth, QMaxStepWidth] range at parse. */
+        frameConfig->stepWidths[LOQ0] = clampS32((data16 >> 1) & 0x7FFF, QMinStepWidth, QMaxStepWidth);
         VNLogVerbose("  Step-width LOQ-0: %u", frameConfig->stepWidths[LOQ0]);
 
         /* dithering_control_flag: 1 bit */
@@ -389,6 +392,10 @@ bool chunkCheckAlloc(LdeFrameConfig* frameConfig, const LdeGlobalConfig* globalC
                             chunkCount, "FrameConfigChunks", frameConfig->diagId);
         frameConfig->chunks = VNAllocationPtr(frameConfig->chunkAllocation, LdeChunk);
         frameConfig->numChunks = chunkCount;
+
+        if (frameConfig->chunks) {
+            memset(frameConfig->chunks, 0, sizeof(LdeChunk) * chunkCount);
+        }
     }
 
     if (!frameConfig->chunks) {
@@ -416,7 +423,7 @@ bool parseChunk(ByteStream* stream, LdeChunk* chunk, bool* loqEntropyEnabled, Ti
 
             chunk->size = (size_t)chunkSize;
         } else {
-            uint64_t chunkSizeMulti;
+            uint64_t chunkSizeMulti = 0;
             VNCheckB(bytestreamReadMultiByte(stream, &chunkSizeMulti));
 
             if (chunkSizeMulti > INT_MAX) {
@@ -427,6 +434,11 @@ bool parseChunk(ByteStream* stream, LdeChunk* chunk, bool* loqEntropyEnabled, Ti
             chunk->size = (size_t)chunkSizeMulti;
         }
 
+        if (chunk->size == 0) {
+            VNLogError("Entropy-enabled chunk signalled with zero size");
+            return false;
+        }
+
         /* Signal that the LOQ has some data. */
         if (loqEntropyEnabled) {
             *loqEntropyEnabled = true;
@@ -434,6 +446,11 @@ bool parseChunk(ByteStream* stream, LdeChunk* chunk, bool* loqEntropyEnabled, Ti
 
         chunk->data = bytestreamCurrent(stream);
         VNCheckB(bytestreamSeek(stream, chunk->size));
+
+        if (chunk->rleOnly && (chunk->data[chunk->size - 1] & 0x80)) {
+            VNLogError("RLE-only chunk ends mid-run (final byte signals run-length continuation)");
+            return false;
+        }
 
         VNLogVerbose("%s=%u", chunk->rleOnly ? "RLE" : "Huffman", (int32_t)chunk->size);
     } else {
@@ -456,7 +473,7 @@ bool parseChunkFlags(BitStream* stream, LdeChunk* chunks, int32_t numChunks)
 bool parseCoefficientChunks(ByteStream* stream, const LdeGlobalConfig* globalConfig,
                             LdeFrameConfig* frameConfig, const LdeLOQIndex loq, const uint32_t planeIdx)
 {
-    LdeChunk* chunks;
+    LdeChunk* chunks = NULL;
     VNCheckB(getLayerChunks(globalConfig, frameConfig, planeIdx, loq, 0, &chunks));
 
     for (uint8_t layer = 0; layer < globalConfig->numLayers; ++layer) {

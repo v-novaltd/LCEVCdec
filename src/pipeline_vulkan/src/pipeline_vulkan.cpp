@@ -36,6 +36,10 @@
 #include <algorithm>
 #include <set>
 
+#if VN_OS(ANDROID)
+#include <android/hardware_buffer.h>
+#endif
+
 namespace lcevc_dec::pipeline_vulkan {
 
 PipelineVulkan::PipelineVulkan(const PipelineBuilderVulkan& builder, pipeline::EventSink* eventSink)
@@ -180,13 +184,34 @@ void PipelineVulkan::releasePicture(pipeline::PictureBase* picture)
 
     m_allocatedPictures.removeReorderIndex(idx);
 
-    picture->unbindMemory();
+    picture->unbindBuffer();
     m_picturesPool.destroy(fromBase(picture));
+}
+
+LdcReturnCode PipelineVulkan::storeAccelBuffer(pipeline::PictureBase* picture,
+                                               const LdpPictureDesc& desc, LdpAccelBuffer* accelBuffer)
+{
+#if VN_OS(ANDROID)
+    VNUnused(desc);
+    // accelBuffer is an AHardwareBuffer* that was cast into LCEVC_AccelBufferHandle by the caller.
+    auto* ahb = reinterpret_cast<AHardwareBuffer*>(accelBuffer); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* pictureVulkan = fromBase(picture);
+    if (!pictureVulkan->setAhbBuffer(*this, ahb)) {
+        return LdcReturnCodeError;
+    }
+    return LdcReturnCodeSuccess;
+#else
+    VNUnused(picture);
+    VNUnused(desc);
+    VNUnused(accelBuffer);
+    VNLogVerbose("storeAccelBuffer: AHardwareBuffer support requires Android");
+    return LdcReturnCodeNotSupported;
+#endif
 }
 
 FrameVulkan* PipelineVulkan::allocateFrame(uint64_t timestamp)
 {
-    assert(findFrame(timestamp) == nullptr);
+    assert(findFrame(timestamp, true) == nullptr);
 
     FrameVulkan* frame = m_framesPool.make(m_allocator, m_allocator, timestamp);
     if (!frame) {
@@ -285,9 +310,10 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
                        colorFormat == LdpColorFormatI444_8 || colorFormat == LdpColorFormatNV12_8 ||
                        colorFormat == LdpColorFormatNV21_8 || colorFormat == LdpColorFormatGRAY_8);
 
-    auto* frame = findFrame(timestamp);
+    auto* frame = findFrame(timestamp, true);
     const LdppDitherFrame* frameDither = frame ? frame->dither() : nullptr;
     backend().getRenderer().setRenderFormat(bit8, nv12);
+    backend().getRenderer().setLimitedRange(desc.colorRange == LdpColorRangeLimited);
     backend().getRenderer().ensureTextureResources(pictureWidth, pictureHeight);
     backend().getRenderer().updateDitherState(&m_dither, frameDither);
 

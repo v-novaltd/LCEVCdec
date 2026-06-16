@@ -72,7 +72,7 @@ private:
     bool getNextEvent(Event& event);
 
     static bool diagnosticHandler(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
-                                  const LdcDiagValue* values);
+                                  const LdcDiagValue* values, uint32_t valuesCount);
 
     DecoderContext* m_context = nullptr;
 
@@ -230,11 +230,11 @@ constexpr char logLevelId(LdcLogLevel level)
 // Handle log events - convert to a data buffer and push into event queue
 //
 // This could make the event callback directly - it would avoid some memory copies and
-// extra threading, but runs the risk of surprising the event hander by calling it from two
+// extra threading, but runs the risk of surprising the event handler by calling it from two
 // threads, and may get logging out of order relative to the other surrounding events.
 //
-bool EventDispatcherImpl::diagnosticHandler(void* user, const LdcDiagSite* site,
-                                            const LdcDiagRecord* record, const LdcDiagValue* values)
+bool EventDispatcherImpl::diagnosticHandler(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
+                                            const LdcDiagValue* values, uint32_t valuesCount)
 {
     // Only handle log messages
     if (!(site->type == LdcDiagTypeLog || (site->type == LdcDiagTypeLogFormatted && values != nullptr))) {
@@ -263,8 +263,8 @@ bool EventDispatcherImpl::diagnosticHandler(void* user, const LdcDiagSite* site,
     }
 
     // Append rest of message
-    bufferUsed +=
-        ldcDiagnosticFormatLog(buffer + bufferUsed, kBufferSize - bufferUsed - 1, site, record, values);
+    bufferUsed += ldcDiagnosticFormatLog(buffer + bufferUsed, kBufferSize - bufferUsed - 1, site,
+                                         record, values, valuesCount);
 
     // Final char always null terminator
     buffer[bufferUsed] = '\0';

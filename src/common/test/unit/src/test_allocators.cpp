@@ -30,7 +30,7 @@
 #include <random>
 #include <string>
 
-// A general set of allocator tests that are paramterized on the various allocator types.
+// A general set of allocator tests that are parameterized on the various allocator types.
 //
 namespace {
 
@@ -59,7 +59,7 @@ protected:
         // Choose allocator
         allocatorKind = GetParam();
 
-        // Fixed seed for random nuber generation
+        // Fixed seed for random number generation
         generator.seed(42);
 
         switch (allocatorKind) {
@@ -565,7 +565,6 @@ TEST_P(MemoryAllocatorTest, RandomAllocations)
 
             size_t newSize = random(kAllocationMax) + 1;
             const size_t preservedSize = std::min(newSize, rec.size);
-            (void)preservedSize;
             uint8_t preservedDigest[16] = {0};
             hash(rec.allocation.ptr, preservedSize, preservedDigest);
 

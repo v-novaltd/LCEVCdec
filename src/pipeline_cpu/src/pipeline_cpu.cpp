@@ -17,6 +17,8 @@
 #include "frame_cpu.h"
 #include "from_base.h"
 
+#include <LCEVC/common/log.h>
+
 namespace lcevc_dec::pipeline_cpu {
 
 // PipelineCPU
@@ -141,7 +143,7 @@ void PipelineCPU::releasePicture(pipeline::PictureBase* picture)
 
     m_allocatedPictures.removeReorderIndex(idx);
 
-    picture->unbindMemory();
+    picture->unbindBuffer();
     m_picturesPool.destroy(fromBase(picture));
 }
 
@@ -160,7 +162,7 @@ void PipelineCPU::releasePicture(pipeline::PictureBase* picture)
 //
 pipeline::FrameBase* PipelineCPU::allocateFrame(uint64_t timestamp)
 {
-    assert(findFrame(timestamp) == nullptr);
+    assert(findFrame(timestamp, true) == nullptr);
 
     // Allocate frame
     FrameCPU* frame = m_framesPool.make(this->m_enhancementAllocator, this->m_bufferAllocator, timestamp);

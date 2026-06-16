@@ -16,6 +16,7 @@
 
 #include "backend_vulkan.h"
 #include "buffer_vulkan.h"
+#include "buffer_vulkan_vma.h"
 
 #include <LCEVC/common/log.h>
 #include <LCEVC/common/threads.hpp>
@@ -110,28 +111,20 @@ void VulkanFrameContext::destroy(VkCommandPool commandPool)
 
 bool VulkanFrameContext::allocateDescriptorSets(const DescriptorSetLayouts& layouts, uint32_t /*totalNumTiles*/)
 {
-    // 9 descriptor sets: 7 fixed + 2 apply (one per LOQ, each with its own merged command buffer)
-    constexpr uint32_t descriptorSetCount = 9u;
+    // 10 descriptor sets: 8 fixed + 2 apply (one per LOQ, each with its own merged command buffer)
+    constexpr uint32_t descriptorSetCount = 10u;
     VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
     descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     descriptorPoolCreateInfo.maxSets = descriptorSetCount;
 
-    VkDescriptorPoolSize poolSize{};
-    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSizes[0].descriptorCount = 21; // Existing 20 buffers + RGBA image conversion input
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = 2;
 
-    /*
-    This is how many descriptors (buffers) total
-    Vertical shader has 2 (input and output)
-    Horizontal has 3 (input, output, and base)
-    Apply LOQ0 has 2 (merged command buffer and output plane)
-    Apply LOQ1 has 2 (merged command buffer and output plane)
-    Conversion has 2 (input buffer and output buffer)
-    Add has 2 (input buffer and output buffer)
-    */
-    poolSize.descriptorCount = 20; // 2+3+2+3+2+2+2+2+2
-
-    descriptorPoolCreateInfo.poolSizeCount = 1;
-    descriptorPoolCreateInfo.pPoolSizes = &poolSize;
+    descriptorPoolCreateInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
     if (vkCreateDescriptorPool(m_backend->getDevice(), &descriptorPoolCreateInfo, nullptr,
                                &m_descriptorPool) != VK_SUCCESS) {
         VNLogError("failed to create descriptor pool");
@@ -139,9 +132,9 @@ bool VulkanFrameContext::allocateDescriptorSets(const DescriptorSetLayouts& layo
     }
 
     std::array<VkDescriptorSetLayout, descriptorSetCount> setLayouts = {
-        layouts.vertical,   layouts.horizontal, layouts.vertical,
-        layouts.horizontal, layouts.conversion, layouts.conversion,
-        layouts.add,        layouts.apply,      layouts.apply};
+        layouts.vertical,   layouts.horizontal, layouts.vertical,        layouts.horizontal,
+        layouts.conversion, layouts.conversion, layouts.convertOutImage, layouts.add,
+        layouts.apply,      layouts.apply};
 
     VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
     descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -162,9 +155,10 @@ bool VulkanFrameContext::allocateDescriptorSets(const DescriptorSetLayouts& layo
     m_descriptorSetMidDstLoq0 = descriptorSets[3];
     m_descriptorSetConversionTo = descriptorSets[4];
     m_descriptorSetConversionFrom = descriptorSets[5];
-    m_descriptorSetAdd = descriptorSets[6];
-    m_descriptorSetApply[LOQ0] = descriptorSets[7];
-    m_descriptorSetApply[LOQ1] = descriptorSets[8];
+    m_descriptorSetConversionFromImage = descriptorSets[6];
+    m_descriptorSetAdd = descriptorSets[7];
+    m_descriptorSetApply[LOQ0] = descriptorSets[8];
+    m_descriptorSetApply[LOQ1] = descriptorSets[9];
 
     return true;
 }
@@ -268,7 +262,7 @@ void VulkanFrameContext::prepareCommandBuffer(LdeLOQIndex loq, uint32_t size)
         if (m_gpuCommandBuffer[loq]) {
             delete m_gpuCommandBuffer[loq];
         }
-        m_gpuCommandBuffer[loq] = new BufferVulkan(*m_backend, size, pipeline::BufferUsageIn);
+        m_gpuCommandBuffer[loq] = new BufferVulkanVma(*m_backend, size, pipeline::BufferUsageIn);
     }
 }
 

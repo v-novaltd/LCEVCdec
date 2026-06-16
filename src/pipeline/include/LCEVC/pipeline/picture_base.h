@@ -31,16 +31,18 @@ public:
     virtual bool lock(LdpAccess access, LdpPictureLock*& lockOut) = 0;
     virtual bool unlock(const LdpPictureLock* lock) = 0;
 
-    // Internal fetch of plane pointer and stride
+    // Get pointer to plane and byte stride
     virtual void getPlaneDescInternal(uint32_t plane, LdpPicturePlaneDesc& planeDesc) const = 0;
+
+    // Return true if the pictureDesc changed
+    bool setDesc(const LdpPictureDesc& newDesc);
+    // Get current PictureDesc
+    void getDesc(LdpPictureDesc& descOut) const;
 
     bool isValid() const;
 
     bool getPublicFlag(uint8_t flag) const;
     void setPublicFlag(uint8_t flag, bool value);
-
-    void getDesc(LdpPictureDesc& descOut) const;
-    bool setDesc(const LdpPictureDesc& newDesc);
 
     bool getBufferDesc(LdpPictureBufferDesc& bufferDescOut) const;
     bool getPlaneDescArr(LdpPicturePlaneDesc planeDescArrOut[kLdpPictureMaxNumPlanes]) const;
@@ -52,12 +54,19 @@ public:
     PictureLockBase* getLock() const { return m_pictureLock; }
 
     // Buffer management
-    void setExternal(const LdpPicturePlaneDesc* planeDescArr, const LdpPictureBufferDesc* buffer);
+    void setExternalBufferDesc(const LdpPictureBufferDesc* buffer);
+    void setExternalPlaneDesc(const LdpPicturePlaneDesc* planeDescArr);
+
+    // Set an externally-owned buffer
+    void setExternalBuffer(pipeline::BufferBase* externalBuffer);
+
+    // True if the picture's backing buffer is externally owned
+    bool isExternalBuffer() const { return m_hasExternalBuffer; }
 
     uint32_t getRequiredSize() const;
 
-    bool bindMemory(pipeline::BufferUsage usage);
-    bool unbindMemory();
+    bool bindBuffer(pipeline::BufferUsage usage);
+    bool unbindBuffer();
 
     bool setDescAndBind(const LdpPictureDesc& newDesc, pipeline::BufferUsage usage);
 
@@ -76,6 +85,9 @@ protected:
     bool initializeDesc(const LdpPictureDesc& desc,
                         const uint32_t rowStridesBytes[kLdpPictureMaxNumPlanes]);
 
+    const LdpPictureLayout* bufferPictureLayout() const;
+    LdpPictureDesc resolvePictureDesc(const LdpPictureDesc& desc) const;
+
     bool descsMatch(const LdpPictureDesc& desc) const;
 
     // Owning pipeline
@@ -84,10 +96,16 @@ protected:
     // Any current lock
     PictureLockBase* m_pictureLock{};
 
-    // Any external buffer and plane description
-    bool m_external{false};
+    // Caller supplied an LdpPicturePlaneDesc
+    bool m_hasExternalPlanes{false};
     LdpPicturePlaneDesc m_externalPlaneDescs[kLdpPictureMaxNumPlanes] = {};
+
+    // Caller supplied an LdpPictureBufferDesc
+    bool m_hasExternalBufferDesc{false};
     LdpPictureBufferDesc m_externaBufferDesc = {};
+
+    // Attached buffer is owned by caller
+    bool m_hasExternalBuffer{false};
 };
 
 } // namespace lcevc_dec::pipeline

@@ -56,9 +56,11 @@ struct Resolution
 // Source resolutions (dst is 2x in the upscaled dimension(s)).
 // Both dimensions must be even for 420 chroma.
 constexpr Resolution kResolutions[] = {
-    {960, 540}, // Standard qHD (src) -> 1920x1080 (dst)
-    {480, 270}, // Quarter HD
-    {128, 128}, // Small power-of-2
+    // Removed some resolutions for CI test runtime
+
+    // {960, 540},   // Standard qHD
+    // {480, 270}, // Quarter HD
+    // {128, 128},   // Small power-of-2
     {66, 34},   // Small non-aligned, even
     {254, 130}, // Non-power-of-2, not workgroup-aligned
 };

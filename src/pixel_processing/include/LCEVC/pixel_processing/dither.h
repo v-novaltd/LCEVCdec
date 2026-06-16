@@ -113,7 +113,7 @@ typedef struct LdppDitherSlice
  * \param allocator        The memory allocator.
  * \param dither           The dither module to initialize.
  * \param seed             The seed to initialize the random number generator
- *                         with, if 0 it will use time()
+ *                         with, if 0 it will use the wall clock.
  *
  * \return false if memory allocation failed, otherwise true.
  */
@@ -128,7 +128,7 @@ void ldppDitherGlobalRelease(LdppDitherGlobal* dither);
  * \param global           The global dither module to retrieve entropy from.
  * \param seed             The seed for this particular frame, this should be unique
  *                         for each frame to avoid repitition, the frames timestamp is
- *                         a ideal seed. if 0 it will use time()
+ *                         a ideal seed. if 0 it will use the wall clock.
  * \param strength         The dithering strength for this particular frame.
  *
  * \return false if dithering strength is greater than 31 otherwise true.

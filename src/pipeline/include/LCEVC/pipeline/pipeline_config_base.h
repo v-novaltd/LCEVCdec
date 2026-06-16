@@ -29,7 +29,7 @@ enum class PassthroughMode : int32_t
     Disable = -1, // base can never pass through. No decode occurs if lcevc is absent/inapplicable
     Allow = 0,    // base can pass through if lcevc is not found or not applied
     Force = 1,    // base must pass through, regardless of lcevc being present or applicable
-    Scale = 2, // base can pass through if lcevc is not found or not applied - will be scaled by previous confguration
+    Scale = 2, // base can pass through if lcevc is not found or not applied - will be scaled by previous configuration
 };
 
 // The common configurable values that get passed from the builder to the initialized pipeline

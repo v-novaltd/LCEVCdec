@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -29,7 +29,7 @@ void ldcDequeInitialize(LdcDeque* deque, uint32_t reserved, uint32_t elementSize
     reserved = nextPowerOfTwoU32(reserved);
 
     VNClear(deque);
-    VNAllocateArray(allocator, &deque->dataAllocation, uint8_t, reserved * elementSize, "Deque");
+    VNAllocateArray(allocator, &deque->dataAllocation, uint8_t, (size_t)reserved * elementSize, "Deque");
     VNCheck(VNAllocationSucceeded(deque->dataAllocation));
 
     deque->data = VNAllocationPtr(deque->dataAllocation, uint8_t);
@@ -63,7 +63,7 @@ void ldcDequeGrow(LdcDeque* deque)
 
     // Reallocate the memory
     VNReallocateArray(deque->allocator, &deque->dataAllocation, uint8_t,
-                      deque->reserved * deque->elementSize, "Deque");
+                      (size_t)deque->reserved * deque->elementSize, "Deque");
     VNCheck(VNAllocationSucceeded(deque->dataAllocation));
     deque->data = VNAllocationPtr(deque->dataAllocation, uint8_t);
 
@@ -73,8 +73,8 @@ void ldcDequeGrow(LdcDeque* deque)
     }
 
     // The previous entries were wrapped around end of buffer, move them up to new end
-    memmove(deque->data + (deque->front + prevReserved) * deque->elementSize,
-            deque->data + (deque->front) * deque->elementSize,
-            (prevReserved - deque->front) * deque->elementSize);
+    memmove(deque->data + (deque->front + prevReserved) * (size_t)deque->elementSize,
+            deque->data + (deque->front) * (size_t)deque->elementSize,
+            (prevReserved - deque->front) * (size_t)deque->elementSize);
     deque->front += prevReserved;
 }

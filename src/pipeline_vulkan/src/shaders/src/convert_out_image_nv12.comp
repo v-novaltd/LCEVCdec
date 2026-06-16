@@ -1,0 +1,52 @@
+/* Copyright (c) V-Nova International Limited 2025-2026. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
+// Vulkan output conversion shader for NV12 (8-bit 2-plane 4:2:0)
+// AHardwareBuffer VkImage destinations.
+
+#version 450
+
+#include "specialization_ids.h"
+
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
+       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+       local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
+
+layout(r8,  set = 0, binding = 1) uniform restrict writeonly image2D dstY;
+layout(rg8, set = 0, binding = 2) uniform restrict writeonly image2D dstUV;
+
+#include "convert_out_image_common.glsl"
+
+void main()
+{
+    const int x = int(gl_GlobalInvocationID.x);
+    const int y = int(gl_GlobalInvocationID.y);
+
+    if (x >= width || y >= height) {
+        return;
+    }
+
+    const float yf = internalToUnorm(loadInternalValue(x, y, containerStrideY, containerOffsetY), 7, 255);
+    imageStore(dstY, ivec2(x, y), vec4(yf, 0.0, 0.0, 1.0));
+
+    const int chromaMaskX = (1 << chromaWidthShift) - 1;
+    const int chromaMaskY = (1 << chromaHeightShift) - 1;
+    if ((x & chromaMaskX) == 0 && (y & chromaMaskY) == 0) {
+        const int cx = x >> chromaWidthShift;
+        const int cy = y >> chromaHeightShift;
+        const float u = internalToUnorm(loadInternalValue(cx, cy, containerStrideU, containerOffsetU), 7, 255);
+        const float v = internalToUnorm(loadInternalValue(cx, cy, containerStrideV, containerOffsetV), 7, 255);
+        imageStore(dstUV, ivec2(cx, cy), vec4(u, v, 0.0, 1.0));
+    }
+}

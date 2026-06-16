@@ -53,12 +53,11 @@ void main()
     }
 
     const uint index = containerOffset + x + containerStride * y;
-    if (index < containerOffset + containerStride * height) {
-        const ivec2 srcPixels = unpack16bitInternals(src.samples[index]);
-        ivec2 dstPixels = unpack16bitInternals(dst.samples[index]);
-        ivec2 sum;
-        sum.x = saturateS16(dstPixels.x + srcPixels.x);
-        sum.y = saturateS16(dstPixels.y + srcPixels.y);
-        dst.samples[index] = pack16bitInternals(sum);
-    }
+
+    const ivec2 srcPixels = unpack16bitInternals(src.samples[index]);
+    ivec2 dstPixels = unpack16bitInternals(dst.samples[index]);
+    ivec2 sum;
+    sum.x = saturateS16(dstPixels.x + srcPixels.x);
+    sum.y = saturateS16(dstPixels.y + srcPixels.y);
+    dst.samples[index] = pack16bitInternals(sum);
 }

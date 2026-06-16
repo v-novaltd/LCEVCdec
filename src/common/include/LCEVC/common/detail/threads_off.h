@@ -72,7 +72,7 @@ static inline void threadSetName(const char* name) { VNUnused(name); }
 
 static inline uint64_t threadTimeMicroseconds(int32_t offset)
 {
-    if (offset == UINT32_MAX) {
+    if (offset == -1) {
         return UINT64_MAX;
     }
 

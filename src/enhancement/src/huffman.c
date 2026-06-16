@@ -89,7 +89,7 @@ static void generateCodesAndIndices(HuffmanListEntry entriesInOut[VN_MAX_NUM_SYM
 
     idxOfEachBitSize[currLength] = maxIdx;
 
-    for (int16_t idx = maxIdx - 1; idx > -1; idx--) {
+    for (int16_t idx = (int16_t)(maxIdx - 1); idx > -1; idx--) {
         if (entriesInOut[idx].bits < currLength) {
             currCode >>= (currLength - entriesInOut[idx].bits);
             currLength = entriesInOut[idx].bits;
@@ -160,7 +160,7 @@ static uint8_t generateCodesAndLut(HuffmanListEntry entriesIn[VN_MAX_NUM_SYMBOLS
 static void determineIdxOfEachBitSize(HuffmanList* listInOut)
 {
     uint8_t bitSize = listInOut->list[0].bits;
-    for (uint8_t idx = 0; idx < listInOut->size; idx++) {
+    for (uint8_t idx = 0; idx < (uint8_t)listInOut->size; idx++) {
         if (listInOut->list[idx].bits > bitSize) {
             listInOut->idxOfEachBitSize[bitSize] = idx;
             bitSize = listInOut->list[idx].bits;
@@ -179,6 +179,42 @@ static int listEntrySizeOrder(const void* left, const void* right)
     }
 
     return (int)rightEntry->symbol - leftEntry->symbol;
+}
+
+static inline void huffmanCodeLengthCountsAdd(uint16_t codeLengthCounts[VN_MAX_CODE_LENGTH + 1],
+                                              uint8_t codeLength, uint8_t maxCodeLength)
+{
+    if (codeLength == 0) {
+        return;
+    }
+
+    codeLengthCounts[minU8(codeLength, maxCodeLength)]++;
+}
+
+static bool validateCodeLengths(const uint16_t codeLengthCounts[VN_MAX_CODE_LENGTH + 1], uint8_t maxCodeLength)
+{
+    uint16_t currCode = 0;
+    uint8_t currLength = maxCodeLength;
+
+    for (uint8_t bits = maxCodeLength; bits > 0; --bits) {
+        if (bits < currLength) {
+            currCode >>= (currLength - bits);
+            currLength = bits;
+        }
+
+        const uint16_t count = codeLengthCounts[bits];
+        if (bits <= VN_SMALL_TABLE_MAX_SIZE && count > 0) {
+            const uint16_t maxCode = (uint16_t)(1u << bits);
+            if (currCode >= maxCode || count > (uint16_t)(maxCode - currCode)) {
+                VNLogError("Huffman code lengths are too large for the LUT");
+                return false;
+            }
+        }
+
+        currCode += count;
+    }
+
+    return true;
 }
 
 /* Utility functions for HuffmanTriple's contents memvar */
@@ -228,6 +264,13 @@ static int16_t huffmanManualInitializeCommon(HuffmanManualDecodeState* state, Hu
         return 0;
     }
 
+    const uint8_t maxDecodableCodeLength = (uint8_t)(8 * sizeof(stream->word) - 7);
+    if (state->maxCodeLength > maxDecodableCodeLength) {
+        VNLogError("huffman: max code length [%u] exceeds the decodable maximum [%u]",
+                   state->maxCodeLength, maxDecodableCodeLength);
+        return -1;
+    }
+
     const int8_t lengthBits = bitWidth(state->maxCodeLength - state->minCodeLength, bitstreamVersion);
     if (lengthBits < 0) {
         VNLogError("huffman: code lengths are invalid, resulted in incorrect bit-width max"
@@ -240,15 +283,28 @@ static int16_t huffmanManualInitializeCommon(HuffmanManualDecodeState* state, Hu
     VNCheckI(huffmanStreamReadBits(stream, 1, &bits));
 
     int16_t orderIdx = 0;
+    uint16_t codeLengthCounts[VN_MAX_CODE_LENGTH + 1] = {0};
     if (bits) {
         for (int32_t i = 0; i < VN_MAX_NUM_SYMBOLS; ++i) {
             /* Symbol present flag */
             VNCheckI(huffmanStreamReadBits(stream, 1, &bits));
             if (bits) {
                 uint32_t codeLength = 0;
-                VNCheckI(huffmanStreamReadBits(stream, lengthBits, &codeLength));
+                if (lengthBits > 0) {
+                    VNCheckI(huffmanStreamReadBits(stream, lengthBits, &codeLength));
+                }
+                const uint8_t entryBits = (uint8_t)(codeLength + state->minCodeLength);
+                if (entryBits > state->maxCodeLength) {
+                    VNLogError("huffman: code length [%u] exceeds signalled max length [%u]",
+                               entryBits, state->maxCodeLength);
+                    return -1;
+                }
+                if (entryBits == 0) {
+                    continue;
+                }
+                huffmanCodeLengthCountsAdd(codeLengthCounts, entryBits, state->maxCodeLength);
                 entriesOut[orderIdx].symbol = (uint8_t)i;
-                entriesOut[orderIdx].bits = (uint8_t)(codeLength + state->minCodeLength);
+                entriesOut[orderIdx].bits = entryBits;
                 orderIdx++;
             }
         }
@@ -264,12 +320,28 @@ static int16_t huffmanManualInitializeCommon(HuffmanManualDecodeState* state, Hu
             uint32_t symbol = 0;
             uint32_t codeLength = 0;
             VNCheckI(huffmanStreamReadBits(stream, 8, &symbol));
-            VNCheckI(huffmanStreamReadBits(stream, lengthBits, &codeLength));
+            if (lengthBits > 0) {
+                VNCheckI(huffmanStreamReadBits(stream, lengthBits, &codeLength));
+            }
+            const uint8_t entryBits = (uint8_t)(codeLength + state->minCodeLength);
+            if (entryBits > state->maxCodeLength) {
+                VNLogError("huffman: code length [%u] exceeds signalled max length [%u]", entryBits,
+                           state->maxCodeLength);
+                return -1;
+            }
+            if (entryBits == 0) {
+                continue;
+            }
+            huffmanCodeLengthCountsAdd(codeLengthCounts, entryBits, state->maxCodeLength);
 
             entriesOut[orderIdx].symbol = (uint8_t)symbol;
-            entriesOut[orderIdx].bits = (uint8_t)(codeLength + state->minCodeLength);
+            entriesOut[orderIdx].bits = entryBits;
             orderIdx++;
         }
+    }
+
+    if (!validateCodeLengths(codeLengthCounts, state->maxCodeLength)) {
+        return -1;
     }
 
     qsort(entriesOut, orderIdx, sizeof(HuffmanListEntry), listEntrySizeOrder);
@@ -281,7 +353,7 @@ static int16_t huffmanManualInitializeCommon(HuffmanManualDecodeState* state, Hu
 static uint16_t huffmanIterateRls(HuffmanTripleTable* huffmanTableOut, const HuffmanTable* rlTable,
                                   const HuffmanList* rlList, uint16_t parentStartIdx,
                                   uint16_t parentEndIdx, uint8_t lsbSymbol, uint16_t rlSymbol,
-                                  uint8_t validBits, uint8_t recursionLevel);
+                                  uint8_t codeSizeInStream, uint8_t recursionLevel);
 
 /* Slightly hideous function but, sonarQube prefers functions with too many params over excessive
  * code duplication. */
@@ -450,7 +522,7 @@ bool huffmanTripleInitialize(HuffmanTripleDecodeState* state, HuffmanStream* str
     res = huffmanManualInitializeCommon(&state->manualStates[HuffLSB], stream, bitstreamVersion,
                                         lsbList.list);
     if (res < 0) {
-        VNLogError("Failed to initialize huffman state");
+        VNLogError("Failed to initialize huffman state - possible stream corruption");
         return false;
     }
     lsbList.size = res;
@@ -460,7 +532,7 @@ bool huffmanTripleInitialize(HuffmanTripleDecodeState* state, HuffmanStream* str
     res = huffmanManualInitializeCommon(&state->manualStates[HuffMSB], stream, bitstreamVersion,
                                         state->manualStates[HuffMSB].list.list);
     if (res < 0) {
-        VNLogError("Failed to initialize huffman state");
+        VNLogError("Failed to initialize huffman state - possible stream corruption");
         return false;
     }
     state->manualStates[HuffMSB].list.size = res;
@@ -469,7 +541,11 @@ bool huffmanTripleInitialize(HuffmanTripleDecodeState* state, HuffmanStream* str
         state->manualStates[HuffMSB].list.size, state->manualStates[HuffMSB].maxCodeLength);
 
     /* RL */
-    huffmanManualInitializeWithLut(&state->manualStates[HuffRL], &state->rlTable, stream, bitstreamVersion);
+    if (!huffmanManualInitializeWithLut(&state->manualStates[HuffRL], &state->rlTable, stream,
+                                        bitstreamVersion)) {
+        VNLogError("Failed to initialize huffman state - possible stream corruption");
+        return false;
+    }
 
     /* Triple Table */
     memset(&state->tripleTable, 0, sizeof(state->tripleTable));
@@ -497,16 +573,20 @@ bool huffmanStreamInitialize(HuffmanStream* stream, const uint8_t* data, size_t 
 
 /*- HuffmanManualDecodeState --------------------------------------------------------------------*/
 
-void huffmanManualInitializeWithLut(HuffmanManualDecodeState* state, HuffmanTable* table,
+bool huffmanManualInitializeWithLut(HuffmanManualDecodeState* state, HuffmanTable* table,
                                     HuffmanStream* stream, uint8_t bitstreamVersion)
 {
     assert(state && table && stream);
 
     HuffmanListEntry codes[VN_MAX_NUM_SYMBOLS];
     const int16_t size = huffmanManualInitializeCommon(state, stream, bitstreamVersion, codes);
-    if (size <= 0) {
-        // Early exit if there's no work to do
-        return;
+    if (size < 0) {
+        // The table is internally inconsistent (e.g., signaled code lengths but zero symbols).
+        VNLogError("Failed to initialize huffman state");
+        return false;
+    }
+    if (size == 0) {
+        return true;
     }
 
     const uint8_t minIdxOfOversizedCodes =
@@ -519,11 +599,18 @@ void huffmanManualInitializeWithLut(HuffmanManualDecodeState* state, HuffmanTabl
 
         determineIdxOfEachBitSize(&state->list);
     }
+
+    return true;
 }
 
 bool huffmanManualDecode(const HuffmanManualDecodeState* state, HuffmanStream* stream, uint8_t* symbolOut)
 {
     const HuffmanList* list = &state->list;
+
+    if (list->size == 0) {
+        return false;
+    }
+
     uint8_t bitsUnderConsideration = list->list[0].bits;
     uint32_t code = huffmanStreamAdvanceToNthBit(stream, bitsUnderConsideration);
 
@@ -535,37 +622,25 @@ bool huffmanManualDecode(const HuffmanManualDecodeState* state, HuffmanStream* s
             code = huffmanStreamAdvanceToNthBit(stream, bitsUnderConsideration);
         }
 
-        /* binary search
-         * Lower and Upper limit are inclusive bounds (whereas idxOfEach... is an exclusive bound) */
+        /* Binary search the equal-length group [idx, idxOfEachBitSize[bits]). Codes are sorted
+         * descending, so a larger code sits at a lower index. Half-open bounds that strictly shrink
+         * each step guarantee termination even when the code matches no entry. */
         uint16_t lowerLimit = idx;
-        uint16_t upperLimit = list->idxOfEachBitSize[bitsUnderConsideration] - 1;
-        for (uint16_t testIdx = lowerLimit + (upperLimit - lowerLimit + 1) / 2;;) {
-            /* Go down */
+        uint16_t upperLimit = list->idxOfEachBitSize[bitsUnderConsideration];
+        while (lowerLimit < upperLimit) {
+            const uint16_t testIdx = lowerLimit + (upperLimit - lowerLimit) / 2;
             entry = &list->list[testIdx];
             if (code > entry->code) {
-                if (testIdx == lowerLimit) {
-                    break;
-                }
                 upperLimit = testIdx;
-                testIdx = testIdx - (testIdx - lowerLimit + 1) / 2;
-                continue;
+            } else if (code < entry->code) {
+                lowerLimit = testIdx + 1;
+            } else {
+                /* Found it! Now advance wordStartBit, so we're no longer looking at those bits. */
+                stream->wordStartBit += entry->bits;
+                assert(stream->wordStartBit <= 32);
+                *symbolOut = entry->symbol;
+                return true;
             }
-
-            /* Go up */
-            if (code < entry->code) {
-                if (testIdx == upperLimit) {
-                    break;
-                }
-                lowerLimit = testIdx;
-                testIdx = testIdx + (upperLimit - testIdx + 1) / 2;
-                continue;
-            }
-
-            /* Found it! Now advance wordStartBit, so we're no longer looking at those bits. */
-            stream->wordStartBit += entry->bits;
-            assert(stream->wordStartBit <= 32);
-            *symbolOut = entry->symbol;
-            return true;
         }
     }
 
@@ -700,6 +775,9 @@ int32_t huffmanTripleDecode(const HuffmanTripleDecodeState* state, HuffmanStream
             if (!huffmanManualDecodeMaybeSingleSymbol(rlState, stream, &rlDetectionSymbol)) {
                 return -1;
             }
+        }
+        if (zeros >= (1 << 24)) {
+            return -1; // Don't overflow a 24-bit integer to prevent crashes on subsequent << 7
         }
         zeros = (zeros << 7) | (rlDetectionSymbol & 0x7f);
         seekRunLengths = nextSymbolIsRL(rlDetectionSymbol);

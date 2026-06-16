@@ -17,6 +17,7 @@
 
 #include "backend_vulkan.h"
 #include "buffer_vulkan.h"
+#include "buffer_vulkan_vma.h"
 #include "frame_vulkan.h"
 #include "picture_vulkan.h"
 #include "pipeline_builder_vulkan.h"
@@ -70,6 +71,9 @@ public:
     PictureVulkan* allocatePicture() override;
     void releasePicture(pipeline::PictureBase* picture) override;
 
+    LdcReturnCode storeAccelBuffer(pipeline::PictureBase* picture, const LdpPictureDesc& desc,
+                                   LdpAccelBuffer* accelBuffer) override;
+
     FrameVulkan* allocateFrame(uint64_t timestamp) override;
     void freeFrame(pipeline::FrameBase* frame) override;
 
@@ -118,7 +122,7 @@ private:
     common::Mutex m_allocationBuffersMutex;
     common::Mutex m_allocationPicturesMutex;
 
-    common::FreePool<BufferVulkan> m_buffersPool;
+    common::FreePool<BufferVulkanVma> m_buffersPool;
     common::FreePool<PictureVulkan> m_picturesPool;
     common::FreePool<FrameVulkan> m_framesPool;
 

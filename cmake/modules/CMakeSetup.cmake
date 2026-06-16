@@ -192,8 +192,8 @@ function (lcevc_set_properties TARGET)
         if (((TARGET_PLATFORM STREQUAL "Android") OR (TARGET_PLATFORM STREQUAL "Linux")))
             # Set up ld.so RPATH on out test executables so that they can can find libav shared
             # libraries transitively - DT_RPATH vs. DT_RUNPATH
-            set_target_properties(${TARGET} PROPERTIES BUILD_RPATH_USE_ORIGIN true
-                                                       LINK_OPTIONS "-Wl,--disable-new-dtags")
+            set_target_properties(${TARGET} PROPERTIES BUILD_RPATH_USE_ORIGIN true)
+            target_link_options(${TARGET} PRIVATE -Wl,--disable-new-dtags)
         endif ()
 
     else ()
@@ -209,6 +209,16 @@ function (lcevc_set_properties TARGET)
             # Restrict symbols exported by shared library
             target_link_options(${TARGET} PRIVATE
                                 -Wl,--version-script,${CMAKE_CURRENT_LIST_DIR}/exports.txt)
+            if (VN_SDK_MINIMUM_LIB_SIZE)
+                target_link_options(${TARGET} PRIVATE -Wl,--strip-all -Wl,--gc-sections
+                                    -Wl,--no-eh-frame-hdr -Wl,-Map=${TARGET}.map)
+                if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+                    target_link_options(${TARGET} PRIVATE -Wl,--lto-O3 -Wl,--icf=all)
+                endif ()
+                if (TARGET_PLATFORM STREQUAL "Android")
+                    target_link_options(${TARGET} PRIVATE -Wl,--pack-dyn-relocs=android)
+                endif ()
+            endif ()
         endif ()
 
     endif ()

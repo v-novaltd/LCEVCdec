@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -18,26 +18,20 @@ namespace lcevc_dec::common {
 
 Configurable::~Configurable() = default;
 
-bool Configurable::configure(std::string_view name, bool val) { return false; }
+bool Configurable::configure(std::string_view, bool) { return false; }
 
-bool Configurable::configure(std::string_view name, int32_t val) { return false; }
+bool Configurable::configure(std::string_view, int32_t) { return false; }
 
-bool Configurable::configure(std::string_view name, float val) { return false; }
+bool Configurable::configure(std::string_view, float) { return false; }
 
-bool Configurable::configure(std::string_view name, const std::string& val) { return false; }
+bool Configurable::configure(std::string_view, const std::string&) { return false; }
 
-bool Configurable::configure(std::string_view name, const std::vector<bool>& arr) { return false; }
+bool Configurable::configure(std::string_view, const std::vector<bool>&) { return false; }
 
-bool Configurable::configure(std::string_view name, const std::vector<int32_t>& arr)
-{
-    return false;
-}
+bool Configurable::configure(std::string_view, const std::vector<int32_t>&) { return false; }
 
-bool Configurable::configure(std::string_view name, const std::vector<float>& arr) { return false; }
+bool Configurable::configure(std::string_view, const std::vector<float>&) { return false; }
 
-bool Configurable::configure(std::string_view name, const std::vector<std::string>& arr)
-{
-    return false;
-}
+bool Configurable::configure(std::string_view, const std::vector<std::string>&) { return false; }
 
 } // namespace lcevc_dec::common

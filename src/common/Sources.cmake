@@ -52,6 +52,7 @@ list(
     "include/LCEVC/common/bitutils.h"
     "include/LCEVC/common/check.h"
     "include/LCEVC/common/class_utils.hpp"
+    "include/LCEVC/common/clock.h"
     "include/LCEVC/common/configure.hpp"
     "include/LCEVC/common/configure_members.hpp"
     "include/LCEVC/common/constants.h"
@@ -81,6 +82,8 @@ list(
 list(
     APPEND
     INTERFACES_DETAIL
+    "include/LCEVC/common/detail/clock_unix.h"
+    "include/LCEVC/common/detail/clock_win32.h"
     "include/LCEVC/common/detail/deque.h"
     "include/LCEVC/common/detail/diagnostics.h"
     "include/LCEVC/common/detail/diagnostics_buffer.h"
@@ -89,6 +92,7 @@ list(
     "include/LCEVC/common/detail/rolling_arena.h"
     "include/LCEVC/common/detail/simple_allocator.h"
     "include/LCEVC/common/detail/task_pool.h"
+    "include/LCEVC/common/detail/threads_off.h"
     "include/LCEVC/common/detail/threads_pthread.h"
     "include/LCEVC/common/detail/threads_win32.h"
     "include/LCEVC/common/detail/vector.h")

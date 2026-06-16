@@ -20,6 +20,9 @@
 #define VMA_IMPLEMENTATION
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
+#if VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
+#define VMA_STATS_STRING_ENABLED 0
+#endif
 
 // The VulkanMemeoryAllocator implementation collides with some of the more paranoid GCC warnings.
 //
@@ -469,7 +472,7 @@ bool BackendVulkan::createLogicalDeviceAndQueues()
         return false;
     }
 
-    // Set up Vulkan memeory allocator
+    // Set up Vulkan memory allocator
     VmaVulkanFunctions vulkanFunctions = {};
     vulkanFunctions.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
     vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;

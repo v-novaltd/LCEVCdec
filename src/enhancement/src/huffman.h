@@ -194,7 +194,18 @@ static inline size_t huffmanStreamGetRemainingBits(const HuffmanStream* stream)
  */
 static inline uint32_t extractBits(uint32_t data, uint8_t startBit, uint8_t endBit)
 {
-    const uint32_t mask = (1 << (endBit - startBit)) - 1;
+    if (endBit > 32) {
+        endBit = 32;
+    }
+    if (startBit > endBit) {
+        startBit = endBit;
+    }
+    const uint8_t numBits = (uint8_t)(endBit - startBit); /* 0..32 */
+    if (numBits == 0) {
+        return 0;
+    }
+    /* numBits >= 1 here, so endBit >= 1 and (32 - endBit) is in [0, 31]. */
+    const uint32_t mask = (numBits >= 32) ? 0xFFFFFFFFu : ((1u << numBits) - 1u);
     return (data >> (32 - endBit)) & mask;
 }
 
@@ -296,7 +307,7 @@ typedef struct HuffmanSingleDecoder
  *  \param stream           HuffmanStream to read initialization from
  *  \param bitstreamVersion The bitstream version number to decode with
  */
-void huffmanManualInitializeWithLut(HuffmanManualDecodeState* state, HuffmanTable* table,
+bool huffmanManualInitializeWithLut(HuffmanManualDecodeState* state, HuffmanTable* table,
                                     HuffmanStream* stream, uint8_t bitstreamVersion);
 
 /*! \brief Decode the next huffman symbol using a look-up table

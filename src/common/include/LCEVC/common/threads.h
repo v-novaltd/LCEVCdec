@@ -229,9 +229,9 @@ int threadCondVarWaitDeadline(ThreadCondVar* condVar, ThreadMutex* mutex, uint64
  *
  * This will be based on some system-side start time eg: CLOCK_MONOTONIC, CLOCK_REALTIME or QueryPerformanceCounter()
  *
- * @param[in] microseconds      Offset from current time
+ * @param[in] offset        Offset from current time
  */
-uint64_t threadTimeMicroseconds(int32_t microseconds);
+uint64_t threadTimeMicroseconds(int32_t offset);
 #endif
 
 // Implementation specific declarations

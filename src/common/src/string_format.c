@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2025-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -48,7 +48,7 @@ typedef enum CharClass
 
 // Per character classification table
 //
-static const enum CharClass charClasses[256];
+static const enum CharClass kCharClasses[256];
 
 // Parser state
 //
@@ -135,7 +135,7 @@ bool ldcFormatParseNext(LdcFormatParser* parser, LdcFormatElement* element)
 
     while (*ptr && state != Format) {
         // Classify the next character
-        enum CharClass cc = charClasses[(unsigned char)*ptr];
+        enum CharClass cc = kCharClasses[(unsigned char)*ptr];
 
         switch (state) {
             case Flag:
@@ -185,7 +185,7 @@ bool ldcFormatParseNext(LdcFormatParser* parser, LdcFormatElement* element)
     }
 
     // Classify and move over specifier
-    enum CharClass sc = charClasses[(unsigned char)*ptr++];
+    enum CharClass sc = kCharClasses[(unsigned char)*ptr++];
     if (sc == EOS) {
         return false;
     }
@@ -518,7 +518,7 @@ static inline int argumentAsInt(size_t idx, const LdcDiagArg* types, const LdcDi
         case LdcDiagArgInt16: return values[idx].valueInt16;
         case LdcDiagArgUInt16: return values[idx].valueUInt16;
         case LdcDiagArgInt32: return values[idx].valueInt32;
-        case LdcDiagArgUInt32: return values[idx].valueUInt32;
+        case LdcDiagArgUInt32: return (int)values[idx].valueUInt32;
         case LdcDiagArgInt64: return (int)values[idx].valueInt64;
         case LdcDiagArgUInt64: return (int)values[idx].valueUInt64;
         default: return 0;
@@ -555,7 +555,7 @@ static inline int64_t argumentAsLongLongInt(size_t idx, const LdcDiagArg* types,
         case LdcDiagArgInt32: return values[idx].valueInt32;
         case LdcDiagArgUInt32: return values[idx].valueUInt32;
         case LdcDiagArgInt64: return values[idx].valueInt64;
-        case LdcDiagArgUInt64: return values[idx].valueUInt64;
+        case LdcDiagArgUInt64: return (long long int)values[idx].valueUInt64;
         default: return 0;
     }
 }
@@ -606,7 +606,7 @@ static inline double argumentAsDouble(size_t idx, const LdcDiagArg* types, const
 }
 
 // Char classification down here to keep it out of the way
-static const enum CharClass charClasses[256] = {
+static const enum CharClass kCharClasses[256] = {
     EOS,                  //   0 ' '
     Other,                //   1 ' '
     Other,                //   2 ' '

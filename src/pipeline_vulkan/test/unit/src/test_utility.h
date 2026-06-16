@@ -70,7 +70,11 @@ allocateTestPictureAndBuffer(lcevc_dec::pipeline_vulkan::PipelineVulkan* pipelin
 {
     LdpPictureDesc desc{};
     ldpDefaultPictureDesc(&desc, format, width, height);
-    auto* picture = static_cast<lcevc_dec::pipeline_vulkan::PictureVulkan*>(pipeline->allocPicture(desc));
+    LdpPicture* ldpPic = nullptr;
+    if (pipeline->allocPicture(desc, ldpPic) != LdcReturnCodeSuccess || !ldpPic) {
+        return nullptr;
+    }
+    auto* picture = static_cast<lcevc_dec::pipeline_vulkan::PictureVulkan*>(ldpPic);
     picture->setDescAndBind(desc, lcevc_dec::pipeline::BufferUsageIn);
     return picture;
 }

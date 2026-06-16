@@ -14,7 +14,7 @@
 
 include("Sources.cmake")
 
-add_library(lcevc_dec_enhancement STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
+add_library(lcevc_dec_enhancement ${VN_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_enhancement)
 
 target_include_directories(lcevc_dec_enhancement PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
@@ -45,5 +45,7 @@ target_compile_definitions(lcevc_dec_enhancement
 
 add_library(lcevc_dec::enhancement ALIAS lcevc_dec_enhancement)
 
-lcevc_install(lcevc_dec_enhancement)
-install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/enhancement")
+if (NOT BUILD_SHARED_LIBS)
+    lcevc_install(lcevc_dec_enhancement)
+    install(FILES ${INTERFACES} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC/enhancement")
+endif ()

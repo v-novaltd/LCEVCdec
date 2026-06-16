@@ -41,7 +41,7 @@ namespace lcevc_dec::decoder {
 // These deliberately cast between two compatible C structures (API and internal pipeline).
 // The tests  in`test_pipeline_types.cpp` makes sure these stay in line.
 //
-// It is expected that the internal structures and enums will gain trailing memebers as the code evolves.
+// It is expected that the internal structures and enums will gain trailing members as the code evolves.
 //
 static inline LdpPictureDesc* toLdpPictureDescPtr(LCEVC_PictureDesc* ptr)
 {

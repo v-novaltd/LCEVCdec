@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -20,6 +20,7 @@ set(SOURCES
     "src/test_config_pool.cpp"
     "src/test_decode.cpp"
     "src/test_config_parser.cpp"
+    "src/test_parser_malformed.cpp"
     "src/test_transform.cpp"
     "src/test_transform_unit.cpp")
 

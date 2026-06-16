@@ -24,8 +24,8 @@
 #include <thread>
 #include <vector>
 
-extern "C" bool LCEVC_DiagHandlerOStream(void* user, const LdcDiagSite* site,
-                                         const LdcDiagRecord* record, const LdcDiagValue* values);
+extern "C" bool LCEVC_DiagHandlerOStream(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
+                                         const LdcDiagValue* values, uint32_t valuesCount);
 
 class DiagnosticsInitialisation : public testing::Test
 {

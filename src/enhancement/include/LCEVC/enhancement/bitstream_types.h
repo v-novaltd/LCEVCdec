@@ -153,6 +153,13 @@ typedef enum LdeQuantMatrixMode
     QMMCustomBothUnique
 } LdeQuantMatrixMode;
 
+/* Maximum possible number of chunks as Table A.1 of AMENDMENT 1: Additional levels to the
+ * LCEVC MPEG-5 Part 2 standard - max tiles = 1024 * 3 yuv444p planes * 2 LOQs * 17 layers */
+enum LdeChunkConstants
+{
+    ChunkMaxCount = 104448,
+};
+
 /* Block sizes. A block (if temporal is on) is 32x32 pixels, and 32 = 1 << 5. */
 enum LdeBlockConstants
 {

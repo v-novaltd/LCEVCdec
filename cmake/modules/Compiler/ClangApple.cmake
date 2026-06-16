@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -21,14 +21,29 @@ if (VN_SDK_COVERAGE)
     add_link_options(--coverage)
 endif ()
 
+if (VN_SDK_MINIMUM_LIB_SIZE)
+    set(CMAKE_C_FLAGS_RELEASE
+        "-Oz -DNDEBUG -fno-unwind-tables -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections"
+    )
+    set(CMAKE_CXX_FLAGS_RELEASE
+        "-Oz -DNDEBUG -fno-unwind-tables -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections"
+    )
+endif ()
+
 target_compile_options(
     lcevc_dec::compiler
     INTERFACE $<$<BOOL:${VN_SDK_WARNINGS_FAIL}>:-Werror>
+              $<$<BOOL:${VN_SDK_MINIMUM_LIB_SIZE}>:-fno-exceptions>
+              $<$<AND:$<BOOL:${VN_SDK_MINIMUM_LIB_SIZE}>,$<COMPILE_LANGUAGE:CXX>>:-fno-rtti>
               -Wall
               -Wshadow
               -Wstrict-prototypes
               -Wwrite-strings
               -Wpointer-arith
-              -Wtautological-unsigned-zero-compare)
+              -Wtautological-unsigned-zero-compare
+              -Wno-error=missing-field-initializers
+              -Wno-error=unused-parameter
+              -Wno-error=type-limits
+              -Wno-error=sign-compare)
 
 set(CMAKE_MACOSX_BUNDLE NO)

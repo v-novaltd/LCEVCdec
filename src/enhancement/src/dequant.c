@@ -167,7 +167,8 @@ static int32_t calculateDeadzoneWidth(int32_t masterSW, int32_t layerSW)
         return INT32_MAX;
     }
 
-    return ((((1 << 16) - (((kA * layerSW) + kB) >> 1)) * layerSW) >> 16);
+    const int32_t scaled = (1 << 16) - (((kA * layerSW) + kB) >> 1);
+    return (int32_t)(((int64_t)scaled * layerSW) >> 16);
 }
 
 static int16_t calculateAppliedDequantOffset(int32_t dequantOffsetActual, int32_t deadzoneWidth,
@@ -178,7 +179,8 @@ static int16_t calculateAppliedDequantOffset(int32_t dequantOffsetActual, int32_
     }
 
     if (mode == DQMConstOffset) {
-        return (int16_t)(dequantOffsetActual - deadzoneWidth);
+        const int64_t appliedOffset = (int64_t)dequantOffsetActual - deadzoneWidth;
+        return (int16_t)clampS64(appliedOffset, INT16_MIN, INT16_MAX);
     }
 
     return 0;
@@ -194,7 +196,7 @@ static int32_t calculateLOQStepWidth(const LdeGlobalConfig* globalConfig, const 
 {
     return (planeIdx > 0 && loqIdx == LOQ0)
                ? applyChromaSWMultiplier(frameConfig->stepWidths[loqIdx], globalConfig->chromaStepWidthMultiplier)
-               : frameConfig->stepWidths[loqIdx];
+               : clampS32(frameConfig->stepWidths[loqIdx], QMinStepWidth, QMaxStepWidth);
 }
 
 /*- Dequant (public functions) ------------------------------------------------------------------*/

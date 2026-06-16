@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -66,7 +66,7 @@ private:
 std::unique_ptr<RawWriter> createRawWriter(std::string_view filename);
 
 /*!
- * \brief Create a YUVWriter, given a picture descrption,and a filename
+ * \brief Create a YUVWriter, given a picture description,and a filename
  * Written pictures must match the description.
  *
  * @param[in]       _description    Description of picture (format & size)

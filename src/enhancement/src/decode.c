@@ -94,6 +94,14 @@ static inline void deblockResiduals(const LdeDeblock* deblock, int16_t residuals
     /* clang-format on */
 }
 
+static inline void applyUserData(const LdeUserDataConfig* userData, int16_t coeffs[16])
+{
+    int32_t coeff = coeffs[userData->layerIndex];
+    coeff >>= userData->shift;
+    const int32_t sign = (coeff & 0x01) ? -1 : 1;
+    coeffs[userData->layerIndex] = (int16_t)((coeff >> 1) * sign);
+}
+
 /*------------------------------------------------------------------------------*/
 
 bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameConfig* frameConfig,
@@ -103,6 +111,10 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
 {
     bool res = true;
 
+    if (!globalConfig->initialized || !frameConfig->frameConfigSet) {
+        VNLogError("Global or frame config not initialized");
+        return false;
+    }
     if (loq > LOQ1 || planeIdx >= RCMaxPlanes || tileIdx >= globalConfig->numTiles[planeIdx][loq]) {
         VNLogError("Invalid LOQ-plane-tile: LOQ%d, plane %d, tile %d", (uint8_t)loq, planeIdx, tileIdx);
         return false;
@@ -122,9 +134,10 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
     const uint8_t tuWidthShift = dds ? 2 : 1;     /* The width, log2, of the transform unit */
     const uint8_t residualMemSize = dds ? 32 : 8; /* Size of residuals in bytes */
     const bool temporalReducedSignalling = globalConfig->temporalReducedSignallingEnabled;
-    const LdeScalingMode scaling = (LOQ0 == loq) ? globalConfig->scalingModes[LOQ0] : Scale2D;
+    const LdeScalingMode scaling = globalConfig->scalingModes[loq];
     const bool tuRasterOrder = (!globalConfig->temporalEnabled && globalConfig->tileDimensions == TDTNone);
     const bool cpuCmdBuffers = cmdBufferCpu ? true : false;
+    const bool userDataEnabled = globalConfig->userData.enabled;
 
     if (!cpuCmdBuffers && (!cmdBufferGpu || !cmdBufferBuilder)) {
         VNLogError("No CPU or GPU cmdbuffer provided to decode to");
@@ -133,7 +146,10 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
 
     LdeChunk* chunks = {0};
     LdeChunk* temporalChunk = {0};
-    getLayerChunks(globalConfig, frameConfig, planeIdx, loq, tileIdx, &chunks);
+    if (!getLayerChunks(globalConfig, frameConfig, planeIdx, loq, tileIdx, &chunks)) {
+        VNLogError("Failed to resolve layer chunks - inconsistent chunk configuration");
+        return false;
+    }
     if (loq == LOQ0) {
         getTemporalChunk(globalConfig, frameConfig, planeIdx, tileIdx, &temporalChunk);
     } else {
@@ -189,6 +205,16 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
         coeffsNonzeroMask = entropyDecodeAllLayers(numLayers, tileHasEntropyDecode, (int32_t)tuState.tuTotal,
                                                    residualDecoders, zeros, coeffs, &minZeroCount);
 
+        if (coeffsNonzeroMask < 0) {
+            VNLogError("Entropy decode failed - likely stream corruption");
+            res = false;
+            break;
+        }
+
+        if (userDataEnabled && loq == LOQ1) {
+            applyUserData(&globalConfig->userData, coeffs);
+        }
+
         /* Decode temporal and track temporal run */
         const bool blockStart = ldeTuIsBlockStart(&tuState, tuIndex);
         if (clearBlockQueue == 0 && tileHasTemporalDecode && temporalEnabled) {
@@ -196,11 +222,11 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
                 temporalRun = entropyDecodeTemporal(&temporalDecoder, &temporal);
                 clearBlockRemainder = false;
 
-                if (temporalRun == EntropyNoData) {
+                if (temporalRun == EntropyNoData || temporalRun > (int32_t)tuState.tuTotal) {
                     temporalRun = (int32_t)tuState.tuTotal;
                 }
                 if (temporalRun <= 0) {
-                    VNLogError("Invalid temporalRun value %d", temporalRun);
+                    VNLogError("Invalid temporalRun value %d - likely stream corruption", temporalRun);
                     res = false;
                     break;
                 }
@@ -332,13 +358,12 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
                 temporalRun -= minZeroCount + 1;
             } else if (clearBlockQueue > 0) {
                 /* Case for an upcoming clear block or residual, whichever comes first */
-                int32_t nextBlockStart;
+                int32_t nextBlockStart = (int32_t)blockTUCount - 1;
                 if (tuIndex >= tuState.block.maxWholeBlockTu) {
-                    nextBlockStart =
-                        blockTUCount - ((tuIndex - tuState.block.maxWholeBlockTu) % blockTUCount) - 1;
+                    nextBlockStart -= (int32_t)((tuIndex - tuState.block.maxWholeBlockTu) % blockTUCount);
                 } else {
-                    nextBlockStart = (int32_t)blockTUCount -
-                                     ((tuIndex % tuState.block.tuPerRow) % tuState.block.tuPerBlock) - 1;
+                    nextBlockStart -=
+                        (int32_t)((tuIndex % tuState.block.tuPerRow) % tuState.block.tuPerBlock);
                 }
                 minZeroCount = minS32(nextBlockStart, minZeroCount);
                 temporalRun -= minZeroCount + 1;

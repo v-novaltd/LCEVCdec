@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -22,7 +22,7 @@ if (VN_SDK_BASE_DECODER)
     find_package(ffmpeg-libs REQUIRED)
 endif ()
 
-add_library(lcevc_dec_utility STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
+add_library(lcevc_dec_utility ${VN_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_utility)
 
 target_include_directories(lcevc_dec_utility PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")

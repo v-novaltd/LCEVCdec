@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,9 +12,9 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include <LCEVC/common/clock.h>
 #include <LCEVC/common/random.h>
 //
-#include <time.h>
 
 /*------------------------------------------------------------------------------*/
 
@@ -36,7 +36,7 @@ static inline uint32_t rotl(const uint32_t x, int amount)
 void ldcRandomInitialize(LdcRandom* random, uint64_t seed)
 {
     if (seed == 0) {
-        seed = (uint64_t)time(NULL);
+        seed = ldcClockWallSeconds();
     }
 
     /* Prepare initial state based upon seed. */

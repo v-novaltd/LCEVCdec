@@ -174,6 +174,7 @@ TEST_F(PipelineVulkanApplyFixture, ApplyGpuCommandBufferToPlane)
     tileArgs.bufferGpu = cmdBuffer;
     tileArgs.context = frameContext;
     tileArgs.loq = args.loq;
+    tileArgs.dds = args.dds;
     EXPECT_TRUE(pipeline->backend().applyTile(&tileArgs));
     compute.endCompute(frameContext);
     pipeline->addCompletionContext(frameContext);
@@ -327,6 +328,7 @@ protected:
         tileArgs.context = frameContext;
         tileArgs.loq = args.loq;
         tileArgs.highlightResiduals = params.highlight;
+        tileArgs.dds = args.dds;
         tileArgs.tuRasterOrder = params.surfaceRasterOrder;
 
         if (!pipeline->backend().applyTile(&tileArgs)) {
@@ -561,6 +563,7 @@ protected:
             tileArgs.bufferGpu = tile;
             tileArgs.context = ctx;
             tileArgs.loq = common.loq;
+            tileArgs.dds = common.dds;
             if (temporal) {
                 tileArgs.temporalPicture = temporalPic;
             }
@@ -630,6 +633,7 @@ protected:
         tile1.bufferGpu = m_cmdBuf1;
         tile1.context = ctx;
         tile1.loq = common.loq;
+        tile1.dds = common.dds;
         if (temporal) {
             tile1.temporalPicture = temporalPic;
         }
@@ -643,6 +647,7 @@ protected:
         tile2.bufferGpu = m_cmdBuf2;
         tile2.context = ctx;
         tile2.loq = common.loq;
+        tile2.dds = common.dds;
         if (temporal) {
             tile2.temporalPicture = temporalPic;
         }
@@ -689,8 +694,6 @@ protected:
 // picture directly.  The result must match applying them in separate sessions.
 TEST_F(MultiTileApplyFixture, DirectMergedMatchesSequential)
 {
-    GTEST_SKIP() << "Skipping - DEC-1078";
-
     auto* seqPic = allocPicture();
     auto* mergedPic = allocPicture();
 
@@ -711,8 +714,6 @@ TEST_F(MultiTileApplyFixture, DirectMergedMatchesSequential)
 // and Add (non-cleared blocks) as the decoder would produce.
 TEST_F(MultiTileApplyFixture, TemporalMergedMatchesSequential)
 {
-    GTEST_SKIP() << "Skipping - DEC-1078";
-
     auto* seqPic = allocPicture();
     auto* mergedPic = allocPicture();
 

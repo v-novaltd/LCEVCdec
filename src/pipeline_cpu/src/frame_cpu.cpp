@@ -19,6 +19,7 @@
 #include "pipeline_config_cpu.h"
 #include "tasks_cpu.h"
 
+#include <LCEVC/common/log.h>
 #include <LCEVC/enhancement/config_parser.h>
 #include <LCEVC/enhancement/config_types.h>
 #include <LCEVC/pipeline/buffer_alignment.h>

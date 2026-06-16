@@ -105,6 +105,9 @@ typedef enum LdpColorFormat
     LdpColorFormatGRAY_14_LE = 5004,
     LdpColorFormatGRAY_16_LE = 5005,
 
+    LdpColorFormatP010_10 = 6001,
+    LdpColorFormatP016_16 = 6002,
+
     LdpColorFormatForceInt32 = 0x7fffffff,
 } LdpColorFormat;
 
@@ -314,7 +317,7 @@ typedef enum LdpColorSpace
     LdpColorSpaceForceInt32 = 0x7ffffff,
 } LdpColorSpace;
 
-// Describes pipleine capacity (curent and maximum)
+// Describes pipeline capacity (current and maximum)
 //
 typedef struct LdpPipelineCapacity
 {

@@ -23,6 +23,7 @@
 #endif
 
 {
+    VNUnused(srcHeight);
     const __m128i kRound = _mm_set1_epi32(0x2000);
     const __m128i kMin16 = _mm_set1_epi16(-0x4000); /* see saturateS15 for explanation */
     const __m128i kMax16 = _mm_set1_epi16(0x4000 - 1);
@@ -80,6 +81,8 @@
         const __m128i ditherOffset = _mm_set1_epi16((int16_t)dither->strength);
         const __m128i ditherShift = _mm_cvtsi32_si128((int32_t)params.shift); // Shift when < 16bit
         const __m128i ditherMul = _mm_set1_epi16((int16_t)(dither->strength * 2u + 1u));
+#else
+        VNUnused(dither);
 #endif
 
 #if IN_FIXED_POINT == FP_U8

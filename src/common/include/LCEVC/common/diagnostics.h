@@ -27,7 +27,6 @@
 //
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
 
 /* Maximum number of handlers that can be registered
  */
@@ -160,8 +159,8 @@ typedef struct DiagRecord
     const LdcDiagSite* site; ///< Where the diagnostic was raised
     uint64_t timestamp;      ///< When the diagnostic was raised in nanoseconds 'system clock'
     uint32_t threadId;       ///< Thread that raised it
-    uint32_t size; ///< Type dependant size associated with diagnostic - e.g. variable data size
-    LdcDiagValue value; ///< Type dependant value associated with diagnostic - e.g. a metric or id
+    uint32_t size; ///< Type dependent size associated with diagnostic - e.g. variable data size
+    LdcDiagValue value; ///< Type dependent value associated with diagnostic - e.g. a metric or id
 } LdcDiagRecord;
 
 #ifdef __cplusplus
@@ -173,12 +172,14 @@ extern "C"
  * @param user User pointer provided when the handler was registered.
  * @param site Static metadata describing the event (type, level, args).
  * @param record Per-event data such as timestamp, thread id, and value/id.
- * @param values Array of argument values (length = site->argumentCount). For
- *               LdcDiagTypeLogFormatted this points at the formatted string buffer.
+ * @param values Array of argument values. For LdcDiagTypeLogFormatted this points at the formatted
+ *               string buffer.
+ * @param valuesCount Number of values.
+ *
  * @return true to stop propagation to earlier handlers, false to continue.
  */
 typedef bool LdcDiagHandler(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
-                            const LdcDiagValue* values);
+                            const LdcDiagValue* values, uint32_t valuesCount);
 
 /*! Diagnostics handler that writes log events to a stdio FILE*.
  *
@@ -187,13 +188,14 @@ typedef bool LdcDiagHandler(void* user, const LdcDiagSite* site, const LdcDiagRe
  * @param user User pointer provided when the handler was registered.
  * @param site Static metadata describing the event (type, level, args).
  * @param record Per-event data such as timestamp, thread id, and value/id.
- * @param values Array of argument values (length = site->argumentCount). For
- *               LdcDiagTypeLogFormatted this points at the formatted string buffer.
+ * @param values Array of argument values. For LdcDiagTypeLogFormatted this points at the formatted
+ *               string buffer.
+ * @param valuesCount Number of values.
  *
  * @return True if event was a Log message of some sort.
  */
 bool ldcDiagHandlerStdio(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
-                         const LdcDiagValue* values);
+                         const LdcDiagValue* values, uint32_t valuesCount);
 
 /*! Initialize diagnostics.
  *
@@ -261,13 +263,14 @@ void ldcDiagnosticsLogLevel(LdcLogLevel maxLevel);
  * @param dstSize Size of destination buffer.
  * @param site Static metadata describing the event (type, level, args).
  * @param record Per-event data such as timestamp, thread id, and value/id.
- * @param values Array of argument values (length = site->argumentCount). For
- *               LdcDiagTypeLogFormatted this points at the formatted string buffer.
+ * @param values Array of argument values. For LdcDiagTypeLogFormatted this points at the formatted
+ *               string buffer.
+ * @param valuesCount Number of values.
  *
  * @return Number of characters written (excluding null terminator) or 0 on failure.
  */
 int ldcDiagnosticFormatLog(char* dst, uint32_t dstSize, const LdcDiagSite* site,
-                           const LdcDiagRecord* record, const LdcDiagValue* values);
+                           const LdcDiagRecord* record, const LdcDiagValue* values, uint32_t valuesCount);
 
 /*! Format a trace/metric record as a Perfetto JSON event.
  *
@@ -276,13 +279,14 @@ int ldcDiagnosticFormatLog(char* dst, uint32_t dstSize, const LdcDiagSite* site,
  * @param site Static metadata describing the event (type, level, args).
  * @param record Per-event data such as timestamp, thread id, and value/id.
  * @param processId The process ID to record in any trace events.
- * @param values Array of argument values (length = site->argumentCount). For
- *               LdcDiagTypeLogFormatted this points at the formatted string buffer.
+ * @param values Array of argument values. For LdcDiagTypeLogFormatted this points at the formatted string buffer.
+ * @param valuesCount Number of values.
  *
  * @return Number of characters written or 0 if the event is not traceable or did not fit.
  */
 int ldcDiagnosticFormatJson(char* dst, uint32_t dstSize, const LdcDiagSite* site,
-                            const LdcDiagRecord* record, uint32_t processId, const LdcDiagValue* values);
+                            const LdcDiagRecord* record, uint32_t processId,
+                            const LdcDiagValue* values, uint32_t valuesCount);
 
 /*! Open a trace output file and register a Perfetto JSON handler.
  *

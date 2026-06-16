@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -354,7 +354,7 @@ static int32_t extractEnhancementFromNAL(uint8_t* data, uint32_t dataSize, LCEVC
     }
 
     if ((outputData == NULL) || (outputSize == NULL) || ((int32_t)(codecType) < 0) ||
-        ((int32_t)(codecType) >= sizeof(kNalTypes) / sizeof(kNalTypes[0]))) {
+        ((size_t)(codecType) >= sizeof(kNalTypes) / sizeof(kNalTypes[0]))) {
         return -1;
     }
 

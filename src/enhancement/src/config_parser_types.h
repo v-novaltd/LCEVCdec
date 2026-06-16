@@ -130,7 +130,15 @@ static const LdeKernel kKernels[] = {
     /* US_Unspecified */
     {{0}, 0, false}};
 
+// From LCEVC spec, aligned to ITU-T H.273 | ISO/IEC 23091-2:2019, 8.6, ITU-T H.264 & H.265 Table E-1
 static const uint32_t kVUIAspectRatioIDCExtendedSAR = 255;
+static const uint32_t kVUIAspectRatioIDCCount = 17;
+// clang-format off
+// aspect_ratio_idc ->                                      0   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15  16
+static const uint16_t kVUIAspectRatioIDCNumerators[]   = {  1,  1, 12, 10, 16, 40, 24, 20, 32, 80, 18, 15, 64,160,  4,  3,  2 };
+static const uint16_t kVUIAspectRatioIDCDenominators[] = {  1,  1, 11, 11, 11, 33, 11, 11, 11, 33, 11, 11, 33, 99,  3,  2,  1 };
+// clang-format on
+
 static const uint64_t kMaximumConformanceWindowValue = (1 << 16) - 1;
 
 enum

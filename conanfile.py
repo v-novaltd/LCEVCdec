@@ -148,7 +148,7 @@ class LCEVCDecoderSDK(ConanFile):
 
         if self.options.vulkan:
             if self.settings.os != "Android":
-                reqs.extend(['vulkan-loader/1.4.313', 'vulkan-headers/1.4.313'])
+                reqs.extend(['vulkan-loader/1.4.313', 'vulkan-headers/1.4.313', 'zlib/1.2.13'])
 
                 if self.options.executables:
                     reqs.append('glfw/3.3.8')

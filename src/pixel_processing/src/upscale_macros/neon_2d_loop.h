@@ -67,6 +67,8 @@
         const int16x8_t ditherOffset = vdupq_n_s16((int16_t)dither->strength);
         const int16x8_t ditherShift = vdupq_n_s16(params.shift); // Shift when < 16bit
         const uint16_t ditherMul = (uint16_t)(dither->strength * 2u + 1u);
+#else
+        VNUnused(dither);
 #endif
 
         // Get clamped source row indices

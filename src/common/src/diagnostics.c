@@ -13,6 +13,9 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "string_format.h"
+
+#include <LCEVC/common/limit.h>
+#include <LCEVC/common/memory.h>
 //
 #include <LCEVC/common/check.h>
 #include <LCEVC/common/diagnostics.h>
@@ -29,10 +32,16 @@
 #include <time.h>
 #endif
 
-#define kCapacity 1024
-#define kVarDataSize 1024 * 1024
+// Capacity of diagnostic ring buffer in records
+#define VN_CAPACITY 1024
 
-#define kMaxRecordVarData 1024
+// Total bytes of exta variable data associated with diagnostic ring buffer
+#define VN_VAR_DATA_SIZE 1024 * 1024
+
+// Maximum number of values for diagnostic records
+//
+// NB: This also sets the limit for pre-formatted character strings.
+#define VN_MAX_RECORD_VAR_COUNT 64
 
 // Pointer to state to use - either allocated with this address space, or
 // passed in from parent library.
@@ -57,14 +66,14 @@ const LdcDiagSite ldcDiagnosticsTraceScopedEndSite = {LdcDiagTypeTraceEnd};
 // NB: Calling code should arrange appropriate locking
 //
 static void applyDiagnosticsHandlers(const LdcDiagSite* site, const LdcDiagRecord* record,
-                                     const LdcDiagValue* values)
+                                     const LdcDiagValue* values, uint32_t valuesCount)
 {
     for (uint32_t i = ldcDiagnosticsState->handlersCount; i-- != 0;) {
         if (ldcDiagnosticsState->handlers[i].handler == NULL) {
             continue;
         }
         if (ldcDiagnosticsState->handlers[i].handler(ldcDiagnosticsState->handlers[i].userData,
-                                                     site, record, values)) {
+                                                     site, record, values, valuesCount)) {
             break;
         }
     }
@@ -73,7 +82,7 @@ static void applyDiagnosticsHandlers(const LdcDiagSite* site, const LdcDiagRecor
 #if VN_SDK_FEATURE(DIAGNOSTICS_ASYNC)
 
 // Special site used to mark a flush in buffer
-static const LdcDiagSite diagnosticsFlushSite = {LdcDiagTypeFlush};
+static const LdcDiagSite kDiagnosticsFlushSite = {LdcDiagTypeFlush};
 
 static intptr_t diagnosticThreadFn(void* argument)
 {
@@ -83,7 +92,7 @@ static intptr_t diagnosticThreadFn(void* argument)
     while (true) {
         // Pop record from buffer (diagnostic buffer is thread safe)
         LdcDiagRecord rec;
-        LdcDiagValue values[kMaxRecordVarData / sizeof(LdcDiagValue)];
+        LdcDiagValue values[VN_MAX_RECORD_VAR_COUNT];
         size_t varDataSize = 0;
         ldcDiagnosticsBufferPop(&state->diagnosticsBuffer, &rec, (uint8_t*)&values, sizeof(values),
                                 &varDataSize);
@@ -96,9 +105,10 @@ static intptr_t diagnosticThreadFn(void* argument)
         // All the handler work is done under the per state mutex
         threadMutexLock(&state->mutex);
 
-        applyDiagnosticsHandlers(rec.site, &rec, values);
+        applyDiagnosticsHandlers(rec.site, &rec, values,
+                                 minU32(rec.site->argumentCount, VNArraySize(values)));
 
-        if (rec.site == &diagnosticsFlushSite && state->flushCount > 0) {
+        if (rec.site == &kDiagnosticsFlushSite && state->flushCount > 0) {
             // Got a flush record - signal anything waiting when all pending flushes have been seen
             state->flushCount--;
             if (state->flushCount == 0) {
@@ -128,13 +138,9 @@ void ldcDiagnosticsInitialize(void* parentState)
 
     if (previousRefCount == 0) {
         // Diagnostic state needs initializing
-#if VN_OS(WINDOWS)
-        QueryPerformanceFrequency(&state->performanceCounterFrequency);
-#endif
-
 #if VN_SDK_FEATURE(DIAGNOSTICS_ASYNC)
         state->flushCount = 0;
-        ldcDiagnosticsBufferInitialize(&state->diagnosticsBuffer, kCapacity, kVarDataSize,
+        ldcDiagnosticsBufferInitialize(&state->diagnosticsBuffer, VN_CAPACITY, VN_VAR_DATA_SIZE,
                                        ldcMemoryAllocatorMalloc());
         threadMutexInitialize(&state->mutex);
         threadMutexLock(&state->mutex);
@@ -174,7 +180,7 @@ void ldcDiagnosticsRelease(void)
     }
 
     if (previousRefCount == 0) {
-        // Clamp use count to 0 - relase called too many times
+        // Clamp use count to 0 - release called too many times
         atomic_store_explicit(&state->refCount, 0, memory_order_release);
         ldcDiagnosticsState = NULL;
         localDiagnosticsUnlock();
@@ -226,7 +232,7 @@ void ldcDiagnosticsFlush(void)
 
     // Push 'flush' record into buffer
     LdcDiagRecord rec = {0};
-    rec.site = &diagnosticsFlushSite;
+    rec.site = &kDiagnosticsFlushSite;
     ldcDiagnosticsBufferPush(&ldcDiagnosticsState->diagnosticsBuffer, &rec, NULL, 0);
 
     while (ldcDiagnosticsState->flushCount != 0) {
@@ -322,9 +328,12 @@ bool ldcDiagnosticsHandlerPop(LdcDiagHandler* handler, void** userData)
 
 // Extract arguments from stack into an array of values
 //
-void ldcDiagnosticsCopyArguments(const LdcDiagSite* site, LdcDiagValue values[], va_list args)
+uint32_t ldcDiagnosticsCopyArguments(const LdcDiagSite* site, LdcDiagValue values[],
+                                     uint32_t valuesCount, va_list args)
 {
-    for (uint32_t i = 0; i < site->argumentCount; ++i) {
+    const uint32_t count = minU32(site->argumentCount, valuesCount);
+
+    for (uint32_t i = 0; i < count; ++i) {
         switch (site->argumentTypes[i]) {
             case LdcDiagArgId: {
                 values[i].id = va_arg(args, uint64_t);
@@ -404,16 +413,18 @@ void ldcDiagnosticsCopyArguments(const LdcDiagSite* site, LdcDiagValue values[],
             default: assert(0); break;
         }
     }
+
+    return count;
 }
 
 #if !VN_SDK_FEATURE(DIAGNOSTICS_ASYNC)
 
 // Apply diagnostic handlers whilst holding the overall diagnosticState lock
 static inline void applyDiagnosticsHandlersLocked(const LdcDiagSite* site, const LdcDiagRecord* record,
-                                                  const LdcDiagValue* values)
+                                                  const LdcDiagValue* values, uint32_t valuesCount)
 {
     localDiagnosticsLock();
-    applyDiagnosticsHandlers(site, record, values);
+    applyDiagnosticsHandlers(site, record, values, valuesCount);
     localDiagnosticsUnlock();
 }
 
@@ -429,14 +440,14 @@ void ldcDiagEvent(const LdcDiagSite* site, size_t valuesSize, ...)
     ldcDiagnosticsRecordSet(&record, site);
 
     // Extract arguments into a value array
-    LdcDiagValue* values = alloca(valuesSize);
+    LdcDiagValue values[VN_MAX_RECORD_VAR_COUNT];
 
     va_list args;
     va_start(args, valuesSize);
-    ldcDiagnosticsCopyArguments(site, values, args);
+    const uint32_t count = ldcDiagnosticsCopyArguments(site, values, VNArraySize(values), args);
     va_end(args);
 
-    applyDiagnosticsHandlersLocked(site, &record, values);
+    applyDiagnosticsHandlersLocked(site, &record, values, count);
 }
 
 void ldcDiagEventFormatted(const LdcDiagSite* site, const char* fmt, ...)
@@ -455,7 +466,8 @@ void ldcDiagEventFormatted(const LdcDiagSite* site, const char* fmt, ...)
     record.size = vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    applyDiagnosticsHandlersLocked(site, &record, (LdcDiagValue*)buffer);
+    applyDiagnosticsHandlersLocked(site, &record, (LdcDiagValue*)buffer,
+                                   sizeof(buffer) / sizeof(LdcDiagValue));
 }
 
 void ldcTracingScopedBegin(const LdcDiagSite* site)
@@ -463,7 +475,7 @@ void ldcTracingScopedBegin(const LdcDiagSite* site)
     LdcDiagRecord record = {0};
     ldcDiagnosticsRecordSetAll(&record, site, 1, 0);
 
-    applyDiagnosticsHandlersLocked(site, &record, NULL);
+    applyDiagnosticsHandlersLocked(site, &record, NULL, 0);
 }
 
 void ldcTracingScopedEnd(const LdcDiagSite* site)
@@ -471,7 +483,7 @@ void ldcTracingScopedEnd(const LdcDiagSite* site)
     LdcDiagRecord record = {0};
     ldcDiagnosticsRecordSetAll(&record, site, 0, 0);
 
-    applyDiagnosticsHandlersLocked(site, &record, NULL);
+    applyDiagnosticsHandlersLocked(site, &record, NULL, 0);
 }
 
 void ldcTracingEvent(const LdcDiagSite* site, size_t valuesSize, ...)
@@ -480,14 +492,14 @@ void ldcTracingEvent(const LdcDiagSite* site, size_t valuesSize, ...)
     ldcDiagnosticsRecordSet(&record, site);
 
     // Extract arguments into a value array
-    LdcDiagValue* values = alloca(valuesSize);
+    LdcDiagValue values[VN_MAX_RECORD_VAR_COUNT];
 
     va_list args;
     va_start(args, valuesSize);
-    ldcDiagnosticsCopyArguments(site, values, args);
+    const uint32_t count = ldcDiagnosticsCopyArguments(site, values, VNArraySize(values), args);
     va_end(args);
 
-    applyDiagnosticsHandlersLocked(site, &record, values);
+    applyDiagnosticsHandlersLocked(site, &record, values, count);
 }
 
 void ldcMetricInt32(const LdcDiagSite* site, int32_t value)
@@ -496,7 +508,7 @@ void ldcMetricInt32(const LdcDiagSite* site, int32_t value)
     ldcDiagnosticsRecordSetAll(&record, site, 0, 0);
     record.value.valueInt32 = value;
 
-    applyDiagnosticsHandlers(site, &record, NULL);
+    applyDiagnosticsHandlers(site, &record, NULL, 0);
 }
 
 void ldcMetricUInt32(const LdcDiagSite* site, uint32_t value)
@@ -505,7 +517,7 @@ void ldcMetricUInt32(const LdcDiagSite* site, uint32_t value)
     ldcDiagnosticsRecordSetAll(&record, site, 0, 0);
     record.value.valueUInt32 = value;
 
-    applyDiagnosticsHandlersLocked(site, &record, NULL);
+    applyDiagnosticsHandlersLocked(site, &record, NULL, 0);
 }
 
 void ldcMetricInt64(const LdcDiagSite* site, int64_t value)
@@ -514,7 +526,7 @@ void ldcMetricInt64(const LdcDiagSite* site, int64_t value)
     ldcDiagnosticsRecordSetAll(&record, site, 0, 0);
     record.value.valueInt64 = value;
 
-    applyDiagnosticsHandlersLocked(site, &record, NULL);
+    applyDiagnosticsHandlersLocked(site, &record, NULL, 0);
 }
 
 void ldcMetricUInt64(const LdcDiagSite* site, uint64_t value)
@@ -523,7 +535,7 @@ void ldcMetricUInt64(const LdcDiagSite* site, uint64_t value)
     ldcDiagnosticsRecordSetAll(&record, site, 0, 0);
     record.value.valueUInt64 = value;
 
-    applyDiagnosticsHandlersLocked(site, &record, NULL);
+    applyDiagnosticsHandlersLocked(site, &record, NULL, 0);
 }
 
 void ldcMetricFloat32(const LdcDiagSite* site, float value)
@@ -532,7 +544,7 @@ void ldcMetricFloat32(const LdcDiagSite* site, float value)
     ldcDiagnosticsRecordSetAll(&record, site, 0, 0);
     record.value.valueFloat32 = value;
 
-    applyDiagnosticsHandlersLocked(site, &record, NULL);
+    applyDiagnosticsHandlersLocked(site, &record, NULL, 0);
 }
 
 void ldcMetricFloat64(const LdcDiagSite* site, double value)
@@ -541,7 +553,7 @@ void ldcMetricFloat64(const LdcDiagSite* site, double value)
     ldcDiagnosticsRecordSetAll(&record, site, 0, 0);
     record.value.valueFloat64 = value;
 
-    applyDiagnosticsHandlersLocked(site, &record, NULL);
+    applyDiagnosticsHandlersLocked(site, &record, NULL, 0);
 }
 
 #endif

@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -51,7 +51,7 @@ typedef struct LdcRandom
 /*! Initializes the random module.
  *
  * \param random [in]          The random module to initialize.
- * \param seed   [in]          The seed to initialize with, if 0 it will use time().
+ * \param seed   [in]          The seed to initialize with, if 0 it will use the wall clock.
  */
 void ldcRandomInitialize(LdcRandom* random, uint64_t seed);
 

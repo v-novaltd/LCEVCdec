@@ -15,6 +15,7 @@
 #include "sharpen_common.h"
 
 #include <LCEVC/build_config.h>
+#include <stddef.h>
 
 #if VN_SDK_FEATURE(NEON)
 

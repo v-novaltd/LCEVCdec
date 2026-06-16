@@ -183,7 +183,7 @@ static inline int ldcVectorFindUnorderedIdx(const LdcVector* vector, LdcVectorCo
  *
  * @param[in] vector            An initialized vector.
  * @param[in] compareFn         Pointer function that provides a comparison between elements <0, 0 or >0
- * @param[in] element           Pointer to `elementSize` bytes of element ot be inserted.
+ * @param[in] element           Pointer to `elementSize` bytes of element to be inserted.
  * @return                      Pointer to indexed element, or NULL if index .ge. size.
  */
 static inline void* ldcVectorInsert(LdcVector* vector, LdcVectorCompareFn compareFn, const void* element);

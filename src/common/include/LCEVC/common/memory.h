@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -70,8 +70,8 @@ typedef struct
 typedef struct
 {
     /*!
-     * Allocate a block of memory of given size, using aligned from allocation - recored details in
-     * 'allocation'. `allocation->ptr` will set to NULL if allocation failed.
+     * Allocate a block of memory of given size, using aligned allocation - record details in
+     * 'allocation'. `allocation->ptr` will be set to NULL if allocation failed.
      *
      * @param[in]       allocator     The memory allocator to allocate with.
      * @param[inout]    allocation    Details of allocation are written back to here.
@@ -82,7 +82,7 @@ typedef struct
                      size_t size, size_t alignment, const LdcDiagSite* site);
     /*!
      * Adjust an allocation, given a new size. Any previous data is copied to new block, up to the minimum of the old and new sizes.
-     * `allocation->ptr` will set to NULL if teh reaallocation failed.
+     * `allocation->ptr` will set to NULL if the reallocation failed.
      *
      * @param[in]       allocator     The memory allocator to allocate with.
      * @param[inout]    allocation    Details of allocation are to be adjusted.
@@ -478,7 +478,7 @@ LdcMemoryAllocator* ldcMemoryAllocatorMalloc(void);
 /** Helper to align a size to a given multiple by rounding up if necessary */
 #define VNAlignSize(sz, align) (((sz) + ((align)-1)) & ~((align) -1))
 
-/** Helper to get from a pointer to strcuture member to the container - eg: from linked list node*/
+/** Helper to get from a pointer to structure member to the container - eg: from linked list node*/
 #define VNContainerOf(ptr, type, member) ((type*)((char*)(ptr)-offsetof(type, member)))
 
 /* clang-format on */

@@ -17,6 +17,7 @@
 #ifndef VN_LCEVC_PIPELINE_PICTURE_LAYOUT_H
 #define VN_LCEVC_PIPELINE_PICTURE_LAYOUT_H
 
+#include <LCEVC/enhancement/bitstream_types.h>
 #include <LCEVC/pipeline/types.h>
 
 // NOLINTBEGIN(modernize-use-using)
@@ -61,11 +62,12 @@ typedef struct LdpPictureMargins
 //
 struct LdpPictureLayoutInfo
 {
-    LdpColorFormat format;    // The format
-    LdpColorSpace colorSpace; // High-level colorspace distinction
-    uint8_t colorComponents;  // Number of distinct color components (also called channels) in image
-    uint8_t validWidthMask;   // Width bits that must be zero for valid picture
-    uint8_t validHeightMask;  // Height bits that must be zero for valid picture
+    LdpColorFormat format;      // The format
+    LdpColorSpace colorSpace;   // High-level colorspace distinction
+    LdeChroma chromSubsampling; // Chroma subsumpling from LCEVC spec.
+    uint8_t colorComponents; // Number of distinct color components (also called channels) in image
+    uint8_t validWidthMask;  // Width bits that must be zero for valid picture
+    uint8_t validHeightMask; // Height bits that must be zero for valid picture
 
     uint8_t planeWidthShift[kLdpPictureMaxNumPlanes]; // This plane's width (in "pixels", i.e. repeating interleaved units) is the nominal width, divided by 2^planeWidthShift
     uint8_t planeHeightShift[kLdpPictureMaxNumPlanes]; // This plane's height is the nominal height, divided by 2^planeHeightShift
@@ -171,6 +173,12 @@ bool ldpPictureLayoutIsCompatible(const LdpPictureLayout* layout, const LdpPictu
 uint8_t ldpColorFormatBitsPerSample(LdpColorFormat format);
 uint8_t ldpColorFormatPlaneWidthShift(LdpColorFormat format, uint32_t planeIdx);
 uint8_t ldpColorFormatPlaneHeightShift(LdpColorFormat format, uint32_t planeIdx);
+
+// Return the LdeChroma subsampling implied by a color format
+LdeChroma ldpColorFormatChroma(LdpColorFormat format);
+
+// Return the LdeChroma subsampling implied by a layout.
+LdeChroma ldpPictureLayoutChroma(const LdpPictureLayout* layout);
 
 // Utilities for checking LdpPictureDesc
 //

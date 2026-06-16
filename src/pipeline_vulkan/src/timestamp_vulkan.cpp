@@ -254,7 +254,7 @@ void TimestampVulkan::report() const
     }
 
     // Helper to convert a device timestamp to the calibrated domain (nanoseconds).
-    auto toCalibratedNs = [&](uint64_t deviceTs) -> double {
+    [[maybe_unused]] auto toCalibratedNs = [&](uint64_t deviceTs) -> double {
         const auto delta = static_cast<int64_t>(deviceTs - deviceCalibration);
         return static_cast<double>(hostCalibration) +
                static_cast<double>(delta) * static_cast<double>(m_timestampPeriod);
@@ -263,7 +263,7 @@ void TimestampVulkan::report() const
     VNLogInfo("Timestamps: period:%g count:%d %s", m_timestampPeriod, queryCount,
               m_getCalibratedTimestamps ? "Calibrated" : "");
 
-    float total = 0.0f;
+    [[maybe_unused]] float total = 0.0f;
     for (size_t i = 0; i < m_events.size(); ++i) {
         const auto& evt = m_events[i];
         const uint64_t timestamp = results[evt.queryIndex * 2];

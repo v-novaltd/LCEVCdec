@@ -19,7 +19,12 @@
 #include "picture_lock_vulkan.h"
 #include "pipeline_vulkan.h"
 
+#include <LCEVC/common/log.h>
 #include <LCEVC/pipeline/types.h>
+
+#if VN_OS(ANDROID)
+#include "buffer_vulkan_ahb.h"
+#endif
 
 namespace lcevc_dec::pipeline_vulkan {
 
@@ -28,7 +33,16 @@ PictureVulkan::PictureVulkan(PipelineVulkan& pipeline, LdcMemoryAllocator* alloc
     , m_allocator(allocator ? allocator : pipeline.staticAllocator())
 {}
 
-PictureVulkan::~PictureVulkan() {}
+PictureVulkan::~PictureVulkan()
+{
+#if VN_OS(ANDROID)
+    if (m_ahbBuffer) {
+        buffer = nullptr;
+        m_hasExternalBuffer = false;
+        m_ahbBuffer.reset();
+    }
+#endif
+}
 
 bool PictureVulkan::lock(LdpAccess access, LdpPictureLock*& lockOut)
 {
@@ -40,13 +54,13 @@ bool PictureVulkan::lock(LdpAccess access, LdpPictureLock*& lockOut)
         return false;
     }
 
-    if (buffer == nullptr) {
+    if (buffer == nullptr && !m_hasExternalPlanes) {
         // Unbound - make buffer with usage according to first access
         // This is a little bit sketchy - infers how picture is used from it's
         // first access, but in practice it seems sufficient.
         switch (access) {
-            case LdpAccessRead: bindMemory(pipeline::BufferUsageIn); break;
-            case LdpAccessWrite: bindMemory(pipeline::BufferUsageOut); break;
+            case LdpAccessRead: bindBuffer(pipeline::BufferUsageIn); break;
+            case LdpAccessWrite: bindBuffer(pipeline::BufferUsageOut); break;
             default: return false;
         }
         if (buffer == nullptr) {
@@ -87,9 +101,9 @@ void PictureVulkan::getPlaneDescInternal(uint32_t plane, LdpPicturePlaneDesc& de
 {
     assert(plane < kLdpPictureMaxNumPlanes);
 
-    if (!m_external) {
+    if (!m_hasExternalPlanes) {
         assert(buffer);
-        const BufferVulkan* bufferVulkan = fromPipeline(buffer);
+        const BufferVulkanVma* bufferVulkan = fromPipeline(buffer);
         if (!isLocked() || !bufferVulkan->m_mapped) {
             VNLogError("Can't get PlaneDesc for unlocked picture.");
             assert(0);
@@ -102,5 +116,37 @@ void PictureVulkan::getPlaneDescInternal(uint32_t plane, LdpPicturePlaneDesc& de
         desc = m_externalPlaneDescs[plane];
     }
 }
+
+#if VN_OS(ANDROID)
+bool PictureVulkan::setAhbBuffer(PipelineVulkan& pipeline, AHardwareBuffer* ahb)
+{
+    if (!ahb) {
+        VNLogError("PictureVulkan::setAhbBuffer: null AHardwareBuffer");
+        return false;
+    }
+
+    auto ahbBuffer = BufferVulkanAhb::create(pipeline.backend(), ahb);
+    if (!ahbBuffer || ahbBuffer->size() == 0) {
+        VNLogError("PictureVulkan::setAhbBuffer: failed to import AHardwareBuffer");
+        return false;
+    }
+
+    // If the AHB has an implicit picture layout, PictureBase::setExternalBuffer()
+    // will make the picture desc use that layout.  Dimension mismatches are
+    // warnings rather than failures; colour format mismatches are silently
+    // overridden by the hardware buffer's implicit format.
+
+    // Clean up any previous AHB buffer
+    if (m_ahbBuffer) {
+        buffer = nullptr;
+        m_hasExternalBuffer = false;
+        m_ahbBuffer.reset();
+    }
+
+    m_ahbBuffer = std::move(ahbBuffer);
+    setExternalBuffer(m_ahbBuffer.get());
+    return true;
+}
+#endif
 
 } // namespace lcevc_dec::pipeline_vulkan

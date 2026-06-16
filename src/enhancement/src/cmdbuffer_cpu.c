@@ -48,6 +48,7 @@ enum CmdBufferCpuConfig
 static bool cmdBufferStorageResize(LdeCmdBufferCpuStorage* store, uint32_t capacity, uint64_t diagId)
 {
     assert(store);
+    VNUnused(diagId);
 
     if (capacity == store->end - store->start) {
         return true;
@@ -119,6 +120,7 @@ static bool cmdBufferStorageInitialize(LdcMemoryAllocator* allocator, LdeCmdBuff
 static void cmdBufferStorageFree(LdeCmdBufferCpuStorage* store, uint64_t diagId)
 {
     assert(store);
+    VNUnused(diagId);
 
     if (store->allocator && store->start) {
         LdcMemoryAllocation storeAllocation = store->allocation;
@@ -276,12 +278,12 @@ bool ldeCmdBufferCpuAppend(LdeCmdBufferCpu* cmdBuffer, LdeCmdBufferCpuCmd comman
     return true;
 }
 
-void ldeCmdBufferCpuSplit(const LdeCmdBufferCpu* srcBuffer)
+void ldeCmdBufferCpuSplit(const LdeCmdBufferCpu* cmdBuffer)
 {
-    const uint16_t numEntryPoints = srcBuffer->numEntryPoints;
-    LdeCmdBufferCpuEntryPoint* entryPoints = srcBuffer->entryPoints;
-    const uint32_t groupSize = srcBuffer->count / numEntryPoints;
-    const uint8_t blockShift = (srcBuffer->transformSize == 16) ? 6 : 8;
+    const uint16_t numEntryPoints = cmdBuffer->numEntryPoints;
+    LdeCmdBufferCpuEntryPoint* entryPoints = cmdBuffer->entryPoints;
+    const uint32_t groupSize = cmdBuffer->count / numEntryPoints;
+    const uint8_t blockShift = (cmdBuffer->transformSize == 16) ? 6 : 8;
     uint32_t splitPoint = groupSize;
 
     int32_t dataOffset = 0;
@@ -295,8 +297,8 @@ void ldeCmdBufferCpuSplit(const LdeCmdBufferCpu* srcBuffer)
     entryPoints[0].commandOffset = 0;
     entryPoints[0].dataOffset = 0;
     uint32_t cmdCount = 0;
-    for (; cmdCount < srcBuffer->count; cmdCount++) {
-        const uint8_t* commandPtr = (const uint8_t*)(srcBuffer->data.start) + cmdOffset;
+    for (; cmdCount < cmdBuffer->count; cmdCount++) {
+        const uint8_t* commandPtr = (const uint8_t*)(cmdBuffer->data.start) + cmdOffset;
         const LdeCmdBufferCpuCmd command = (const LdeCmdBufferCpuCmd)(*commandPtr & 0xC0);
         const uint8_t jumpSignal = *commandPtr & 0x3F;
 
@@ -313,14 +315,14 @@ void ldeCmdBufferCpuSplit(const LdeCmdBufferCpu* srcBuffer)
             cmdIncrement += 4;
         }
 
-        const int32_t currentBlock = (tuIndex + jump) >> blockShift;
+        const int32_t currentBlock = (int32_t)((tuIndex + jump) >> blockShift);
         if (cmdCount > splitPoint && bufferIndex < (numEntryPoints - 1) && currentBlock != lastCmdBlock) {
             entryPoints[bufferIndex].count = cmdCount - lastBufferCount;
             bufferIndex++;
             entryPoints[bufferIndex].initialJump = tuIndex;
             entryPoints[bufferIndex].commandOffset = cmdOffset;
             entryPoints[bufferIndex].dataOffset =
-                (int32_t)(dataOffset * srcBuffer->transformSize * sizeof(int16_t));
+                (dataOffset * cmdBuffer->transformSize * (int32_t)sizeof(int16_t));
             splitPoint += groupSize;
             lastBufferCount = cmdCount;
         }

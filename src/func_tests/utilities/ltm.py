@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -130,12 +130,12 @@ def initialize_ltm():
 def ltm_generate_regen_image(test_runner, subsampling, test_dir, encode_path):
     output_path = 'ltm_ref.yuv'
     ltm_runner = get_runner(os.path.abspath(os.path.join(
-        LOCAL_LTM_PATH, 'ModelDecoder')), test_dir, force_local=True)
+        LOCAL_LTM_PATH, 'ModelDecoder')), LOCAL_LTM_PATH, force_local=True)
     ltm_runner.set_param('--input_file', encode_path)
     ltm_runner.set_param('--base', 'hevc')
     ltm_runner.set_param('--encapsulation', 'sei_reg')
     ltm_runner.set_param('--format', f'yuv{subsampling}p')
-    ltm_runner.set_param('--output_file', output_path)
+    ltm_runner.set_param('--output_file', os.path.abspath(os.path.join(test_dir, output_path)))
     test_runner.record_cmd('ltm', ltm_runner.get_command_line())
     ltm_runner.run(assert_rc=True)
 

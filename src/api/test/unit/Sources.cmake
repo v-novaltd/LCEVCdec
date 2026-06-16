@@ -20,6 +20,7 @@ set(SOURCES
     "src/test_api_bad_streams.cpp"
     "src/test_api_bad_streams.cpp"
     "src/test_api_events_threaded.cpp"
+    "src/test_api_peek.cpp"
     "src/test_event_dispatcher.cpp"
     "src/test_event_log.cpp"
     "src/test_pipeline_types.cpp"

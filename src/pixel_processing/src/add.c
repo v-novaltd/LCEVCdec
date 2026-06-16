@@ -51,9 +51,11 @@ PlaneAddFunction planeAddGetFunction(LdpFixedPoint dstFP)
     }
 
     /* Fallback to a non-SIMD function */
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
     if (!res) {
         res = planeAddGetFunctionScalar(dstFP);
     }
+#endif
 
     return res;
 }

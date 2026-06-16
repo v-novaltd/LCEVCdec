@@ -838,11 +838,14 @@ LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture( LCEVC_DecoderHandle decHandle,
 /*!
  * Get dimensions of an enhanced picture from the decoder, and predict the eventual return code.
  *
+ * ** The LCEVC_PeekDecoder API is DEPRECATED and will be removed in a future version.
+ *    Use LCEVC_PeekDecoderPictureDesc instead. **
+ *
  * For accurate results, call this after sending the Base and Enhancement (if available).
  *
  * The behavior of this function exactly mirrors the behavior of LCEVC_ReceiveDecoderPicture. For
  * example, if no Enhancement is available, and passthrough mode is disabled, then this function
- * returns LCEVC_Error. Likewise, if a Base was sent, but its timeout has expired, then this
+ * returns LCEVC_NotFound. Likewise, if a Base was sent, but its timeout has expired, then this
  * function will return LCEVC_Timeout. The dimensions will match the dimensions that you'll need
  * when using LCEVC_ReceiveDecoderPicture.
  *
@@ -863,6 +866,32 @@ LCEVC_ReturnCode LCEVC_PeekDecoder( LCEVC_DecoderHandle decHandle,
                                     uint64_t timestamp,
                                     uint32_t* width,
                                     uint32_t* height );
+
+/*!
+ * Get LCEVC_PictureDesc of an enhanced picture from the decoder, and predict eventual return code.
+ *
+ * For accurate results, call this after sending the Base and Enhancement (if available).
+ *
+ * If no Enhancement is available, and passthrough mode is disabled, then this function
+ * returns LCEVC_NotFound. Likewise, if a Base was sent, but its timeout has expired, then this
+ * function will return LCEVC_Timeout. The LCEVC_PictureDesc will match the description that you'd
+ * be able to access post LCEVC_ReceiveDecoderPicture.
+ *
+ * @param[in]    decHandle           LCEVC Decoder instance
+ * @param[in]    timestamp           Time reference of the picture
+ * @param[out]   output              Pointer to LCEVC_PictureDesc, as output
+ * @return                           LCEVC_NotFound if this timestamp hasn't been sent, or has
+ *                                   already been returned to the user. Returns LCEVC_Again if the
+ *                                   frame has not yet been parsed for description.
+ *                                   Otherwise, the decoder will use the information that it has
+ *                                   about this timestamp to predict the return code that will be
+ *                                   produced by LCEVC_ReceiveDecoderPicture when the decode is
+ *                                   finished.
+ */
+LCEVC_API
+LCEVC_ReturnCode LCEVC_PeekDecoderPictureDesc( LCEVC_DecoderHandle decHandle,
+                                               uint64_t timestamp,
+                                               LCEVC_PictureDesc* output );
 
 /*!
  * Tell the decoder that any picture at or earlier than timestamp is not being presented.
@@ -904,8 +933,9 @@ LCEVC_ReturnCode LCEVC_SynchronizeDecoder( LCEVC_DecoderHandle decHandle,
 /*!
  * Throw away any data that hasn't been emitted yet.
  *
- * After this is called, calls to LCEVC_PeekDecoder and LCEVC_ReceiveDecoderPicture will return
- * LCEVC_Flushed for any pictures that were in the decoder when flushed.
+ * After this is called, calls to LCEVC_PeekDecoder, LCEVC_PeekDecoderPictureDesc and
+ * LCEVC_ReceiveDecoderPicture will return LCEVC_Flushed for any pictures that were in the decoder
+ * when flushed.
  *
  * @param[in]    decHandle           LCEVC Decoder instance
  * @return                           LCEVC_Success on successful flush
@@ -1035,7 +1065,7 @@ typedef struct LCEVC_RenderReceiveInformation
     bool rendered; /**< true if the received picture was rendered */
 } LCEVC_RenderReceiveInformation;
 
-/*! Recieve the rendered picture
+/*! Receive the rendered picture
  *
  * @param[in]     decHandle                  LCEVC Decoder instance
  * @param[in]     output                     the rendered picture

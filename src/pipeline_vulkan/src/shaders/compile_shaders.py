@@ -14,35 +14,69 @@
 
 import argparse
 import binascii
+import glob
 import os
 import re
+import struct
 import subprocess
+import zlib
 
 
-def get_glslang_validator_path(build_dir):
+def get_tool_path(build_dir, package_name, tool_name):
     conanbuildinfo_path = f"{build_dir}/conanbuildinfo.txt"
-
     try:
         with open(conanbuildinfo_path, 'r') as file:
             lines = file.readlines()
-
             for line_no, line in enumerate(lines):
-                if line.strip() == '[bindirs_glslang]':
+                if line.strip() == f'[bindirs_{package_name}]':
                     next_line = lines[line_no + 1].strip()
                     if not next_line:
                         break
-
-                    exe_path = f"{next_line}/glslangValidator"
+                    exe_path = f"{next_line}/{tool_name}"
                     if os.name == 'nt':
                         exe_path += '.exe'
                     return exe_path
-
-            print("Cound not find glslang package in conanbuildinfo.txt")
+            print("Could not find glslang package in conanbuildinfo.txt")
             return None
-
     except FileNotFoundError:
-        print(f"Warning: {conanbuildinfo_path} not found.")
-        return None
+        pass
+    return None
+
+
+def get_glslang_validator_path(build_dir):
+    path = get_tool_path(build_dir, 'glslang', 'glslangValidator')
+    if path:
+        print("Found glslangValidator path from conan:", path)
+        return path
+    path = 'glslangValidator'
+    r = subprocess.run([path, '--version'])
+    if r.returncode == 0:
+        print("Could not find glslangValidator path from conan, defaulting to PATH")
+        return path
+    else:
+        print("Could not find glslangValidator from conan or on PATH, cannot build shaders")
+        exit(1)
+
+
+def get_spirv_opt_path(build_dir):
+    path = get_tool_path(build_dir, 'glslang', 'spirv-opt')
+    if path:
+        print("Found spirv-opt path from conan:", path)
+        return path
+    matches = glob.glob(os.path.join(os.environ.get(
+        'ANDROID_NDK'), 'shader-tools', '*', 'spirv-opt'))
+    android_path = matches[0] if matches else None
+    if android_path:
+        print("Using spirv-opt from Android NDK:", path)
+        return android_path
+    path = 'spirv-opt'
+    r = subprocess.run([path, '--version'])
+    if r.returncode == 0:
+        print("Could not find spirv-opt path from conan or Android NDK, defaulting to PATH")
+        return path
+    else:
+        print("Could not find spirv-opt from conan or on PATH, cannot optimize shaders")
+        exit(1)
 
 
 def preprocess_shader(shader_path, shader_dir):
@@ -69,35 +103,35 @@ def preprocess_shader(shader_path, shader_dir):
     return shader_code
 
 
-def generate_header_file(spv_file, header_file):
+def generate_header_file(spv_file, header_file, compress=False):
 
-    # Generate a .h file containing the binary data of the SPIR-V file
     with open(spv_file, 'rb') as f:
         spv_data = f.read()
 
-    # Convert to hex string format suitable for a C header file
-    spv_hex = binascii.hexlify(spv_data).decode('utf-8')
+    uncompressed_size = len(spv_data)
+    if compress:
+        # Prefix the zlib stream with the LE uint32 uncompressed size so the C++ loader can
+        # distinguish compressed blobs (first word != SPIR-V magic 0x07230203) and allocate
+        # the right buffer without needing a separate parameter.
+        output_data = struct.pack('<I', uncompressed_size) + zlib.compress(spv_data, 9)
+    else:
+        output_data = spv_data
+    spv_hex = binascii.hexlify(output_data).decode('utf-8')
 
     with open(header_file, 'w') as f:
-        # Write the header guard and array definition
         spv_name = os.path.splitext(os.path.basename(spv_file))[0]
         header_guard = f"VULKAN_SHADER_{spv_name}_HEADER_H"
         f.write(f"#ifndef {header_guard.upper()}\n")
         f.write(f"#define {header_guard.upper()}\n\n")
 
-        # Write the array of bytes
         f.write(f'static const unsigned char {spv_name}_spv[] = {{\n')
-
-        # Split the hex string into byte-sized chunks and format as a C array
         for i in range(0, len(spv_hex), 2):
-            hex_byte = spv_hex[i:i + 2]
-            f.write(f'    0x{hex_byte},\n')
-
+            f.write(f'    0x{spv_hex[i:i + 2]},\n')
         f.write('};\n\n')
         f.write(f"#endif // {header_guard.upper()}\n")
 
 
-def build_shader(input_shader, glslangvalidator_path, shader_build_dir):
+def build_shader(input_shader, glslangvalidator_path, shader_build_dir, spirvopt_path=None):
 
     # Input shader source file is pre-processed
     shader_dir = os.path.dirname(input_shader)
@@ -124,11 +158,17 @@ def build_shader(input_shader, glslangvalidator_path, shader_build_dir):
                    '-o', output_shader], check=True)
     print(f"SPIR-V shader written to {output_shader}")
 
+    # Optimize for size: strip debug info then run the size-optimization pass
+    if spirvopt_path:
+        subprocess.run([spirvopt_path, '--strip-debug', '-Os',
+                        output_shader, '-o', output_shader], check=True)
+        print(f"Optimised SPIR-V written to {output_shader}")
+
     # Generate C++ header file
     hpp_dir = os.path.join(shader_build_dir, shader_dir, 'hpp')
     os.makedirs(hpp_dir, exist_ok=True)
     hpp_shader = os.path.join(hpp_dir, f"{input_shader_name}.h")
-    generate_header_file(output_shader, hpp_shader)
+    generate_header_file(output_shader, hpp_shader, compress=(spirvopt_path is not None))
     print(f"hpp shader written to {hpp_shader}")
 
 
@@ -136,22 +176,30 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compile GLSL shaders")
     parser.add_argument('--cmakebuildinfodir', type=str, required=True,
                         help="The directory containing cmakebuildinfo.txt")
+    parser.add_argument('--optimize', action='store_true',
+                        help="Run spirv-opt -Os after compilation to reduce SPIR-V binary size")
     args = parser.parse_args()
+
     glslang_validator_path = get_glslang_validator_path(args.cmakebuildinfodir)
     shader_build_dir = os.path.join(args.cmakebuildinfodir, 'src', 'pipeline_vulkan')
 
-    if glslang_validator_path:
-        print("Found glslangValidator path from conan:", glslang_validator_path)
-    else:
-        print("Could not find glslangValidator path from conan, defaulting to PATH")
+    spirvopt_path = None
+    if args.optimize:
+        spirvopt_path = get_spirv_opt_path(args.cmakebuildinfodir)
 
-    if glslang_validator_path is None:
-        glslang_validator_path = 'glslangValidator'
-
-    build_shader("src/upscale_vertical.comp", glslang_validator_path, shader_build_dir)
-    build_shader("src/upscale_horizontal.comp", glslang_validator_path, shader_build_dir)
-    build_shader("src/apply.comp", glslang_validator_path, shader_build_dir)
-    build_shader("src/conversion.comp", glslang_validator_path, shader_build_dir)
-    build_shader("src/add.comp", glslang_validator_path, shader_build_dir)
-    build_shader("src/render_vertex.vert", glslang_validator_path, shader_build_dir)
-    build_shader("src/render_fragment.frag", glslang_validator_path, shader_build_dir)
+    shaders = [
+        "src/upscale_vertical.comp",
+        "src/upscale_horizontal.comp",
+        "src/apply.comp",
+        "src/convert_in.comp",
+        "src/convert_out.comp",
+        "src/convert_out_image_p010.comp",
+        "src/convert_out_image_nv12.comp",
+        "src/convert_out_image_rgba8.comp",
+        "src/convert_out_image_rgba10.comp",
+        "src/add.comp",
+        "src/render_vertex.vert",
+        "src/render_fragment.frag",
+    ]
+    for shader in shaders:
+        build_shader(shader, glslang_validator_path, shader_build_dir, spirvopt_path)

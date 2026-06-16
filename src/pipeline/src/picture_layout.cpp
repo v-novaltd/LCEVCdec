@@ -14,6 +14,8 @@
 
 #include <LCEVC/pipeline/picture_layout.hpp>
 
+#include <string>
+
 namespace lcevc_dec::pipeline {
 
 // Construct a vooya/YUView style filename from base

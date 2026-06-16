@@ -26,7 +26,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/CMakeSetup.cmake")
 project(
     LCEVCdec_SDK
     DESCRIPTION "The Open Source LCEVC Decoder SDK"
-    VERSION 4.1.0
+    VERSION 4.2.0
     LANGUAGES CXX C)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
@@ -36,8 +36,10 @@ option(VN_SDK_EXECUTABLES "Include samples and test harness executables in SDK i
 option(VN_SDK_SAMPLE_SOURCE "Include sample sources in SDK installations" ON)
 option(VN_SDK_UNIT_TESTS "Enable unit test executables" OFF)
 option(VN_SDK_API_LAYER "Include API layer library in SDK installations" ON)
+option(VN_SDK_PIPELINE "Enable the pipeline module" ON)
 option(VN_SDK_PIPELINE_CPU "Enable the CPU pipeline" ON)
 option(VN_SDK_PIPELINE_VULKAN "Enable the Vulkan pipeline" OFF)
+option(VN_SDK_PIXEL_PROCESSING "Enable the pixel processing module" ON)
 option(VN_SDK_JSON_CONFIG "Allow decoder to be configured with JSON, requires nlohmann-json" OFF)
 option(VN_SDK_DOCS "Build Doxygen and Sphinx documentation" OFF)
 option(VN_SDK_COVERAGE "Generate gcov statistics for coverage" OFF)
@@ -53,16 +55,41 @@ option(VN_SDK_WARNINGS_FAIL "Compiler warnings will cause a build to fail" OFF)
 option(VN_SDK_BUILD_DETAILS "Include build time and origin in libraries - non-reproducible build"
        OFF)
 option(VN_SDK_SYSTEM_INSTALL "Install licences and docs to the system or to a package" ON)
+option(VN_SDK_STATIC_LIBS_AS_OBJECTS "Build STATIC libraries as OBJECT" OFF)
+option(VN_SDK_MINIMUM_LIB_SIZE "Disable optional features to minimize output library sizes" OFF)
+option(VN_SDK_FUZZER
+       "Build libFuzzer fuzz targets with ASan+UBSan instrumentation (requires Clang)" OFF)
 
 # cmake-format: off
 set(VN_SDK_FFMPEG_LIBS_PACKAGE "" CACHE STRING
         "Define a path to search for libav packages, conan or pkg-config will be used by default if not specified")
 # cmake-format: on
 
+if (VN_SDK_MINIMUM_LIB_SIZE)
+    if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
+        message(FATAL_ERROR "Cannot build for minimum size with executables or unit tests")
+    endif ()
+    if (NOT VN_STRIP_RELEASE OR "${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+        message(WARNING "VN_SDK_MINIMUM_LIB_SIZE enabled but other, non-optimal options present")
+    endif ()
+    set(VN_SDK_JSON_CONFIG OFF)
+    set(VN_SDK_METRICS OFF)
+    set(VN_SDK_TRACING OFF)
+    set(VN_SDK_DIAGNOSTICS_ASYNC OFF)
+    set(VN_SDK_LTO ON)
+    set(VN_SDK_MAXIMUM_LOG_LEVEL "ERROR")
+endif ()
+
 if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
     set(VN_SDK_BASE_DECODER ON)
 else ()
     set(VN_SDK_BASE_DECODER OFF)
+endif ()
+
+if (VN_SDK_STATIC_LIBS_AS_OBJECTS)
+    set(VN_STATIC_LIB_TYPE OBJECT)
+else ()
+    set(VN_STATIC_LIB_TYPE STATIC)
 endif ()
 
 if ((VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS) AND NOT VN_SDK_JSON_CONFIG)
@@ -92,6 +119,7 @@ endif ()
 # Performance options
 option(VN_SDK_THREADING "Enable multithreading" ON)
 option(VN_SDK_THREADS_CUSTOM "Use a custom threading implementation." OFF)
+option(VN_SDK_TIME_CUSTOM "Use a custom time implementation." OFF)
 option(VN_SDK_GENERATE_PGO "Make an instrumented build for profile-guided optimization (PGO)." OFF)
 option(VN_SDK_USE_PGO "Use previously-generated PGO profiles to optimize this build." OFF)
 option(VN_SDK_BENCHMARK "Build benchmark google benchmark tests" OFF)
@@ -99,6 +127,9 @@ option(VN_SDK_BENCHMARK "Build benchmark google benchmark tests" OFF)
 if (NOT VN_SDK_THREADING AND VN_SDK_DIAGNOSTICS_ASYNC)
     message(STATUS "VN_SDK_DIAGNOSTICS_ASYNC cannot be enabled without threading, disabling")
     set(VN_SDK_DIAGNOSTICS_ASYNC OFF)
+endif ()
+if (VN_SDK_FUZZER AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "VN_SDK_FUZZER requires Clang (got ${CMAKE_CXX_COMPILER_ID})")
 endif ()
 
 # Module Versions
@@ -117,14 +148,19 @@ lcevc_add_subdirectory_if(src/common/test/unit VN_SDK_UNIT_TESTS)
 lcevc_add_subdirectory(src/enhancement)
 lcevc_add_subdirectory_if(src/enhancement/test/unit VN_SDK_UNIT_TESTS)
 lcevc_add_subdirectory_if(src/enhancement/test/sample VN_SDK_EXECUTABLES)
+lcevc_add_subdirectory_if(src/enhancement/test/fuzz VN_SDK_FUZZER)
 
 # Pipeline
-lcevc_add_subdirectory(src/pipeline)
-lcevc_add_subdirectory_if(src/pipeline/test/unit VN_SDK_UNIT_TESTS)
+if (VN_SDK_PIPELINE)
+    lcevc_add_subdirectory(src/pipeline)
+    lcevc_add_subdirectory_if(src/pipeline/test/unit VN_SDK_UNIT_TESTS)
+endif ()
 
 # Pixel processing
-lcevc_add_subdirectory(src/pixel_processing)
-lcevc_add_subdirectory_if(src/pixel_processing/test/unit VN_SDK_UNIT_TESTS)
+if (VN_SDK_PIXEL_PROCESSING)
+    lcevc_add_subdirectory(src/pixel_processing)
+    lcevc_add_subdirectory_if(src/pixel_processing/test/unit VN_SDK_UNIT_TESTS)
+endif ()
 
 # LCEVC NALU Extract
 lcevc_add_subdirectory(src/extract)
@@ -166,4 +202,4 @@ lcevc_add_subdirectory_if(docs/sphinx VN_SDK_DOCS)
 include(GNUInstallDirs)
 
 # Install project specific files and templates
-include("CMakeInstall")
+include(cmake/modules/CMakeInstall.cmake)

@@ -23,12 +23,20 @@ namespace lcevc_dec::pipeline_vulkan {
 class PipelineVulkan;
 class VulkanFrameContext;
 
-struct VulkanConversionArgs
+struct VulkanConvertInArgs
 {
     PictureVulkan* src;
     PictureVulkan* dst;
-    bool toInternal;  /**< Indicates whether we are converting to or from internal */
-    uint8_t bitDepth; /**< Indicates bit depth of the external picture */
+    uint8_t bitDepth; /**< Bit depth of the source picture */
+    LdeChroma chroma;
+    VulkanFrameContext* context{};
+};
+
+struct VulkanConvertOutArgs
+{
+    PictureVulkan* src;
+    PictureVulkan* dst;
+    uint8_t bitDepth; /**< Bit depth of the destination picture */
     LdeChroma chroma;
     float sharpenStrength{0.0f}; /**< Sharpen strength for output conversion (plane 0 only) */
     VulkanFrameContext* context{};

@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -62,7 +62,7 @@ class Test(BaseTest):
         with open(stream_config_path, 'r') as json_file:
             stream_config = json.load(json_file)
         ltm_runner = get_runner(os.path.abspath(os.path.join(
-            LOCAL_LTM_PATH, 'ModelDecoder')), test_dir, force_local=True)
+            LOCAL_LTM_PATH, 'ModelDecoder')), LOCAL_LTM_PATH, force_local=True)
         assert not isinstance(ltm_runner, ADBRunner), "Cannot regen compliance hashes on Android"
         ltm_runner.set_param('--input_file', es_path)
         if not stream_config['format'].startswith("yuv") or stream_config['format'].endswith("12") or \
@@ -70,7 +70,7 @@ class Test(BaseTest):
             ltm_runner.set_param('--base_external', 'true')
         ltm_runner.set_param('--base', stream_config['base_encoder'])
         ltm_runner.set_param('--encapsulation', 'nal')
-        ltm_runner.set_param('--output_file', 'ltm.yuv')
+        ltm_runner.set_param('--output_file', os.path.abspath(os.path.join(test_dir, 'ltm.yuv')))
         self.record_cmd('ltm', ltm_runner.get_command_line())
         ltm_runner.run(assert_rc=True)
 

@@ -113,9 +113,12 @@ void FrameVulkan::signalComputeTaskDone()
 
 void FrameVulkan::computeTaskFinish(PipelineVulkan* pipeline)
 {
-    // Copy output to external buffer if present
-    if (LdpPictureBufferDesc exDesc{}; fromPipeline(outputPicture)->getBufferDesc(exDesc)) {
-        BufferVulkan* managedBuffer = fromPipeline(fromPipeline(outputPicture)->buffer);
+    // Copy output to external CPU planes if present.
+    PictureVulkan* op = fromPipeline(outputPicture);
+    LdpPictureBufferDesc exDesc{};
+    if (!op->isExternalBuffer() && op->getBufferDesc(exDesc) && exDesc.data != nullptr &&
+        exDesc.byteSize != 0) {
+        BufferVulkan* managedBuffer = fromPipeline(op->buffer);
         managedBuffer->copyOut(exDesc.data, 0, exDesc.byteSize);
     }
 

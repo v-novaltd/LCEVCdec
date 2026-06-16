@@ -40,7 +40,7 @@ static bool appendFormat(CharSpan* span, const char* fmt, ...)
     va_start(args, fmt);
     int numChars = vsnprintf(span->start, span->size, fmt, args);
     va_end(args);
-    if (numChars > span->size) {
+    if ((size_t)numChars > span->size) {
         return false;
     }
 
@@ -121,7 +121,8 @@ static void argumentsFormat(CharSpan* dst, uint32_t count, const LdcDiagArg* typ
 // Convert a tracing or metric record to Perfetto JSON
 //
 int ldcDiagnosticFormatJson(char* dstStart, uint32_t dstSize, const LdcDiagSite* site,
-                            const LdcDiagRecord* record, uint32_t processId, const LdcDiagValue* values)
+                            const LdcDiagRecord* record, uint32_t processId,
+                            const LdcDiagValue* values, uint32_t valuesCount)
 {
     static const char* valueName[] = {"value"};
     static const char* memoryNames[] = {"size", "address", "prevAdress"};
@@ -249,7 +250,7 @@ int ldcDiagnosticFormatJson(char* dstStart, uint32_t dstSize, const LdcDiagSite*
         return 0;
     }
 
-    // Accumalate string in this span
+    // Accumulate string in this span
     CharSpan dst = {dstStart, dstSize};
 
     // Common part of record
@@ -280,8 +281,8 @@ int ldcDiagnosticFormatJson(char* dstStart, uint32_t dstSize, const LdcDiagSite*
     return 0;
 }
 
-static bool diagnosticHandlerTraceFile(void* user, const LdcDiagSite* site,
-                                       const LdcDiagRecord* record, const LdcDiagValue* value)
+static bool diagnosticHandlerTraceFile(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
+                                       const LdcDiagValue* values, uint32_t valuesCount)
 {
     FILE* output = user;
 
@@ -290,7 +291,8 @@ static bool diagnosticHandlerTraceFile(void* user, const LdcDiagSite* site,
     }
 
     char buffer[4096] = {0}; // Could make thread local?
-    if (ldcDiagnosticFormatJson(buffer, sizeof(buffer), site, record, VNGetProcessId(), value) > 0) {
+    if (ldcDiagnosticFormatJson(buffer, sizeof(buffer), site, record, VNGetProcessId(), values,
+                                valuesCount) > 0) {
         fputs(buffer, output);
         return true;
     }

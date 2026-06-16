@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -28,7 +28,7 @@ void ldcVectorInitialize(LdcVector* vector, uint32_t elementSize, uint32_t reser
 
     VNClear(vector);
 
-    VNAllocateArray(allocator, &vector->dataAllocation, uint8_t, reserved * elementSize, "Vector");
+    VNAllocateArray(allocator, &vector->dataAllocation, uint8_t, reserved * (size_t)elementSize, "Vector");
     VNCheck(VNAllocationSucceeded(vector->dataAllocation));
 
     vector->data = VNAllocationPtr(vector->dataAllocation, uint8_t);

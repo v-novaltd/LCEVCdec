@@ -16,6 +16,10 @@ include("Sources.cmake")
 
 find_package(VulkanShim REQUIRED)
 
+if (VN_SDK_MINIMUM_LIB_SIZE)
+    find_package(ZLIB REQUIRED)
+endif ()
+
 # Compile shaders
 find_package(Python3 REQUIRED)
 set(SHADER_SCRIPT_PATH ${CMAKE_CURRENT_LIST_DIR}/src/shaders/compile_shaders.py)
@@ -25,7 +29,13 @@ set(SHADER_INPUT_FILES
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/apply.comp
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/add.comp
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/common.glsl
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/conversion.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_common.glsl
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_in.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_p010.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_nv12.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_rgba8.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_rgba10.comp
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/render_fragment.frag
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/render_vertex.vert
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_constants.glsl
@@ -35,16 +45,25 @@ set(SHADER_INPUT_FILES
 set(SHADER_OUTPUT_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/apply.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/add.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/conversion.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_in.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_p010.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_nv12.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba8.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba10.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/render_fragment.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/render_vertex.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_horizontal.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_vertical.h)
 
+set(SHADER_COMPILE_ARGS --cmakebuildinfodir ${CMAKE_CURRENT_BINARY_DIR}/../..)
+if (VN_SDK_MINIMUM_LIB_SIZE)
+    list(APPEND SHADER_COMPILE_ARGS --optimize)
+endif ()
+
 add_custom_command(
     OUTPUT ${SHADER_OUTPUT_FILES}
-    COMMAND ${Python3_EXECUTABLE} ${SHADER_SCRIPT_PATH} --cmakebuildinfodir
-            ${CMAKE_CURRENT_BINARY_DIR}/../..
+    COMMAND ${Python3_EXECUTABLE} ${SHADER_SCRIPT_PATH} ${SHADER_COMPILE_ARGS}
     WORKING_DIRECTORY ${SHADER_SCRIPT_DIR}
     DEPENDS ${SHADER_INPUT_FILES} ${SHADER_SCRIPT_PATH}
     COMMENT "Running Python script to compile GLSL shaders"
@@ -60,6 +79,10 @@ set(LINK_LIBRARIES
     lcevc_dec::enhancement
     lcevc_dec::pixel_processing
     VulkanShim::VulkanShim)
+
+if (VN_SDK_MINIMUM_LIB_SIZE)
+    list(APPEND LINK_LIBRARIES ZLIB::ZLIB)
+endif ()
 
 if (VN_SDK_EXECUTABLES AND NOT ANDROID)
     find_package(glfw3 REQUIRED)

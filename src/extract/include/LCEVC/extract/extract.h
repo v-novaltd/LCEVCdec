@@ -57,7 +57,7 @@ typedef enum LCEVC_NALFormat // NOLINT
  * @param[out]      enhancementData      Where to put extracted enhancement data
  * @param[in]       enhancementCapacity  Capacity of enhancement data buffer
  * @param[out]      enhancementSize      Pointer to where to write the extracted size - will be 0 if none found
- * @return                               1 = LCEVC found, 0 = no LCEVC found, -1 = an error ocurred
+ * @return                               1 = LCEVC found, 0 = no LCEVC found, -1 = an error occurred
  */
 int32_t LCEVC_extractEnhancementFromNAL(const uint8_t* nalData, uint32_t nalSize, LCEVC_NALFormat nalFormat,
                                         LCEVC_CodecType codecType, uint8_t* enhancementData,
@@ -75,7 +75,7 @@ int32_t LCEVC_extractEnhancementFromNAL(const uint8_t* nalData, uint32_t nalSize
  * @param[out]      enhancementSize      Pointer to where to write the extracted size - will be 0 if none found
  * @param[out]      strippedOffset       Pointer to where to write the offset of the NAL units buffer after the enhancement data is removed
  * @param[out]      strippedSize         Pointer to where to write the size of the NAL units buffer after the enhancement data is removed
- * @return                               1 = LCEVC found, 0 = no LCEVC found, -1 = an error ocurred
+ * @return                               1 = LCEVC found, 0 = no LCEVC found, -1 = an error occurred
  */
 int32_t LCEVC_extractAndRemoveEnhancementFromNAL(uint8_t* nalData, uint32_t nalSize,
                                                  LCEVC_NALFormat nalFormat,

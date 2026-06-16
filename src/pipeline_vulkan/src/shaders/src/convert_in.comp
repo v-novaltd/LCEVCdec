@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2025-2026. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,7 +12,7 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-// Vulkan Vertical format conversion shader
+// Vulkan input format conversion shader
 
 #version 450
 
@@ -25,7 +25,6 @@ layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
 
 // Specialized build time configuration
 layout (constant_id = SPECID_8_BIT) const bool bit8 = false;
-layout (constant_id = SPECID_TO_INTERNAL) const bool toInternal = false;
 layout (constant_id = SPECID_NV12) const bool nv12 = false;
 
 layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
@@ -46,7 +45,8 @@ layout(push_constant) uniform consts {
     int containerStrideV; // used to check for nv12 and as input or output stride for V-plane
     int containerOffsetV; // used with nv12 as input or output offset for V-plane
     int shift;     // 5 for 10bit, 3 for 12bit, and 1 for 14bit
-    int sharpenStrength; // 0 disables sharpening, otherwise U16 strength
+    int sharpenStrength; // 0 disables sharpening, otherwise U16 strength (in-direction: unused)
+    int nv21Swap; // (in-direction: unused; declared for layout parity with convert_out.comp)
 };
 
 #include "common.glsl"
@@ -107,68 +107,23 @@ void main()
         return;
     }
 
-    if (toInternal) {
-        if (bit8) {
-            if (nv12 && containerStrideV != 0) {
-                if (4 * x < width) {
-                    const ivec4 pixels = toInternalFrom8bit(unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));
-                    dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bitInternals(ivec2(pixels.x, pixels.z));
-                    dst.samples[containerOffsetV + x + y * containerStrideV] = pack16bitInternals(ivec2(pixels.y, pixels.w));
-                }
-            } else {
+    if (bit8) {
+        if (nv12 && containerStrideV != 0) {
+            if (4 * x < width) {
                 const ivec4 pixels = toInternalFrom8bit(unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));
-                dst.samples[containerOffsetOut + 2 * x + y * containerStrideOut] = pack16bitInternals(pixels.xy);
-                if(4 * x + 2 < width) {
-                    dst.samples[containerOffsetOut + 2 * x + 1 + y * containerStrideOut] = pack16bitInternals(pixels.zw);
-                }
+                dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bitInternals(ivec2(pixels.x, pixels.z));
+                dst.samples[containerOffsetV + x + y * containerStrideV] = pack16bitInternals(ivec2(pixels.y, pixels.w));
             }
         } else {
-            const ivec2 pixels = toInternalFrom16bit(unpack16bit(src.samples[containerOffsetIn + x + y * containerStrideIn]), shift);
-            dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bitInternals(pixels);
+            const ivec4 pixels = toInternalFrom8bit(unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));
+            dst.samples[containerOffsetOut + 2 * x + y * containerStrideOut] = pack16bitInternals(pixels.xy);
+            if(4 * x + 2 < width) {
+                dst.samples[containerOffsetOut + 2 * x + 1 + y * containerStrideOut] = pack16bitInternals(pixels.zw);
+            }
         }
     } else {
-        if (bit8) {
-            if (nv12 && containerStrideV != 0) {
-                if (4 * x < width) {
-                    const ivec2 pixels1 = unpack16bitInternals(src.samples[containerOffsetIn + x + y * containerStrideIn]);
-                    const ivec2 pixels2 = unpack16bitInternals(src.samples[containerOffsetV + x + y * containerStrideV]);
-                    dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack8bit(fromInternalTo8bit(ivec4(pixels1.x, pixels2.x, pixels1.y, pixels2.y)));
-                }
-            } else {
-                if (sharpenStrength != 0) {
-                    const int px0 = int(4 * x + 0);
-                    const int px1 = int(4 * x + 1);
-                    const int px2 = int(4 * x + 2);
-                    const int px3 = int(4 * x + 3);
-                    const uint out0 = uint(sharpenPixel(px0, int(y)));
-                    const uint out1 = uint(sharpenPixel(px1, int(y)));
-                    const uint out2 = uint(sharpenPixel(px2, int(y)));
-                    const uint out3 = uint(sharpenPixel(px3, int(y)));
-                    dst.samples[containerOffsetOut + x + y * containerStrideOut] =
-                        pack8bit(uvec4(out0, out1, out2, out3));
-                } else {
-                    const ivec2 pixels1 =
-                        unpack16bitInternals(src.samples[containerOffsetIn + 2 * x + y * containerStrideIn]);
-                    const ivec2 pixels2 =
-                        unpack16bitInternals(src.samples[containerOffsetIn + 2 * x + 1 + y * containerStrideIn]);
-                    dst.samples[containerOffsetOut + x + y * containerStrideOut] =
-                        pack8bit(fromInternalTo8bit(ivec4(pixels1.x, pixels1.y, pixels2.x, pixels2.y)));
-                }
-            }
-        } else {
-            if (sharpenStrength != 0) {
-                const int px0 = int(2 * x + 0);
-                const int px1 = int(2 * x + 1);
-                const uint out0 = uint(sharpenPixel(px0, int(y)));
-                const uint out1 = uint(sharpenPixel(px1, int(y)));
-                dst.samples[containerOffsetOut + x + y * containerStrideOut] =
-                    pack16bit(uvec2(out0, out1));
-            } else {
-                const ivec2 pixels =
-                    unpack16bitInternals(src.samples[containerOffsetIn + x + y * containerStrideIn]);
-                dst.samples[containerOffsetOut + x + y * containerStrideOut] =
-                    pack16bit(fromInternalTo16bit(pixels, shift));
-            }
-        }
+        const ivec2 pixels = toInternalFrom16bit(unpack16bit(src.samples[containerOffsetIn + x + y * containerStrideIn]), shift);
+        dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bitInternals(pixels);
     }
+
 }

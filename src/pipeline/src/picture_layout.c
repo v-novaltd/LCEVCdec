@@ -23,51 +23,57 @@
     /* Various constants per color format used to work out actual sizes, offsets & strides, and file names */                                                                         \
     static const LdpPictureLayoutInfo k##format##PictureLayoutInfo[] = {                                                                                                              \
 /*                                     colorSpace
-                                       |                       colorComponents
-                                       |                       |  validWidthMask
-                                       |                       |  |  validHeightMask
-                                       |                       |  |  |  planeWidthShift
-                                       |                       |  |  |  |          planeHeightShift
-                                       |                       |  |  |  |          |          alignment
-                                       |                       |  |  |  |          |          |          interleave
-                                       |                       |  |  |  |          |          |          |             offset
-                                       |                       |  |  |  |          |          |          |             |             bits
-                                       |                       |  |  |  |          |          |          |             |             |         fixedPoint
-                                       |                       |  |  |  |          |          |          |             |             |         |                  suffix */           \
-        {LdpColorFormatI420_8,         LdpColorSpaceYUV,       3, 1, 1, {0, 1, 1}, {0, 1, 1}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(8),  LdpFP##prefix##8,  "_p420.yuv"},       \
-        {LdpColorFormatI420_10_LE,     LdpColorSpaceYUV,       3, 1, 1, {0, 1, 1}, {0, 1, 1}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(10), LdpFP##prefix##10, "_10bit_p420.yuv"}, \
-        {LdpColorFormatI420_12_LE,     LdpColorSpaceYUV,       3, 1, 1, {0, 1, 1}, {0, 1, 1}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(12), LdpFP##prefix##12, "_12bit_p420.yuv"}, \
-        {LdpColorFormatI420_14_LE,     LdpColorSpaceYUV,       3, 1, 1, {0, 1, 1}, {0, 1, 1}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(14), LdpFP##prefix##14, "_14bit_p420.yuv"}, \
-        {LdpColorFormatI420_16_LE,     LdpColorSpaceYUV,       3, 1, 1, {0, 1, 1}, {0, 1, 1}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(16), LdpFP##prefix##14, "_16bit_p420.yuv"}, \
-                                                                                                                                                                                      \
-        {LdpColorFormatI422_8,         LdpColorSpaceYUV,       3, 1, 0, {0, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(8),  LdpFP##prefix##8,  "_p422.yuv"},       \
-        {LdpColorFormatI422_10_LE,     LdpColorSpaceYUV,       3, 1, 0, {0, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(10), LdpFP##prefix##10, "_10bit_p422.yuv"}, \
-        {LdpColorFormatI422_12_LE,     LdpColorSpaceYUV,       3, 1, 0, {0, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(12), LdpFP##prefix##12, "_12bit_p422.yuv"}, \
-        {LdpColorFormatI422_14_LE,     LdpColorSpaceYUV,       3, 1, 0, {0, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(14), LdpFP##prefix##14, "_14bit_p422.yuv"}, \
-        {LdpColorFormatI422_16_LE,     LdpColorSpaceYUV,       3, 1, 0, {0, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(16), LdpFP##prefix##14, "_16bit_p422.yuv"}, \
-                                                                                                                                                                                      \
-        {LdpColorFormatI444_8,         LdpColorSpaceYUV,       3, 0, 0, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(8),  LdpFP##prefix##8,  "_p444.yuv"},       \
-        {LdpColorFormatI444_10_LE,     LdpColorSpaceYUV,       3, 0, 0, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(10), LdpFP##prefix##10, "_10bit_p444.yuv"}, \
-        {LdpColorFormatI444_12_LE,     LdpColorSpaceYUV,       3, 0, 0, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(12), LdpFP##prefix##12, "_12bit_p444.yuv"}, \
-        {LdpColorFormatI444_14_LE,     LdpColorSpaceYUV,       3, 0, 0, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(14), LdpFP##prefix##14, "_14bit_p444.yuv"}, \
-        {LdpColorFormatI444_16_LE,     LdpColorSpaceYUV,       3, 0, 0, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(16), LdpFP##prefix##14, "_16bit_p444.yuv"}, \
-                                                                                                                                                                                      \
-        {LdpColorFormatNV12_8,         LdpColorSpaceYUV,       3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 0, 1},    BITS(8),  LdpFP##prefix##8,  ".nv12"},           \
-        {LdpColorFormatNV21_8,         LdpColorSpaceYUV,       3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 1, 0},    BITS(8),  LdpFP##prefix##8,  ".nv21"},           \
-                                                                                                                                                                                      \
-        {LdpColorFormatRGB_8,          LdpColorSpaceRGB,       3, 0, 0, {0},       {0},       {0},       {3, 3, 3},    {0, 1, 2},    BITS(8),  LdpFP##prefix##8,  ".rgb"},            \
-        {LdpColorFormatBGR_8,          LdpColorSpaceRGB,       3, 0, 0, {0},       {0},       {0},       {3, 3, 3},    {2, 1, 0},    BITS(8),  LdpFP##prefix##8,  ".bgr"},            \
-        {LdpColorFormatRGBA_8,         LdpColorSpaceRGB,       4, 0, 0, {0},       {0},       {0},       {4, 4, 4, 4}, {0, 1, 2, 3}, BITS(8),  LdpFP##prefix##8,  ".rgba"},           \
-        {LdpColorFormatBGRA_8,         LdpColorSpaceRGB,       4, 0, 0, {0},       {0},       {0},       {4, 4, 4, 4}, {2, 1, 0, 3}, BITS(8),  LdpFP##prefix##8,  ".bgra"},           \
-        {LdpColorFormatARGB_8,         LdpColorSpaceRGB,       4, 0, 0, {0},       {0},       {0},       {4, 4, 4, 4}, {3, 0, 1, 2}, BITS(8),  LdpFP##prefix##8,  ".argb"},           \
-        {LdpColorFormatABGR_8,         LdpColorSpaceRGB,       4, 0, 0, {0},       {0},       {0},       {4, 4, 4, 4}, {3, 2, 1, 0}, BITS(8),  LdpFP##prefix##8,  ".abgr"},           \
-                                                                                                                                                                                      \
-        {LdpColorFormatGRAY_8,         LdpColorSpaceGreyscale, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(8),  LdpFP##prefix##8,  ".y"},              \
-        {LdpColorFormatGRAY_10_LE,     LdpColorSpaceGreyscale, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(10), LdpFP##prefix##10, "_10bit.y"},        \
-        {LdpColorFormatGRAY_12_LE,     LdpColorSpaceGreyscale, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(12), LdpFP##prefix##12, "_12bit.y"},        \
-        {LdpColorFormatGRAY_14_LE,     LdpColorSpaceGreyscale, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(14), LdpFP##prefix##14, "_14bit.y"},        \
-        {LdpColorFormatGRAY_16_LE,     LdpColorSpaceGreyscale, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(16), LdpFP##prefix##14, "_16bit.y"},        \
-    };                                                                                                                                                                                \
+                                       |                       chromaSubsampling
+                                       |                       |             colorComponents
+                                       |                       |             |  validWidthMask
+                                       |                       |             |  |  validHeightMask
+                                       |                       |             |  |  |  planeWidthShift
+                                       |                       |             |  |  |  |          planeHeightShift
+                                       |                       |             |  |  |  |          |          alignment
+                                       |                       |             |  |  |  |          |          |          interleave
+                                       |                       |             |  |  |  |          |          |          |             offset
+                                       |                       |             |  |  |  |          |          |          |             |             bits
+                                       |                       |             |  |  |  |          |          |          |             |             |         fixedPoint
+                                       |                       |             |  |  |  |          |          |          |             |             |         |                  suffix */           \
+        {LdpColorFormatI420_8,         LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1, 1}, {0, 1, 1}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(8),  LdpFP##prefix##8,  "_p420.yuv"},       \
+        {LdpColorFormatI420_10_LE,     LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1, 1}, {0, 1, 1}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(10), LdpFP##prefix##10, "_10bit_p420.yuv"}, \
+        {LdpColorFormatI420_12_LE,     LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1, 1}, {0, 1, 1}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(12), LdpFP##prefix##12, "_12bit_p420.yuv"}, \
+        {LdpColorFormatI420_14_LE,     LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1, 1}, {0, 1, 1}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(14), LdpFP##prefix##14, "_14bit_p420.yuv"}, \
+        {LdpColorFormatI420_16_LE,     LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1, 1}, {0, 1, 1}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(16), LdpFP##prefix##14, "_16bit_p420.yuv"}, \
+                                                                                                                                                                                                    \
+        {LdpColorFormatI422_8,         LdpColorSpaceYUV,       CT422,        3, 1, 0, {0, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(8),  LdpFP##prefix##8,  "_p422.yuv"},       \
+        {LdpColorFormatI422_10_LE,     LdpColorSpaceYUV,       CT422,        3, 1, 0, {0, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(10), LdpFP##prefix##10, "_10bit_p422.yuv"}, \
+        {LdpColorFormatI422_12_LE,     LdpColorSpaceYUV,       CT422,        3, 1, 0, {0, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(12), LdpFP##prefix##12, "_12bit_p422.yuv"}, \
+        {LdpColorFormatI422_14_LE,     LdpColorSpaceYUV,       CT422,        3, 1, 0, {0, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(14), LdpFP##prefix##14, "_14bit_p422.yuv"}, \
+        {LdpColorFormatI422_16_LE,     LdpColorSpaceYUV,       CT422,        3, 1, 0, {0, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(16), LdpFP##prefix##14, "_16bit_p422.yuv"}, \
+                                                                                                                                                                                                    \
+        {LdpColorFormatI444_8,         LdpColorSpaceYUV,       CT444,        3, 0, 0, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(8),  LdpFP##prefix##8,  "_p444.yuv"},       \
+        {LdpColorFormatI444_10_LE,     LdpColorSpaceYUV,       CT444,        3, 0, 0, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(10), LdpFP##prefix##10, "_10bit_p444.yuv"}, \
+        {LdpColorFormatI444_12_LE,     LdpColorSpaceYUV,       CT444,        3, 0, 0, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(12), LdpFP##prefix##12, "_12bit_p444.yuv"}, \
+        {LdpColorFormatI444_14_LE,     LdpColorSpaceYUV,       CT444,        3, 0, 0, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(14), LdpFP##prefix##14, "_14bit_p444.yuv"}, \
+        {LdpColorFormatI444_16_LE,     LdpColorSpaceYUV,       CT444,        3, 0, 0, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1},    {0, 0, 0},    BITS(16), LdpFP##prefix##14, "_16bit_p444.yuv"}, \
+                                                                                                                                                                                                    \
+        {LdpColorFormatNV12_8,         LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 0, 1},    BITS(8),  LdpFP##prefix##8,  ".nv12"},           \
+        {LdpColorFormatNV21_8,         LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 1, 0},    BITS(8),  LdpFP##prefix##8,  ".nv21"},           \
+                                                                                                                                                                                                    \
+        {LdpColorFormatRGB_8,          LdpColorSpaceRGB,       CTMonochrome, 3, 0, 0, {0},       {0},       {0},       {3, 3, 3},    {0, 1, 2},    BITS(8),  LdpFP##prefix##8,  ".rgb"},            \
+        {LdpColorFormatBGR_8,          LdpColorSpaceRGB,       CTMonochrome, 3, 0, 0, {0},       {0},       {0},       {3, 3, 3},    {2, 1, 0},    BITS(8),  LdpFP##prefix##8,  ".bgr"},            \
+        {LdpColorFormatRGBA_8,         LdpColorSpaceRGB,       CTMonochrome, 4, 0, 0, {0},       {0},       {0},       {4, 4, 4, 4}, {0, 1, 2, 3}, BITS(8),  LdpFP##prefix##8,  ".rgba"},           \
+        {LdpColorFormatBGRA_8,         LdpColorSpaceRGB,       CTMonochrome, 4, 0, 0, {0},       {0},       {0},       {4, 4, 4, 4}, {2, 1, 0, 3}, BITS(8),  LdpFP##prefix##8,  ".bgra"},           \
+        {LdpColorFormatARGB_8,         LdpColorSpaceRGB,       CTMonochrome, 4, 0, 0, {0},       {0},       {0},       {4, 4, 4, 4}, {3, 0, 1, 2}, BITS(8),  LdpFP##prefix##8,  ".argb"},           \
+        {LdpColorFormatABGR_8,         LdpColorSpaceRGB,       CTMonochrome, 4, 0, 0, {0},       {0},       {0},       {4, 4, 4, 4}, {3, 2, 1, 0}, BITS(8),  LdpFP##prefix##8,  ".abgr"},           \
+                                                                                                                                                                                                    \
+        {LdpColorFormatRGBA_10_2_LE,   LdpColorSpaceRGB,       CTMonochrome, 1, 0, 0, {0},       {0},       {0},       {1, 1, 1, 1}, {0, 0, 0, 0}, BITS(32), LdpFP##prefix##10, ".rgba10"},         \
+                                                                                                                                                                                                    \
+        {LdpColorFormatGRAY_8,         LdpColorSpaceGreyscale, CTMonochrome, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(8),  LdpFP##prefix##8,  ".y"},              \
+        {LdpColorFormatGRAY_10_LE,     LdpColorSpaceGreyscale, CTMonochrome, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(10), LdpFP##prefix##10, "_10bit.y"},        \
+        {LdpColorFormatGRAY_12_LE,     LdpColorSpaceGreyscale, CTMonochrome, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(12), LdpFP##prefix##12, "_12bit.y"},        \
+        {LdpColorFormatGRAY_14_LE,     LdpColorSpaceGreyscale, CTMonochrome, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(14), LdpFP##prefix##14, "_14bit.y"},        \
+        {LdpColorFormatGRAY_16_LE,     LdpColorSpaceGreyscale, CTMonochrome, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(16), LdpFP##prefix##14, "_16bit.y"},        \
+                                                                                                                                                                                                    \
+        {LdpColorFormatP010_10,        LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 0, 1},    BITS(10), LdpFP##prefix##10,  ".p010"},          \
+        {LdpColorFormatP016_16,        LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 1, 0},    BITS(16), LdpFP##prefix##14,  ".p016"},          \
+    };                                                                                                                                                                                              \
 // clang-format on
 
 //Make a layout table for unsigned formats
@@ -111,6 +117,42 @@ uint8_t ldpColorFormatPlaneWidthShift(LdpColorFormat format, uint32_t planeIdx)
 uint8_t ldpColorFormatPlaneHeightShift(LdpColorFormat format, uint32_t planeIdx)
 {
     return findLayoutInfo(format, kExternalFormat)->planeHeightShift[planeIdx];
+}
+
+LdeChroma ldpColorFormatChroma(LdpColorFormat format)
+{
+    return findLayoutInfo(format, kExternalFormat)->chromSubsampling;
+#if 0
+    const LdpPictureLayoutInfo* info = findLayoutInfo(format, kExternalFormat);
+
+    if (info->format == LdpColorFormatUnknown) {
+        return CT420;
+    }
+    if (info->colorSpace == LdpColorSpaceGreyscale) {
+        return CTMonochrome;
+    }
+    if (info->colorSpace != LdpColorSpaceYUV) {
+        // RGB / packed formats: no chroma subsampling.
+        return CT444;
+    }
+    const uint8_t ws = info->planeWidthShift[1];
+    const uint8_t hs = info->planeHeightShift[1];
+    if (ws == 1 && hs == 1) {
+        return CT420;
+    }
+    if (ws == 1 && hs == 0) {
+        return CT422;
+    }
+    if (ws == 0 && hs == 0) {
+        return CT444;
+    }
+    return CT420;
+#endif
+}
+
+LdeChroma ldpPictureLayoutChroma(const LdpPictureLayout* layout)
+{
+    return ldpColorFormatChroma(ldpPictureLayoutFormat(layout));
 }
 
 bool ldpPictureDescCheckValidStrides(const LdpPictureDesc* pictureDesc,

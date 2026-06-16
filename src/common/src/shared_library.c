@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2025-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -21,7 +21,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#define SHARED_SUFFIX "dll"
+#define VN_SHARED_SUFFIX "dll"
 
 LdcSharedLibrary ldcSharedLibraryFind(const char* libraryName)
 {
@@ -31,7 +31,7 @@ LdcSharedLibrary ldcSharedLibraryFind(const char* libraryName)
     if (!hModule) {
         // Try <name>.dll
         char tmp[PATH_MAX];
-        snprintf(tmp, sizeof(tmp), "%s." SHARED_SUFFIX, libraryName);
+        snprintf(tmp, sizeof(tmp), "%s." VN_SHARED_SUFFIX, libraryName);
 
         hModule = LoadLibrary(tmp);
     }
@@ -54,9 +54,9 @@ void* ldcSharedLibrarySymbol(LdcSharedLibrary sharedLibrary, const char* symbolN
 #include <dlfcn.h>
 
 #if VN_OS(APPLE)
-#define SHARED_SUFFIX "dylib"
+#define VN_SHARED_SUFFIX "dylib"
 #else
-#define SHARED_SUFFIX "so"
+#define VN_SHARED_SUFFIX "so"
 #endif
 
 LdcSharedLibrary ldcSharedLibraryFind(const char* libraryName)
@@ -67,7 +67,7 @@ LdcSharedLibrary ldcSharedLibraryFind(const char* libraryName)
     if (!handle) {
         // Try lib<name>.<suffix>
         char tmp[PATH_MAX];
-        snprintf(tmp, sizeof(tmp), "lib%s." SHARED_SUFFIX, libraryName);
+        snprintf(tmp, sizeof(tmp), "lib%s." VN_SHARED_SUFFIX, libraryName);
 
         handle = dlopen(tmp, RTLD_LAZY);
     }

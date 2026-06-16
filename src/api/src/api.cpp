@@ -116,11 +116,12 @@ LCEVC_API LCEVC_ReturnCode LCEVC_AllocPicture(LCEVC_DecoderHandle decHandle,
     picHandle->hdl = 0;
     return withLockedDecoder(decHandle.hdl, [&ldpPictureDesc, &picHandle,
                                              functionName = __FUNCTION__](DecoderContext* context) {
-        LdpPicture* picture = context->pipeline()->allocPicture(*ldpPictureDesc);
-        if (!picture) {
+        LdpPicture* picture = nullptr;
+        const LdcReturnCode rc = context->pipeline()->allocPicture(*ldpPictureDesc, picture);
+        if (rc != LdcReturnCodeSuccess || !picture) {
             VNUnused(functionName);
-            VNLogError("Unable to create a managed Picture");
-            return LCEVC_Error;
+            VNLogError("Unable to create a managed Picture (rc=%d)", static_cast<int>(rc));
+            return rc != LdcReturnCodeSuccess ? fromLdcReturnCode(rc) : LCEVC_Error;
         }
 
         Handle<LdpPicture> hdl = context->picturePool().add(picture);
@@ -150,24 +151,24 @@ LCEVC_API LCEVC_ReturnCode LCEVC_AllocPictureExternal(LCEVC_DecoderHandle decHan
 
     picHandle->hdl = 0;
 
-    return withLockedDecoder(decHandle.hdl,
-                             [&ldpPictureDesc, &ldpPictureBufferDesc, &ldpPicturePlaneDescs,
-                              &picHandle, functionName = __FUNCTION__](DecoderContext* context) {
-                                 LdpPicture* picture = context->pipeline()->allocPictureExternal(
-                                     *ldpPictureDesc, ldpPicturePlaneDescs, ldpPictureBufferDesc);
-                                 if (!picture) {
-                                     VNUnused(functionName);
-                                     VNLogError("Unable to create an external Picture!");
-                                     return LCEVC_Error;
-                                 }
-                                 Handle<LdpPicture> hdl = context->picturePool().add(picture);
-                                 if (!hdl.isValid()) {
-                                     return LCEVC_Error;
-                                 }
+    return withLockedDecoder(decHandle.hdl, [&ldpPictureDesc, &ldpPictureBufferDesc,
+                                             &ldpPicturePlaneDescs, &picHandle,
+                                             functionName = __FUNCTION__](DecoderContext* context) {
+        LdpPicture* picture = nullptr;
+        const LdcReturnCode rc = context->pipeline()->allocPictureExternal(
+            *ldpPictureDesc, ldpPicturePlaneDescs, ldpPictureBufferDesc, picture);
+        if (rc != LdcReturnCodeSuccess || !picture) {
+            VNUnused(functionName);
+            return rc != LdcReturnCodeSuccess ? fromLdcReturnCode(rc) : LCEVC_Error;
+        }
+        Handle<LdpPicture> hdl = context->picturePool().add(picture);
+        if (!hdl.isValid()) {
+            return LCEVC_Error;
+        }
 
-                                 *picHandle = LCEVC_PictureHandle{hdl.handle};
-                                 return LCEVC_Success;
-                             });
+        *picHandle = LCEVC_PictureHandle{hdl.handle};
+        return LCEVC_Success;
+    });
 }
 
 LCEVC_API LCEVC_ReturnCode LCEVC_FreePicture(LCEVC_DecoderHandle decHandle, LCEVC_PictureHandle picHandle)
@@ -576,9 +577,23 @@ LCEVC_API LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture(LCEVC_DecoderHandle decHa
     });
 }
 
+LCEVC_API LCEVC_ReturnCode LCEVC_PeekDecoderPictureDesc(LCEVC_DecoderHandle decHandle,
+                                                        uint64_t timestamp, LCEVC_PictureDesc* output)
+{
+    if (output == nullptr) {
+        return LCEVC_InvalidParam;
+    }
+
+    return withLockedDecoder(decHandle.hdl, [&timestamp, &output](DecoderContext* context) {
+        LCEVC_ReturnCode r = fromLdcReturnCode(
+            context->pipeline()->peekDecoderPictureDesc(timestamp, toLdpPictureDescPtr(output)));
+        VNTraceInstantArgs("PeekDecoderPictureDesc", "timestamp", timestamp, "output", (void*)output);
+        return r;
+    });
+}
+
 LCEVC_API LCEVC_ReturnCode LCEVC_PeekDecoder(LCEVC_DecoderHandle decHandle, uint64_t timestamp,
                                              uint32_t* width, uint32_t* height)
-
 {
     if ((width == nullptr) || (height == nullptr)) {
         return LCEVC_InvalidParam;

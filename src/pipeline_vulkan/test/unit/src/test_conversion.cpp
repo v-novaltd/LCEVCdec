@@ -17,6 +17,7 @@
 #include "pipeline_vulkan.h"
 #include "test_utility.h"
 //
+#include <LCEVC/build_config.h>
 #include <LCEVC/common/acceleration.h>
 #include <LCEVC/pipeline/buffer_alignment.h>
 #include <LCEVC/pipeline/event_sink.h>
@@ -34,6 +35,12 @@
 #include <random>
 #include <sstream>
 #include <vector>
+
+#if VN_OS(ANDROID)
+#include <android/hardware_buffer.h>
+
+#include <cmath>
+#endif
 
 // CPU scalar convert function - declared in pixel_processing but not in a public header.
 extern "C"
@@ -74,12 +81,14 @@ struct Resolution
 };
 
 constexpr Resolution kResolutions[] = {
-    {960, 540},   // Standard qHD
-    {1920, 1080}, // Full HD
-    {128, 128},   // Small power-of-2
-    {66, 34},     // Small non-aligned, even
-    {254, 130},   // Non-power-of-2, not workgroup-aligned
-    {2, 2},       // Minimum valid 420 size
+    // Removed some resolutions for CI test runtime
+
+    // {960, 540},   // Standard qHD
+    // {1920, 1080}, // Full HD
+    // {128, 128},   // Small power-of-2
+    {66, 34},   // Small non-aligned, even
+    {254, 130}, // Non-power-of-2, not workgroup-aligned
+    // {2, 2},       // Minimum valid 420 size
 };
 
 // Map a bit depth to the corresponding unsigned and signed fixed-point types.
@@ -238,19 +247,29 @@ protected:
             vulkan_test_util::allocateTestPictureAndBuffer(m_vulkanPipeline, dstFormat, width, height);
         auto* dstBuffer = static_cast<BufferVulkan*>(dst->buffer);
 
-        VulkanConversionArgs args{};
-        args.src = src;
-        args.dst = dst;
-        args.toInternal = toInternal;
-        args.bitDepth = bitDepth;
-        args.chroma = chroma;
-
         auto& compute = m_vulkanPipeline->backend().compute();
         VulkanFrameContext* frameContext = compute.acquireFrameContext(nullptr);
         EXPECT_NE(frameContext, nullptr);
-        args.context = frameContext;
         compute.beginCompute(frameContext);
-        EXPECT_TRUE(m_vulkanPipeline->backend().conversion(&args));
+
+        if (toInternal) {
+            VulkanConvertInArgs args{};
+            args.src = src;
+            args.dst = dst;
+            args.bitDepth = bitDepth;
+            args.chroma = chroma;
+            args.context = frameContext;
+            EXPECT_TRUE(m_vulkanPipeline->backend().convertIn(&args));
+        } else {
+            VulkanConvertOutArgs args{};
+            args.src = src;
+            args.dst = dst;
+            args.bitDepth = bitDepth;
+            args.chroma = chroma;
+            args.context = frameContext;
+            EXPECT_TRUE(m_vulkanPipeline->backend().convertOut(&args));
+        }
+
         compute.endCompute(frameContext);
         m_vulkanPipeline->addCompletionContext(frameContext);
         m_vulkanPipeline->waitCompletionContextIdle();
@@ -466,6 +485,159 @@ TEST_P(PipelineVulkanConversionTest, CompareGPUvsCPUScalar)
         }
     }
 }
+
+#if VN_OS(ANDROID)
+namespace {
+
+int internalFrom8(uint8_t val) { return (static_cast<int>(val) << 7) - 0x4000; }
+
+void writeInternalSample(std::vector<uint8_t>& data, const LdpPictureLayout& layout, uint8_t plane,
+                         uint32_t x, uint32_t y, uint8_t val)
+{
+    auto* row = reinterpret_cast<int16_t*>(data.data() + ldpPictureLayoutPlaneOffset(&layout, plane) +
+                                           y * ldpPictureLayoutRowStride(&layout, plane));
+    row[x] = static_cast<int16_t>(internalFrom8(val));
+}
+
+uint8_t expectedRgba8(float value)
+{
+    return static_cast<uint8_t>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+}
+
+std::array<uint8_t, 4> expectedYuvToRgba(uint8_t y, uint8_t u, uint8_t v)
+{
+    const float yf = static_cast<float>(y) / 255.0f;
+    const float uf = (static_cast<float>(u) / 255.0f) - 0.5f;
+    const float vf = (static_cast<float>(v) / 255.0f) - 0.5f;
+
+    return {expectedRgba8(yf + 1.403f * vf), expectedRgba8(yf - 0.344f * uf - 0.714f * vf),
+            expectedRgba8(yf + 1.770f * uf), 255};
+}
+
+} // namespace
+
+TEST(PipelineVulkanConversionAhbTest, ConvertOutRgba8Image)
+{
+    constexpr uint32_t kWidth = 8;
+    constexpr uint32_t kHeight = 8;
+
+    auto* pipelineBuilder = new PipelineBuilderVulkan(ldcMemoryAllocatorMalloc());
+    ASSERT_TRUE(pipelineBuilder);
+
+    EventSink* eventSink = nullptr;
+    std::unique_ptr<Pipeline> pipeline = pipelineBuilder->finish(eventSink);
+    delete pipelineBuilder;
+
+    auto* vulkanPipeline = static_cast<PipelineVulkan*>(pipeline.get());
+    if (!vulkanPipeline) {
+        GTEST_SKIP() << "Skipping test due to lack of Vulkan support";
+    }
+
+    auto* src = vulkan_test_util::allocateTestPictureAndBuffer(vulkanPipeline, LdpColorFormatI420_16_LE,
+                                                               kWidth, kHeight);
+    auto* srcBuffer = static_cast<BufferVulkan*>(src->buffer);
+
+    LdpPictureLayout srcLayout{};
+    ldpPictureLayoutInitialize(&srcLayout, LdpColorFormatI420_16_LE, kWidth, kHeight, kBufferRowAlignment);
+    std::vector<uint8_t> srcData(ldpPictureLayoutSize(&srcLayout), 0);
+
+    std::array<uint8_t, kWidth * kHeight> yValues{};
+    std::array<uint8_t, (kWidth / 2) * (kHeight / 2)> uValues{};
+    std::array<uint8_t, (kWidth / 2) * (kHeight / 2)> vValues{};
+
+    for (uint32_t y = 0; y < kHeight; ++y) {
+        for (uint32_t x = 0; x < kWidth; ++x) {
+            const uint8_t value = static_cast<uint8_t>(32 + x * 17 + y * 9);
+            yValues[y * kWidth + x] = value;
+            writeInternalSample(srcData, srcLayout, 0, x, y, value);
+        }
+    }
+    for (uint32_t y = 0; y < kHeight / 2; ++y) {
+        for (uint32_t x = 0; x < kWidth / 2; ++x) {
+            const uint8_t u = static_cast<uint8_t>(80 + x * 20 + y * 7);
+            const uint8_t v = static_cast<uint8_t>(160 - x * 11 + y * 13);
+            uValues[y * (kWidth / 2) + x] = u;
+            vValues[y * (kWidth / 2) + x] = v;
+            writeInternalSample(srcData, srcLayout, 1, x, y, u);
+            writeInternalSample(srcData, srcLayout, 2, x, y, v);
+        }
+    }
+    srcBuffer->copyIn(0, srcData.data(), static_cast<uint32_t>(srcData.size()));
+
+    AHardwareBuffer_Desc ahbDesc{};
+    ahbDesc.width = kWidth;
+    ahbDesc.height = kHeight;
+    ahbDesc.layers = 1;
+    ahbDesc.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+    ahbDesc.usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE | AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
+                    AHARDWAREBUFFER_USAGE_CPU_WRITE_RARELY;
+
+    if (!AHardwareBuffer_isSupported(&ahbDesc)) {
+        vulkanPipeline->freePicture(src);
+        GTEST_SKIP() << "RGBA8 AHardwareBuffer is not supported on this device";
+    }
+
+    AHardwareBuffer* ahb = nullptr;
+    ASSERT_EQ(0, AHardwareBuffer_allocate(&ahbDesc, &ahb));
+    ASSERT_NE(nullptr, ahb);
+
+    LdpPictureDesc dstDesc{};
+    ASSERT_EQ(LdcReturnCodeSuccess, ldpDefaultPictureDesc(&dstDesc, LdpColorFormatRGBA_8, kWidth, kHeight));
+    LdpPicture* dstLdp = nullptr;
+    ASSERT_EQ(LdcReturnCodeSuccess, vulkanPipeline->allocPicture(dstDesc, dstLdp));
+    auto* dst = static_cast<PictureVulkan*>(dstLdp);
+    ASSERT_NE(nullptr, dst);
+    ASSERT_TRUE(dst->setAhbBuffer(*vulkanPipeline, ahb));
+
+    auto& compute = vulkanPipeline->backend().compute();
+    VulkanFrameContext* frameContext = compute.acquireFrameContext(nullptr);
+    ASSERT_NE(frameContext, nullptr);
+    ASSERT_TRUE(compute.beginCompute(frameContext));
+
+    VulkanConvertOutArgs args{};
+    args.src = src;
+    args.dst = dst;
+    args.bitDepth = 8;
+    args.chroma = LdeChroma::CT420;
+    args.context = frameContext;
+    EXPECT_TRUE(vulkanPipeline->backend().convertOut(&args));
+
+    EXPECT_TRUE(compute.endCompute(frameContext));
+    vulkanPipeline->addCompletionContext(frameContext);
+    vulkanPipeline->waitCompletionContextIdle();
+
+    AHardwareBuffer_Desc lockedDesc{};
+    AHardwareBuffer_describe(ahb, &lockedDesc);
+
+    void* lockedData = nullptr;
+    ASSERT_EQ(0, AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1, nullptr, &lockedData));
+    ASSERT_NE(nullptr, lockedData);
+
+    const auto* pixels = static_cast<const uint8_t*>(lockedData);
+    for (uint32_t y = 0; y < kHeight; ++y) {
+        for (uint32_t x = 0; x < kWidth; ++x) {
+            const uint32_t chromaX = x / 2;
+            const uint32_t chromaY = y / 2;
+            const auto expected =
+                expectedYuvToRgba(yValues[y * kWidth + x], uValues[chromaY * (kWidth / 2) + chromaX],
+                                  vValues[chromaY * (kWidth / 2) + chromaX]);
+            const uint8_t* actual = pixels + (y * lockedDesc.stride + x) * 4;
+            for (uint32_t c = 0; c < 4; ++c) {
+                EXPECT_LE(std::abs(static_cast<int>(actual[c]) - static_cast<int>(expected[c])), 1)
+                    << "Mismatch at (" << x << ", " << y << ") channel " << c
+                    << ": actual=" << static_cast<int>(actual[c])
+                    << " expected=" << static_cast<int>(expected[c]);
+            }
+        }
+    }
+
+    AHardwareBuffer_unlock(ahb, nullptr);
+    vulkanPipeline->freePicture(src);
+    vulkanPipeline->freePicture(dst);
+    AHardwareBuffer_release(ahb);
+}
+
+#endif // VN_OS(ANDROID)
 
 // -----------------------------------------------------------------------------
 

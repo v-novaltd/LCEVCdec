@@ -36,14 +36,10 @@ bool tiledRLEDecoderInitialize(TiledRLEDecoder* decoder, ByteStream* reader)
 
 bool tiledRLEDecoderRead(TiledRLEDecoder* decoder, uint8_t* destination)
 {
-    if (decoder->runLength == 0) {
-        /* Decode next run length and flip the symbol. */
+    /* Decode the next run length(s) and flip the symbol */
+    while (decoder->runLength == 0) {
         VNCheckB(bytestreamReadMultiByte(decoder->reader, &decoder->runLength));
         decoder->currentSymbol = !decoder->currentSymbol;
-
-        if (decoder->runLength == 0) {
-            return true;
-        }
     }
 
     *destination = decoder->currentSymbol;
@@ -56,6 +52,7 @@ bool tiledSizeDecoderInitialize(LdcMemoryAllocator* allocator, uint64_t diagId,
                                 TiledSizeDecoder* decoder, uint32_t numSizes, ByteStream* stream,
                                 LdeTileCompressionSizePerTile type, uint8_t bitstreamVersion)
 {
+    VNUnused(diagId);
     const EntropyDecoderType decoderType = (type == TCSPTTPrefix) ? EDTSizeUnsigned : EDTSizeSigned;
 
     /* Do not attempt to read sizes if none are signaled. */

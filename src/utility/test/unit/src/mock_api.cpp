@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -283,7 +283,14 @@ LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture(LCEVC_DecoderHandle decHandle, LCEV
 }
 
 LCEVC_ReturnCode LCEVC_PeekDecoder(LCEVC_DecoderHandle decHandle, uint64_t timestamp,
-                                   LCEVC_PictureDesc* pictureDesc, LCEVC_DecodeInformation* information)
+                                   uint32_t* width, uint32_t* height)
+{
+    assert(0);
+    return LCEVC_Error;
+}
+
+LCEVC_ReturnCode LCEVC_PeekDecoderPictureDesc(LCEVC_DecoderHandle decHandle, uint64_t timestamp,
+                                              LCEVC_PictureDesc* output)
 {
     assert(0);
     return LCEVC_Error;

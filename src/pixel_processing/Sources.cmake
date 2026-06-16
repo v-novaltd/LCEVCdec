@@ -17,27 +17,32 @@ list(
     SOURCES
     "src/add.c"
     "src/add_neon.c"
-    "src/add_scalar.c"
     "src/add_sse.c"
     "src/apply_cmdbuffer.c"
     "src/apply_cmdbuffer_neon.c"
-    "src/apply_cmdbuffer_scalar.c"
     "src/apply_cmdbuffer_sse.c"
     "src/convert_neon.c"
-    "src/convert_scalar.c"
     "src/convert_sse.c"
     "src/convert.c"
     "src/dither.c"
-    "src/dither.c"
     "src/fp_types.c"
     "src/upscale.c"
-    "src/upscale_scalar.c"
     "src/upscale_sse.c"
     "src/upscale_neon.c"
     "src/sharpen.c"
     "src/sharpen_neon.c"
-    "src/sharpen_scalar.c"
     "src/sharpen_sse.c")
+
+if (NOT VN_SDK_MINIMUM_LIB_SIZE)
+    list(
+        APPEND
+        SOURCES
+        "src/add_scalar.c"
+        "src/apply_cmdbuffer_scalar.c"
+        "src/convert_scalar.c"
+        "src/upscale_scalar.c"
+        "src/sharpen_scalar.c")
+endif ()
 
 list(
     APPEND

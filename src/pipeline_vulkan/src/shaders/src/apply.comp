@@ -23,10 +23,6 @@ layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
        local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
-// Specialized build time configuration
-layout (constant_id = SPECID_DDS) const bool dds = false;
-layout (constant_id = SPECID_RASTER_ORDER) const bool rasterOrder = false;
-
 layout(std430, set = 0, binding = 0) buffer restrict readonly CommandBuffer {
     uint samples[];
 } cmd;
@@ -47,6 +43,9 @@ layout(push_constant) uniform consts {
     uint tileWidth;
     uint commandOffset; // uint32 offset into merged command buffer for this tile
     uint commandCount;   // number of commands in this tile
+    uint blocksInRowMagic; // ceil(2^32 / blocksInRow); 0 means blocksInRow == 1
+    uint dds;
+    uint rasterOrder;
 };
 
 const uint ADD = 0;
@@ -102,7 +101,8 @@ void processSubBlock(uint bitmaskMost, uint bitmaskLeast, uint operation,
         const uint bitIndex = 31 - (i & 31u); // same as 31 - (i % 32)
         const uint bitSelector = 1u << bitIndex;
         const uint currentBitmask = (i < 32u) ? bitmaskMost : bitmaskLeast;
-        const uint ix = i % tusInBlockWidth;
+        // tusInBlockWidth is 8 (dds) or 16 (non-dds) — both power of 2.
+        const uint ix = i & (tusInBlockWidth - 1u);
         const uint iy = i / tusInBlockWidth;
         const uint x = blockX * 16 + ix * (tuWidth >> 1);
         const uint y = blockY * 32 + subBlockIdx * 8 + iy * tuWidth;
@@ -126,14 +126,27 @@ void processSubBlock(uint bitmaskMost, uint bitmaskLeast, uint operation,
 void processBlock(const uint bitmask[8], uint operation, uint block, uint tu, uint tuWidth)
 {
     const uint pixelsInBlockLength = 32;
-    const uint tusInBlockWidth = (dds) ? 8 : 16;
+    const uint tusInBlockWidth = (dds != 0u) ? 8 : 16;
     const uint width = (tileWidth != 0) ? tileWidth : srcWidth;
-    const uint blocksInRow = (width % pixelsInBlockLength == 0) ? (width / pixelsInBlockLength) : (width / pixelsInBlockLength) + 1;
-    const uint blockX = block % blocksInRow;
-    const uint blockY = block / blocksInRow;
+    const uint blocksInRow = (width + (pixelsInBlockLength - 1u)) / pixelsInBlockLength;
+    // Recover blockY = block / blocksInRow via a 32x32->64 multiply by the
+    // CPU-supplied reciprocal, avoiding an integer divide. blocksInRowMagic == 0
+    // is the sentinel for blocksInRow == 1 (the magic 2^32 wouldn't fit in u32).
+    uint blockX;
+    uint blockY;
+    if (blocksInRowMagic != 0u) {
+        uint hi;
+        uint lo;
+        umulExtended(block, blocksInRowMagic, hi, lo);
+        blockY = hi;
+        blockX = block - blockY * blocksInRow;
+    } else {
+        blockY = block;
+        blockX = 0u;
+    }
     const uint firstContainerInBLock = containerOffset + (tileX >> 1) + blockX * (pixelsInBlockLength >> 1) + tileY * containerStride + blockY * containerStride * pixelsInBlockLength;
 
-    for(int i = 0; i<((dds) ? 1 : 4); ++i) {
+    for(int i = 0; i<((dds != 0u) ? 1 : 4); ++i) {
         processSubBlock(bitmask[2*i], bitmask[2*i + 1], operation, firstContainerInBLock + i * 8 * containerStride, blockX, blockY, uint(i), tu, tuWidth, tusInBlockWidth);
     }
 }
@@ -146,20 +159,27 @@ void processRaster(const uint bitmask[8], uint operation, uint block, uint tu, u
     const uint containerWidth = (srcWidth + 1) >> 1;
     const uint containersInRaster = (256 >> 1) * tuWidth;
     const uint containerStartIndex = block * containersInRaster;
+    const uint step = tuWidth >> 1;
+    // Track (x, y) = (containerIndex % containerWidth, containerIndex / containerWidth)
+    // incrementally so the per-bit loop body avoids an integer divmod against
+    // the runtime containerWidth. The starting divide runs once per command.
+    uint y = containerStartIndex / containerWidth;
+    uint x = containerStartIndex - y * containerWidth;
     for (uint i = 0; i < 256; ++i) {
         const uint segment = i >> 5; // same as i / 32
         const uint bitIndex = 31 - (i & 31u); // same as 31 - (i % 32)
         const uint bitSelector = 1u << bitIndex;
-        if ((bitmask[segment] & bitSelector) != 0u) {
-            const uint containerIndex = containerStartIndex + i * (tuWidth >> 1);
-            const uint y = containerIndex / containerWidth;
-            const uint x = containerIndex % containerWidth;
-            if (x + (tuWidth >> 1) > containerWidth || y * tuWidth + tuWidth > srcHeight) {
-                continue;
-            }
+        if ((bitmask[segment] & bitSelector) != 0u
+            && x + step <= containerWidth && y * tuWidth + tuWidth <= srcHeight) {
             // Memory address uses containerStride (includes any row padding).
             const uint index = containerOffset + x + y * tuWidth * containerStride;
             applyTu(index, tu, ADD, tuWidth);
+        }
+        x += step;
+        // while (not if) for the degenerate step > containerWidth case.
+        while (x >= containerWidth) {
+            x -= containerWidth;
+            y += 1u;
         }
     }
 }
@@ -171,7 +191,7 @@ void main()
     }
 
     const uint CMDSIZE = 10; // 64 bit command + four 64 bit bitmasks
-    const uint tuWidth = (dds) ? 4 : 2;
+    const uint tuWidth = (dds != 0u) ? 4 : 2;
     const uint commandIndex = uint(commandOffset) + gl_GlobalInvocationID.x * CMDSIZE;
     const ivec4 command = ivec4(cmd.samples[commandIndex], cmd.samples[commandIndex + 1],
                           cmd.samples[commandIndex + 2], cmd.samples[commandIndex + 3]);
@@ -186,14 +206,14 @@ void main()
     uint bitmask[8];
     bitmask[1] = command.z;
     bitmask[0] = command.w;
-    if (!dds || rasterOrder) { // when in raster order, we make use of all 4 bitmasks for DDS
+    if (dds == 0u || rasterOrder != 0u) { // when in raster order, we make use of all 4 bitmasks for DDS
         const int map[] = {3, 2, 5, 4, 7, 6};
         for (int i = 0; i < 6; ++i) {
             bitmask[map[i]] = cmd.samples[commandIndex + 4 + i];
         }
     }
 
-    if (rasterOrder) {
+    if (rasterOrder != 0u) {
         // temporal off - not tiled
         processRaster(bitmask, operation, block, tu, tuWidth);
     }  else {

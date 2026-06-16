@@ -75,7 +75,8 @@ public:
     bool applyCommon(VulkanApplyCommonArgs* params) { return m_compute.applyCommon(params); };
     bool applyTile(VulkanApplyTileArgs* params) { return m_compute.applyTile(params); };
     bool add(VulkanAddArgs* params) { return m_compute.add(params); };
-    bool conversion(VulkanConversionArgs* params) { return m_compute.conversion(params); };
+    bool convertIn(VulkanConvertInArgs* params) { return m_compute.convertIn(params); };
+    bool convertOut(VulkanConvertOutArgs* params) { return m_compute.convertOut(params); };
     bool upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs* params)
     {
         return m_compute.upscaleVertical(kernel, params);
@@ -152,8 +153,8 @@ private:
     const std::vector<const char*> validationLayers = {"VK_LAYER_KHRONOS_validation"};
     std::vector<const char*> deviceExtensions = {
 #if VN_OS(ANDROID)
-    //"VK_ANDROID_external_memory_android_hardware_buffer",
-    //"VK_EXT_queue_family_foreign"
+        "VK_ANDROID_external_memory_android_hardware_buffer",
+        "VK_EXT_queue_family_foreign",
 #endif
     };
 
@@ -163,7 +164,7 @@ private:
     int32_t m_timestampsLimit{};
     QueueFamilyIndices m_indices;
     VkInstance m_instance{VK_NULL_HANDLE};
-    VkDebugUtilsMessengerEXT m_debugMessenger;
+    VkDebugUtilsMessengerEXT m_debugMessenger{VK_NULL_HANDLE};
     VkPhysicalDevice m_physicalDevice{VK_NULL_HANDLE};
     VkPhysicalDeviceProperties m_physicalDeviceProperties{};
 

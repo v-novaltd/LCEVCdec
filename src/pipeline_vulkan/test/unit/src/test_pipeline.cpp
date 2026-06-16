@@ -71,7 +71,8 @@ TEST_F(PipelineVulkanFixture, AllocatePicturesManaged)
 {
     const LdpPictureDesc pictureDesc{1920, 1080, LdpColorFormatI420_8};
 
-    auto picture = mPipeline->allocPicture(pictureDesc);
+    LdpPicture* picture = nullptr;
+    ASSERT_EQ(LdcReturnCodeSuccess, mPipeline->allocPicture(pictureDesc, picture));
     ASSERT_TRUE(picture);
 
     mPipeline->freePicture(picture);

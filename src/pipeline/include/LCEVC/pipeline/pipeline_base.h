@@ -80,6 +80,11 @@ public:
     // Get dither generator
     virtual LdppDitherGlobal* ditherGlobal() = 0;
 
+    // Called by allocPictureExternal when the buffer descriptor carries an accelBuffer.
+    // Return LdcReturnCodeNotSupported if the buffer cannot be handled..
+    virtual LdcReturnCode storeAccelBuffer(PictureBase* picture, const LdpPictureDesc& desc,
+                                           LdpAccelBuffer* accelBuffer);
+
     // Send/receive
     LdcReturnCode sendDecoderBase(uint64_t timestamp, LdpPicture* basePicture, uint32_t timeoutUs,
                                   void* userData) override;
@@ -96,13 +101,14 @@ public:
     LdcReturnCode skip(uint64_t timestamp) override;
     LdcReturnCode flush(uint64_t timestamp) override;
     LdcReturnCode peekDecoder(uint64_t timestamp, uint32_t& widthOut, uint32_t& heightOut) override;
+    LdcReturnCode peekDecoderPictureDesc(uint64_t timestamp, LdpPictureDesc* desc) override;
 
     LdcReturnCode synchronizeDecoder(uint64_t timestamp, bool flushPending) override;
 
     // Picture-handling
-    LdpPicture* allocPicture(const LdpPictureDesc& desc) override;
-    LdpPicture* allocPictureExternal(const LdpPictureDesc& desc, const LdpPicturePlaneDesc* planeDescArr,
-                                     const LdpPictureBufferDesc* buffer) override;
+    LdcReturnCode allocPicture(const LdpPictureDesc& desc, LdpPicture*& pictureOut) override;
+    LdcReturnCode allocPictureExternal(const LdpPictureDesc& desc, const LdpPicturePlaneDesc* planeDescArr,
+                                       const LdpPictureBufferDesc* buffer, LdpPicture*& pictureOut) override;
 
     void freePicture(LdpPicture* picture) override;
 
@@ -161,7 +167,7 @@ protected:
     uint32_t findAllocatedPicture(const PictureBase* frame) const;
 
     // Find the Frame associated with a timestamp, or NULL if none.
-    FrameBase* findFrame(uint64_t timestamp);
+    FrameBase* findFrame(uint64_t timestamp, bool ignoreSkipped);
 
     // Find the index in allocated frames
     uint32_t findAllocatedFrame(const FrameBase* frame) const;
@@ -205,7 +211,7 @@ protected:
     // The `m_...Index` vectors contain timestamp-order pointers to theFrameBase structures.
     common::Vector<FrameBase*> m_allocatedFrames;
 
-    // The timestamp of the highest sent enhancement frame
+    // The timestamp of the highest sent frame
     std::atomic<uint64_t> m_sendLimit{kInvalidTimestamp};
 
     // Timestamp for frames in processing state

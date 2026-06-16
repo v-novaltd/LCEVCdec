@@ -104,7 +104,7 @@ if (!tasks.names.contains("showSnapshotHint")) {
         doLast {
             println(" -> Building LCEVC${artifactName} JNI wrapper with version ${buildVersion}")
             if (IS_LOCAL) {
-                println(" -> Consume in V-Nova androidx/media3 fork using publish with parameter -Plcevc${artifactName}=${buildVersion}")
+                println(" -> Consume in V-Nova androidx/media3 fork using publish with parameter -Plcevc${artifactName}=${publishVersion}")
             }
         }
     }

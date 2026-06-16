@@ -92,9 +92,6 @@ endif ()
 if (VN_SDK_EXECUTABLES)
     list(APPEND PC_UTILITY_REQUIRES "libxxhash fmt")
 endif ()
-if (VN_SDK_UNIT_TESTS)
-    list(APPEND PC_REQUIRES_PRIVATE "gtest gmock")
-endif ()
 set(PC_VULKAN_PIPELINE "no")
 if (VN_SDK_PIPELINE_VULKAN)
     if (NOT BUILD_SHARED_LIBS)
@@ -132,17 +129,21 @@ endif ()
 # Configure templates for install
 configure_file("cmake/templates/build_config.h.in" "generated/LCEVC/build_config.h")
 configure_file("cmake/templates/lcevc_dec.pc.in" "generated/lcevc_dec.pc" @ONLY)
-configure_file("cmake/templates/lcevc_dec_utility.pc.in" "generated/lcevc_dec_utility.pc" @ONLY)
 configure_file("cmake/templates/lcevc_dec_extract.pc.in" "generated/lcevc_dec_extract.pc" @ONLY)
+if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
+    configure_file("cmake/templates/lcevc_dec_utility.pc.in" "generated/lcevc_dec_utility.pc" @ONLY)
+endif ()
 
 # Install templates and static files
-install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_dec.pc"
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/lcevc_dec.pc"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
-install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_dec_utility.pc"
+if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/lcevc_dec_utility.pc"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
+endif ()
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/lcevc_dec_extract.pc"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
-install(FILES "${CMAKE_BINARY_DIR}/generated/lcevc_dec_extract.pc"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
-install(FILES "${CMAKE_BINARY_DIR}/generated/LCEVC/build_config.h"
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/LCEVC/build_config.h"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC")
 install(FILES "include/LCEVC/api_defs.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LCEVC")
 if (VN_SDK_SYSTEM_INSTALL)

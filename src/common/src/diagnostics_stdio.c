@@ -26,18 +26,15 @@
 #include <stdio.h>
 
 static const char* getLogMessage(char* buffer, size_t bufferSize, const LdcDiagSite* site,
-                                 const LdcDiagRecord* record, const LdcDiagValue* values)
+                                 const LdcDiagRecord* record, const LdcDiagValue* values,
+                                 uint32_t valuesCount)
 {
     if (site->type == LdcDiagTypeLog) {
-        ldcDiagnosticFormatLog(buffer, (uint32_t)bufferSize, site, record, values);
+        ldcDiagnosticFormatLog(buffer, (uint32_t)bufferSize, site, record, values, valuesCount);
         return buffer;
     }
     if (site->type == LdcDiagTypeLogFormatted) {
-        if (values) {
-            return (const char*)values;
-        } else {
-            return "<No Value>";
-        }
+        return (values ? (const char*)values : "<No Value>");
     }
     return NULL;
 }
@@ -45,10 +42,11 @@ static const char* getLogMessage(char* buffer, size_t bufferSize, const LdcDiagS
 // Convert a log record to string
 //
 int ldcDiagnosticFormatLog(char* dst, uint32_t dstSize, const LdcDiagSite* site,
-                           const LdcDiagRecord* record, const LdcDiagValue* values)
+                           const LdcDiagRecord* record, const LdcDiagValue* values, uint32_t valuesCount)
 {
     if (site->type == LdcDiagTypeLog) {
-        return (int)ldcFormat(dst, dstSize, site->str, site->argumentTypes, values, site->argumentCount);
+        return (int)ldcFormat(dst, dstSize, site->str, site->argumentTypes, values,
+                              minU32(site->argumentCount, valuesCount));
     }
     if (site->type == LdcDiagTypeLogFormatted) {
         uint32_t copySize = minU32(record->size, dstSize);
@@ -59,11 +57,11 @@ int ldcDiagnosticFormatLog(char* dst, uint32_t dstSize, const LdcDiagSite* site,
 }
 
 bool ldcDiagHandlerStdio(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
-                         const LdcDiagValue* values)
+                         const LdcDiagValue* values, uint32_t valuesCount)
 {
     FILE* output = user;
     char buffer[4096];
-    const char* message = getLogMessage(buffer, sizeof(buffer), site, record, values);
+    const char* message = getLogMessage(buffer, sizeof(buffer), site, record, values, valuesCount);
     if (!message) {
         return false;
     }

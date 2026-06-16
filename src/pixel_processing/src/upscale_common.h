@@ -57,8 +57,10 @@ UpscaleFunction upscaleGetFunctionSSE(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
 UpscaleFunction upscaleGetFunctionNEON(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
                                        Interleaving interleaving, bool is2d, bool pa, bool dithering);
 
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
 UpscaleFunction upscaleGetFunctionScalar(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
                                          Interleaving interleaving, bool is2d, bool pa, bool dithering);
+#endif
 
 /*------------------------------------------------------------------------------*/
 

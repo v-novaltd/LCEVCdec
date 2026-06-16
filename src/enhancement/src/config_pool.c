@@ -130,7 +130,7 @@ bool ldeConfigPoolFrameInsert(LdeConfigPool* configPool, uint64_t timestamp,
 
     // Has global config changed?
     // Use memcmp to compare - which is why any padding needs to be zero
-    if (globalConfigWritten && memcmp(&next, configPool->latestGlobalConfig, sizeof(LdeGlobalConfig))) {
+    if (globalConfigWritten && memcmp(&next, configPool->latestGlobalConfig, sizeof(LdeGlobalConfig)) != 0) {
         // We have a new config
 
         WrappedGlobalConfig* newLatest = allocateGlobalConfig(configPool, &next);

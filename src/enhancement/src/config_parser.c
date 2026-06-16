@@ -39,7 +39,7 @@ static bool parseConformanceValue(ByteStream* stream, uint16_t* dst, const char*
 #if !VN_SDK_LOG(DEBUG)
     VNUnused(debugLabel);
 #endif
-    uint64_t value;
+    uint64_t value = 0;
 
     VNCheckB(bytestreamReadMultiByte(stream, &value));
 
@@ -174,7 +174,7 @@ static bool calculateTileCounts(LdeGlobalConfig* globalConfig)
             return false;
         }
 
-        for (uint8_t loq = 0; loq < LOQEnhancedCount; ++loq) {
+        for (uint8_t loq = 0; loq < (uint8_t)LOQEnhancedCount; ++loq) {
             uint16_t loqWidth = 0;
             uint16_t loqHeight = 0;
 
@@ -196,6 +196,19 @@ static bool calculateTileCounts(LdeGlobalConfig* globalConfig)
                 return false;
             }
         }
+    }
+
+    uint64_t maxChunks = 0;
+    for (uint8_t plane = 0; plane < globalConfig->numPlanes; ++plane) {
+        for (uint8_t loq = 0; loq < (uint8_t)LOQEnhancedCount; ++loq) {
+            maxChunks += (uint64_t)globalConfig->numTiles[plane][loq] * globalConfig->numLayers;
+        }
+        maxChunks += globalConfig->numTiles[plane][LOQ0]; /* temporal chunk per LOQ0 tile */
+    }
+
+    if (maxChunks > ChunkMaxCount) {
+        VNLogError("invalid stream: tile configuration produces too many chunks (%" PRIu64 ")", maxChunks);
+        return false;
     }
 
     return true;
@@ -220,7 +233,7 @@ static bool calculateTileConfiguration(LdeGlobalConfig* globalConfig)
  * out). Occurs with the first IDR (and possibly other IDRs) */
 static bool parseBlockSequenceConfig(ByteStream* stream, LdeGlobalConfig* globalConfig)
 {
-    uint8_t data;
+    uint8_t data = 0;
     VNCheckB(bytestreamReadU8(stream, &data));
 
     /* Profile: 4 bits */
@@ -535,7 +548,7 @@ static bool parseBlockGlobalConfig(ByteStream* stream, LdeGlobalConfig* globalCo
         for (int16_t i = 0; i < kernelSize; i++) {
             /* First and last coefficients are negative */
             const int16_t multiplier = ((i % 3) == 0) ? -1 : 1;
-            uint16_t coeff;
+            uint16_t coeff = 0;
 
             VNCheckB(bytestreamReadU16(stream, &coeff));
 
@@ -571,6 +584,17 @@ static bool parseBlockGlobalConfig(ByteStream* stream, LdeGlobalConfig* globalCo
     if (resType == kResolutionCustom) {
         VNCheckB(bytestreamReadU16(stream, &globalConfig->width));
         VNCheckB(bytestreamReadU16(stream, &globalConfig->height));
+
+        if (globalConfig->width == 0) {
+            VNLogError("Invalid custom resolution width=%u", globalConfig->width);
+            globalConfig->width = 1;
+            return false;
+        }
+        if (globalConfig->height == 0) {
+            VNLogError("Invalid custom resolution height=%u", globalConfig->height);
+            globalConfig->height = 1;
+            return false;
+        }
 
         VNLogDebug("  Custom resolution width: %u", globalConfig->width);
         VNLogDebug("  Custom resolution height: %u", globalConfig->height);
@@ -620,15 +644,18 @@ static bool parseEncodedData(ByteStream* stream, LdeFrameConfig* frameConfig, co
     for (uint8_t plane = 0; plane < globalConfig->numPlanes; ++plane) {
         if (frameConfig->entropyEnabled) {
             for (int8_t loq = LOQ1; loq >= LOQ0; --loq) {
-                LdeChunk* chunks;
+                LdeChunk* chunks = NULL;
                 VNCheckB(getLayerChunks(globalConfig, frameConfig, plane, (LdeLOQIndex)loq, 0, &chunks));
                 VNCheckB(parseChunkFlags(&chunkHeadersStream, chunks, globalConfig->numLayers));
             }
         }
 
         if (frameConfig->temporalSignallingPresent) {
-            LdeChunk* temporalChunk;
+            LdeChunk* temporalChunk = NULL;
             VNCheckB(getTemporalChunk(globalConfig, frameConfig, plane, 0, &temporalChunk));
+            if (temporalChunk == NULL) {
+                return false;
+            }
             VNCheckB(parseChunkFlags(&chunkHeadersStream, temporalChunk, 1));
         }
     }
@@ -686,11 +713,11 @@ static bool parseEncodedDataTiledEntropyChunk(ByteStream* stream, LdeFrameConfig
             }
 
             for (uint32_t tile = 0; tile < currentTileCount; ++tile) {
-                const int32_t chunkIndex =
+                const uint32_t chunkIndex =
                     getLayerChunkIndex(frameConfig, globalConfig, (LdeLOQIndex)loq, plane, tile, layer);
                 LdeChunk* chunk = &frameConfig->chunks[chunkIndex];
 
-                VNLogVerbose("    [%d, %d, %2d, %3d] chunk %-4d: ", plane, loq, layer, tile, chunkIndex);
+                VNLogVerbose("    [%d, %d, %2d, %3d] chunk %-4u: ", plane, loq, layer, tile, chunkIndex);
                 VNCheckB(parseChunk(stream, chunk, &frameConfig->loqEnabled[loq], sizeDecoderPtr));
             }
         }
@@ -908,7 +935,7 @@ static bool parseBlockFiller(ByteStream* stream, size_t blockSize)
 static bool parseSEIPayload(ByteStream* stream, LdeGlobalConfig* globalConfig, uint32_t blockSize)
 {
     LdeHDRInfo* hdrInfoOut = &globalConfig->hdrInfo;
-    uint8_t data;
+    uint8_t data = 0;
     VNCheckB(bytestreamReadU8(stream, &data));
     SEIPayloadType payloadType = (SEIPayloadType)data;
     VNLogVerbose("    sei_payload_type: %s", seiPayloadTypeToString(payloadType));
@@ -984,8 +1011,7 @@ static bool parseSEIPayload(ByteStream* stream, LdeGlobalConfig* globalConfig, u
         } else {
             VNCheckB(bytestreamReadU8(stream, &globalConfig->bitstreamVersion));
             globalConfig->bitstreamVersionSet =
-                (globalConfig->bitstreamVersion >= BitstreamVersionInitial &&
-                 globalConfig->bitstreamVersion <= BitstreamVersionCurrent);
+                (globalConfig->bitstreamVersion <= BitstreamVersionCurrent);
             if (!globalConfig->bitstreamVersionSet) {
                 VNLogError("Unsupported bitstream version detected %d, supported versions are "
                            "between %d and %d",
@@ -1035,6 +1061,16 @@ static bool parseVUIParameters(ByteStream* stream, LdeVUIInfo* vuiInfo, uint32_t
 
             VNLogVerbose("      sar_width: %u", vuiInfo->sarWidth);
             VNLogVerbose("      sar_height: %u", vuiInfo->sarHeight);
+
+        } else if (vuiInfo->aspectRatioIdc < kVUIAspectRatioIDCCount) {
+            vuiInfo->sarWidth = kVUIAspectRatioIDCNumerators[vuiInfo->aspectRatioIdc];
+            vuiInfo->sarHeight = kVUIAspectRatioIDCDenominators[vuiInfo->aspectRatioIdc];
+            VNLogVerbose("      sar_width: %u", vuiInfo->sarWidth);
+            VNLogVerbose("      sar_height: %u", vuiInfo->sarHeight);
+
+        } else {
+            vuiInfo->sarWidth = 1;
+            vuiInfo->sarHeight = 1;
         }
     }
 
@@ -1122,12 +1158,12 @@ static bool parseVUIParameters(ByteStream* stream, LdeVUIInfo* vuiInfo, uint32_t
 
 static bool parseSFilterPayload(ByteStream* stream, LdeGlobalConfig* globalConfig)
 {
-    uint8_t sfilterByte;
+    uint8_t sfilterByte = 0;
     VNCheckB(bytestreamReadU8(stream, &sfilterByte));
 
     globalConfig->sharpenType = (LdeSharpenType)((sfilterByte & 0xE0) >> 5);
     const uint8_t signalledSharpenStrength = (sfilterByte & 0x1F);
-    globalConfig->sharpenStrength = (signalledSharpenStrength + 1) * 0.01f;
+    globalConfig->sharpenStrength = (float)(signalledSharpenStrength + 1) * 0.01f;
     VNLogVerbose("    sharpen_type: %s", sharpenTypeToString(globalConfig->sharpenType));
     VNLogVerboseF("    sharpen_strength: %d [%f]", signalledSharpenStrength, globalConfig->sharpenStrength);
     return true;
@@ -1174,7 +1210,7 @@ static bool parseHDRPayload(ByteStream* stream, LdeGlobalConfig* globalConfig)
         VNCheckB(bytestreamReadU8(stream, &byte));
 
         /* deinterlacer_type: 4 bit */
-        deinterlacerType = (byte >> 4) & 0b1111;
+        deinterlacerType = (int8_t)((byte >> 4) & 0b1111);
         VNLogVerbose("        deinterlacer_type: %u", deinterlacerType);
         /* top_field_first_flag: 1 bit */
         topFieldFirstFlag = (byte >> 3) & 0b1;
@@ -1201,8 +1237,8 @@ static bool parseHDRPayload(ByteStream* stream, LdeGlobalConfig* globalConfig)
 }
 
 /* 7.3.10 (Table-14) */
-static bool parseBlockAdditionalInfo(ByteStream* stream, uint32_t blockSize, LdeGlobalConfig* globalConfig,
-                                     LdeFrameConfig* frameConfig, bool* globalConfigModified)
+static bool parseBlockAdditionalInfo(ByteStream* stream, uint32_t blockSize,
+                                     LdeGlobalConfig* globalConfig, bool* globalConfigModified)
 {
     if (blockSize == 0) {
         VNLogError("stream: Additional info block size is 0, this is not possible in the standard");
@@ -1241,7 +1277,7 @@ static bool parseBlock(ByteStream* stream, LdeGlobalConfig* globalConfig,
                        LdeFrameConfig* frameConfig, bool* globalConfigModified)
 {
     /* Load block header. */
-    uint8_t data;
+    uint8_t data = 0;
     VNCheckB(bytestreamReadU8(stream, &data));
     const BlockType blockType = (BlockType)(data & 0x1F);
     const SignalledBlockSize blockSizeSignal = (SignalledBlockSize)((data & 0xE0) >> 5);
@@ -1250,7 +1286,7 @@ static bool parseBlock(ByteStream* stream, LdeGlobalConfig* globalConfig,
     uint32_t blockSize = 0;
 
     if (blockSizeSignal == BS_Custom) {
-        uint64_t customBlockSize;
+        uint64_t customBlockSize = 0;
         VNCheckB(bytestreamReadMultiByte(stream, &customBlockSize));
 
         if (customBlockSize > 0xFFFFFFFF) {
@@ -1268,6 +1304,13 @@ static bool parseBlock(ByteStream* stream, LdeGlobalConfig* globalConfig,
     /* Process each block. */
     const size_t initialOffset = stream->offset;
 
+    const size_t remaining = bytestreamRemaining(stream);
+    if (blockSize > remaining) {
+        VNLogError("stream: block size %u exceeds remaining stream size %" PRIu64, blockSize,
+                   (uint64_t)remaining);
+        return false;
+    }
+
     VNLogVerbose("Block: %s - size: %u", blockTypeToString(blockType), blockSize);
 
     switch (blockType) {
@@ -1278,18 +1321,37 @@ static bool parseBlock(ByteStream* stream, LdeGlobalConfig* globalConfig,
         case BT_GlobalConfig:
             *globalConfigModified = true;
             frameConfig->globalConfigSet = true;
-            VNCheckB(parseBlockGlobalConfig(stream, globalConfig));
+            if (!parseBlockGlobalConfig(stream, globalConfig)) {
+                VNLogError("Failed to parse global config");
+                globalConfig->initialized = false;
+                return false;
+            }
             break;
         case BT_PictureConfig:
-            VNCheckB(parseBlockPictureConfig(stream, frameConfig, globalConfig));
+            if (!parseBlockPictureConfig(stream, frameConfig, globalConfig)) {
+                VNLogError("Failed to parse picture config");
+                frameConfig->frameConfigSet = false;
+                return false;
+            }
             break;
-        case BT_EncodedData: VNCheckB(parseEncodedData(stream, frameConfig, globalConfig)); break;
+        case BT_EncodedData:
+            if (globalConfig->tileDimensions != TDTNone) {
+                VNLogError("stream: non-tiled encoded data block in a tiled stream "
+                           "(tile_dimensions_type != 0)");
+                return false;
+            }
+            VNCheckB(parseEncodedData(stream, frameConfig, globalConfig));
+            break;
         case BT_EncodedDataTiled:
+            if (globalConfig->tileDimensions == TDTNone) {
+                VNLogError("stream: tiled encoded data block in a non-tiled stream "
+                           "(tile_dimensions_type == 0)");
+                return false;
+            }
             VNCheckB(parseEncodedDataTiled(stream, frameConfig, globalConfig));
             break;
         case BT_AdditionalInfo:
-            VNCheckB(parseBlockAdditionalInfo(stream, blockSize, globalConfig, frameConfig,
-                                              globalConfigModified));
+            VNCheckB(parseBlockAdditionalInfo(stream, blockSize, globalConfig, globalConfigModified));
             break;
         case BT_Filler: VNCheckB(parseBlockFiller(stream, blockSize)); break;
         default: {
@@ -1407,6 +1469,8 @@ void ldeGlobalConfigInitialize(uint8_t forceBitstreamVersion, LdeGlobalConfig* g
     globalConfig->scalingModes[LOQ1] = Scale0D;
     globalConfig->chromaStepWidthMultiplier = kDefaultChromaStepWidthMultiplier;
     globalConfig->temporalStepWidthModifier = kDefaultTemporalStepWidthModifier;
+    globalConfig->vuiInfo.sarWidth = 1;
+    globalConfig->vuiInfo.sarHeight = 1;
 }
 
 void ldeFrameConfigInitialize(LdcMemoryAllocator* allocator, LdeFrameConfig* frameConfig)
@@ -1416,7 +1480,7 @@ void ldeFrameConfigInitialize(LdcMemoryAllocator* allocator, LdeFrameConfig* fra
     frameConfig->ditherType = DTNone;
     frameConfig->ditherStrength = 0;
     frameConfig->deblockEnabled = false; /* 7.4.3.4 */
-    for (uint8_t loq = 0; loq < LOQEnhancedCount; loq++) {
+    for (uint8_t loq = 0; loq < (uint8_t)LOQEnhancedCount; loq++) {
         memset(frameConfig->quantMatrix.values[loq], 0,
                RCLayerCountDDS * sizeof(frameConfig->quantMatrix.values[0][0]));
     }
@@ -1486,6 +1550,7 @@ bool ldeConfigsParse(const uint8_t* serialized, const size_t serializedSize, Lde
     while (bytestreamRemaining(&stream) > 0) {
         if (!parseBlock(&stream, globalConfig, frameConfig, globalConfigModified)) {
             VNFree(frameConfig->allocator, &frameConfig->unencapsulatedAllocation);
+            VNLogError("Failed to parse LCEVC block - likely stream corruption");
             return false;
         }
     }

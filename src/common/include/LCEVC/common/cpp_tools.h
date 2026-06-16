@@ -21,7 +21,7 @@
 //
 #define _VNForEachEmpty(_op, ...)
 
-// Chain of macros that expand to "op(argIndex, argumentValue)" seperated by 'sep' for n arguments where 'op' is a macro
+// Chain of macros that expand to "op(argIndex, argumentValue)" separated by 'sep' for n arguments where 'op' is a macro
 //
 #define _VNForEach1(_op, _sep, _idx, _arg, ...) _op(_idx, _arg)
 #define _VNForEach2(_op, _sep, _idx, _arg, ...) \

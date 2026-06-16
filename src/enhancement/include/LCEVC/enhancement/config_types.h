@@ -34,7 +34,7 @@ typedef struct LdeChunk
  */
 typedef struct LdeGlobalConfig
 {
-    bool initialized; /**< Tracks if the config has been initialized */
+    bool initialized; /**< Tracks if the config has been correctly initialized */
     bool bitstreamVersionSet; /**< Tracks if the version has been set, if not set default to the newest version */
     uint8_t bitstreamVersion; /**< After revisions of the LCEVC standard, tracking the version of a bitstream allows older streams to be played correctly */
 
@@ -93,11 +93,11 @@ typedef struct LdeGlobalConfig
  */
 typedef struct LdeFrameConfig
 {
-    bool frameConfigSet;  /**< Tracks if the config has been initialized */
+    bool frameConfigSet;  /**< Tracks if the config has been correctly initialized */
     bool globalConfigSet; /**< Set if Global Config was also updated for this frame */
 
     LdcMemoryAllocator* allocator; /**< Allocator for chunks and underlying unencapsulated stream */
-    uint64_t diagId;               /**< A uint64_t id passed to memeory allocation diagnostics */
+    uint64_t diagId;               /**< A uint64_t id passed to memory allocation diagnostics */
     LdcMemoryAllocation chunkAllocation;          /**< Memory allocation for chunks */
     LdcMemoryAllocation unencapsulatedAllocation; /**< Memory allocation raw LCEVC data */
     uint32_t numChunks;                           /**< Number of huffman chunks (layers) */

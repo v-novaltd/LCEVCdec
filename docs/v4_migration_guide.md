@@ -1,6 +1,6 @@
 # 4.0.0 Migration Guide
 
-LCEVCdec version 4.0.0 incudes a small API change that must be implemented in any downstream integrations before upgrading. This guide gives recommendations on how to implement this API change, changes to shared library structure and how to better call LCEVCdec 4.0.0 APIs for the optimal performance.
+LCEVCdec version 4.0.0 includes a small API change that must be implemented in any downstream integrations before upgrading. This guide gives recommendations on how to implement this API change, changes to shared library structure and how to better call LCEVCdec 4.0.0 APIs for the optimal performance.
 
 ## Send data API changes
 

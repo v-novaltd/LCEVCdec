@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -55,7 +55,13 @@ TEST(ParseRawName, Test)
                 rate == 0.0f);
     EXPECT_TRUE(checkDesc(parseRawName("foo_420p_10bpp_450x300.yuv", rate), LCEVC_I420_10_LE, 450, 300) &&
                 rate == 0.0f);
+    EXPECT_TRUE(checkDesc(parseRawName("foo_420p_10bit_450x300.y", rate), LCEVC_GRAY_10_LE, 450, 300) &&
+                rate == 0.0f);
     EXPECT_TRUE(checkDesc(parseRawName("foo_70000x10_420p_12bpp.yuv", rate), LCEVC_I420_12_LE, 70000, 10) &&
+                rate == 0.0f);
+    EXPECT_TRUE(checkDesc(parseRawName("foo_640x360-422_8bit.yuv", rate), LCEVC_I422_8, 640, 360) &&
+                rate == 0.0f);
+    EXPECT_TRUE(checkDesc(parseRawName("foo_1280x720_444p_10bit.yuv", rate), LCEVC_I444_10_LE, 1280, 720) &&
                 rate == 0.0f);
     EXPECT_TRUE(checkDesc(parseRawName("foo_420p_14bits.yuv", rate), LCEVC_I420_14_LE, 0, 0) && rate == 0.0f);
     EXPECT_TRUE(checkDesc(parseRawName("foo_420_16bits.yuv", rate), LCEVC_I420_16_LE, 0, 0) && rate == 0.0f);
@@ -67,6 +73,10 @@ TEST(ParseRawName, Test)
     EXPECT_TRUE(checkDesc(parseRawName("bar_1800x1600_8bpp.nv21", rate), LCEVC_NV21_8, 1800, 1600) &&
                 rate == 0.0f);
     EXPECT_TRUE(checkDesc(parseRawName("bar_8000x6000.nv12", rate), LCEVC_NV12_8, 8000, 6000) &&
+                rate == 0.0f);
+    EXPECT_TRUE(checkDesc(parseRawName("foo_420p_8bit_12x34.nv12", rate), LCEVC_NV12_8, 12, 34) &&
+                rate == 0.0f);
+    EXPECT_TRUE(checkDesc(parseRawName("foo_420p_8bit_12x34_nv12.yuv", rate), LCEVC_NV12_8, 12, 34) &&
                 rate == 0.0f);
     EXPECT_TRUE(checkDesc(parseRawName("bar_6x8.nv21", rate), LCEVC_NV21_8, 6, 8) && rate == 0.0f);
     EXPECT_TRUE(checkDesc(parseRawName("bletch.y", rate), LCEVC_GRAY_8, 0, 0) && rate == 0.0f);

@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -50,10 +50,10 @@ static const size_t kChunkFooterSize = sizeof(size_t);
 static const size_t kBlockHeaderSize = sizeof(BlockHeader);
 static const size_t kMinimumAlignment = sizeof(void*);
 
-static const size_t kDefaultBlockSize = 64u * 1024u;
+static const size_t kDefaultBlockSize = (size_t)64 * 1024;
 
 // MSVC cannot handle this as a constant
-#define kMinimumChunkSize (sizeof(ChunkHeader) + kChunkFooterSize + sizeof(void*))
+#define VN_MINIMUM_CHUNK_SIZE (sizeof(ChunkHeader) + kChunkFooterSize + sizeof(void*))
 
 // Work out free list index for given size of block
 static inline size_t freeListIndexForSize(size_t size)
@@ -77,12 +77,12 @@ static inline size_t minimumChunkSizeForRequest(size_t payloadSize, size_t align
     return total + (alignment - kMinimumAlignment);
 }
 
-static inline LdcLinkedList* freeListForSize(LdcMemorySimpleAllocator* allocatorSimple, size_t size)
+static inline LdcLinkedList* freeListForSize(LdcMemorySimpleAllocator* simpleAllocator, size_t size)
 {
     const size_t index = freeListIndexForSize(size);
     assert(index < kFreeListCount);
 
-    return &allocatorSimple->freeLists[index];
+    return &simpleAllocator->freeLists[index];
 }
 
 static inline uintptr_t align(uintptr_t value, size_t alignment)
@@ -151,7 +151,7 @@ static inline ChunkHeader* prevChunk(const ChunkHeader* chunk)
     assert(chunkAddress >= firstAddress + kChunkFooterSize);
 
     const size_t prevSize = *(size_t*)(chunkAddress - kChunkFooterSize);
-    if (prevSize < kMinimumChunkSize) {
+    if (prevSize < VN_MINIMUM_CHUNK_SIZE) {
         return NULL;
     }
 
@@ -173,7 +173,7 @@ static inline bool isChunkSuitable(const ChunkHeader* chunk, size_t size, size_t
     return (alignedData + size) <= (chunkEnd - kChunkFooterSize);
 }
 
-static ChunkHeader* findSuitableChunk(const LdcMemorySimpleAllocator* allocatorSimple, size_t size,
+static ChunkHeader* findSuitableChunk(const LdcMemorySimpleAllocator* simpleAllocator, size_t size,
                                       size_t alignment)
 {
     // What should the chunk total size be?
@@ -184,7 +184,7 @@ static ChunkHeader* findSuitableChunk(const LdcMemorySimpleAllocator* allocatorS
     assert(startIndex < kFreeListCount);
 
     for (size_t classIndex = startIndex; classIndex < kFreeListCount; ++classIndex) {
-        const LdcLinkedList* freeList = &allocatorSimple->freeLists[classIndex];
+        const LdcLinkedList* freeList = &simpleAllocator->freeLists[classIndex];
 
         const LdcLinkedNode* const tailSentinel = (LdcLinkedNode*)&freeList->tail;
         for (LdcLinkedNode* node = freeList->head; node != tailSentinel; node = node->next) {
@@ -198,7 +198,7 @@ static ChunkHeader* findSuitableChunk(const LdcMemorySimpleAllocator* allocatorS
     return NULL;
 }
 
-static void addFreeChunk(LdcMemorySimpleAllocator* allocatorSimple, ChunkHeader* chunk)
+static void addFreeChunk(LdcMemorySimpleAllocator* simpleAllocator, ChunkHeader* chunk)
 {
     // Can this be added to previous chunk?
     ChunkHeader* const previous = prevChunk(chunk);
@@ -219,7 +219,7 @@ static void addFreeChunk(LdcMemorySimpleAllocator* allocatorSimple, ChunkHeader*
     writeChunkFooter(chunk);
 
     // Add chunk into sorted position within the appropriate free list
-    LdcLinkedList* const list = freeListForSize(allocatorSimple, chunk->size);
+    LdcLinkedList* const list = freeListForSize(simpleAllocator, chunk->size);
 
     LdcLinkedNode* const tailSentinel = (LdcLinkedNode*)&list->tail;
     LdcLinkedNode* insertBefore = tailSentinel;
@@ -233,7 +233,7 @@ static void addFreeChunk(LdcMemorySimpleAllocator* allocatorSimple, ChunkHeader*
     ldcLinkedInsertBefore(insertBefore, &chunk->node);
 }
 
-static void splitChunkTail(LdcMemorySimpleAllocator* allocatorSimple, ChunkHeader* chunk,
+static void splitChunkTail(LdcMemorySimpleAllocator* simpleAllocator, ChunkHeader* chunk,
                            uintptr_t payloadStart, size_t payloadSize)
 {
     const uintptr_t chunkStart = (uintptr_t)chunk;
@@ -246,7 +246,7 @@ static void splitChunkTail(LdcMemorySimpleAllocator* allocatorSimple, ChunkHeade
     }
 
     const size_t remaining = originalSize - usedBytes;
-    if (remaining < kMinimumChunkSize) {
+    if (remaining < VN_MINIMUM_CHUNK_SIZE) {
         // Tail is too small - leave chunk as is
         return;
     }
@@ -262,10 +262,10 @@ static void splitChunkTail(LdcMemorySimpleAllocator* allocatorSimple, ChunkHeade
     writeChunkFooter(tail);
 
     // Add it to the free list
-    addFreeChunk(allocatorSimple, tail);
+    addFreeChunk(simpleAllocator, tail);
 }
 
-static bool allocateBlock(LdcMemorySimpleAllocator* allocatorSimple, size_t size, size_t alignment)
+static bool allocateBlock(LdcMemorySimpleAllocator* simpleAllocator, size_t size, size_t alignment)
 {
     const size_t worstCasePadding = alignment - 1;
     const size_t minimumBlock =
@@ -273,11 +273,11 @@ static bool allocateBlock(LdcMemorySimpleAllocator* allocatorSimple, size_t size
 
     // Make sure allocated block is big enough
     const size_t requestedSize =
-        (allocatorSimple->blockSize < minimumBlock) ? minimumBlock : allocatorSimple->blockSize;
+        (simpleAllocator->blockSize < minimumBlock) ? minimumBlock : simpleAllocator->blockSize;
 
     // Try and allocate block from parent allocator
     LdcMemoryAllocation blockAllocation = {0};
-    VNAllocateAlignedArray(allocatorSimple->parentAllcoator, &blockAllocation, uint8_t, kMinimumAlignment,
+    VNAllocateAlignedArray(simpleAllocator->parentAllcoator, &blockAllocation, uint8_t, kMinimumAlignment,
                            align(requestedSize, kMinimumAlignment), "SimpleAllocator_Block");
 
     if (!VNIsAllocated(blockAllocation)) {
@@ -288,7 +288,7 @@ static bool allocateBlock(LdcMemorySimpleAllocator* allocatorSimple, size_t size
     BlockHeader* const block = (BlockHeader*)blockAllocation.ptr;
     block->size = blockAllocation.size;
     block->allocation = blockAllocation;
-    ldcLinkedPushBack(&allocatorSimple->blockList, &block->node);
+    ldcLinkedPushBack(&simpleAllocator->blockList, &block->node);
 
     // Create free chunk that covers while block
     ChunkHeader* const chunk = firstChunk(block);
@@ -296,7 +296,7 @@ static bool allocateBlock(LdcMemorySimpleAllocator* allocatorSimple, size_t size
     chunk->block = block;
     writeChunkFooter(chunk);
 
-    addFreeChunk(allocatorSimple, chunk);
+    addFreeChunk(simpleAllocator, chunk);
 
     return true;
 }
@@ -306,8 +306,9 @@ static void allocatorAllocate(LdcMemoryAllocator* allocator, LdcMemoryAllocation
 {
     assert(allocator);
     assert(allocation);
-    LdcMemorySimpleAllocator* allocatorSimple = (LdcMemorySimpleAllocator*)allocator->allocatorData;
-    assert(allocatorSimple);
+    VNUnused(site);
+    LdcMemorySimpleAllocator* simpleAllocator = (LdcMemorySimpleAllocator*)allocator->allocatorData;
+    assert(simpleAllocator);
 
     VNClear(allocation);
     allocation->alignment = alignment;
@@ -316,24 +317,24 @@ static void allocatorAllocate(LdcMemoryAllocator* allocator, LdcMemoryAllocation
         return;
     }
 
-    threadMutexLock(&allocatorSimple->mutex);
+    threadMutexLock(&simpleAllocator->mutex);
 
     // Alignment is always at least kMinimumAlignment
     const size_t effectiveAlignment = (alignment < kMinimumAlignment) ? kMinimumAlignment : alignment;
 
     // Anything in current free lists?
-    ChunkHeader* chunk = findSuitableChunk(allocatorSimple, size, effectiveAlignment);
+    ChunkHeader* chunk = findSuitableChunk(simpleAllocator, size, effectiveAlignment);
     if (!chunk) {
         // No - add another block
-        if (!allocateBlock(allocatorSimple, size, effectiveAlignment)) {
-            threadMutexUnlock(&allocatorSimple->mutex);
+        if (!allocateBlock(simpleAllocator, size, effectiveAlignment)) {
+            threadMutexUnlock(&simpleAllocator->mutex);
             return;
         }
 
         // That should now be satisfied from the new block
-        chunk = findSuitableChunk(allocatorSimple, size, effectiveAlignment);
+        chunk = findSuitableChunk(simpleAllocator, size, effectiveAlignment);
         if (!chunk) {
-            threadMutexUnlock(&allocatorSimple->mutex);
+            threadMutexUnlock(&simpleAllocator->mutex);
             return;
         }
     }
@@ -353,14 +354,14 @@ static void allocatorAllocate(LdcMemoryAllocator* allocator, LdcMemoryAllocation
     assert(alignedData + alignedSize <= (chunkEnd - kChunkFooterSize));
 
     // Return unused end of block to free list
-    splitChunkTail(allocatorSimple, chunk, alignedData, alignedSize);
+    splitChunkTail(simpleAllocator, chunk, alignedData, alignedSize);
 
     // Fill in allocation
     allocation->ptr = (void*)alignedData;
     allocation->size = size;
     allocation->allocatorData = (uintptr_t)chunk;
 
-    threadMutexUnlock(&allocatorSimple->mutex);
+    threadMutexUnlock(&simpleAllocator->mutex);
 }
 
 static void allocatorFree(LdcMemoryAllocator* allocator, LdcMemoryAllocation* allocation,
@@ -368,28 +369,29 @@ static void allocatorFree(LdcMemoryAllocator* allocator, LdcMemoryAllocation* al
 {
     assert(allocator);
     assert(allocation);
-    LdcMemorySimpleAllocator* allocatorSimple = (LdcMemorySimpleAllocator*)allocator->allocatorData;
-    assert(allocatorSimple);
+    VNUnused(site);
+    LdcMemorySimpleAllocator* simpleAllocator = (LdcMemorySimpleAllocator*)allocator->allocatorData;
+    assert(simpleAllocator);
 
     if (!VNIsAllocated(*allocation)) {
         return;
     }
-    threadMutexLock(&allocatorSimple->mutex);
+    threadMutexLock(&simpleAllocator->mutex);
 
     ChunkHeader* chunk = (ChunkHeader*)allocation->allocatorData;
     assert(chunk);
-    addFreeChunk(allocatorSimple, chunk);
+    addFreeChunk(simpleAllocator, chunk);
 
     VNClear(allocation);
 
-    threadMutexUnlock(&allocatorSimple->mutex);
+    threadMutexUnlock(&simpleAllocator->mutex);
 }
 
 static void allocatorReallocate(LdcMemoryAllocator* allocator, LdcMemoryAllocation* allocation,
                                 size_t size, const LdcDiagSite* site)
 {
-    LdcMemorySimpleAllocator* allocatorSimple = (LdcMemorySimpleAllocator*)allocator->allocatorData;
-    assert(allocatorSimple);
+    LdcMemorySimpleAllocator* simpleAllocator = (LdcMemorySimpleAllocator*)allocator->allocatorData;
+    assert(simpleAllocator);
 
     // Simple case - just allocate
     if (!VNIsAllocated(*allocation)) {
@@ -403,7 +405,7 @@ static void allocatorReallocate(LdcMemoryAllocator* allocator, LdcMemoryAllocati
         return;
     }
 
-    threadMutexLock(&allocatorSimple->mutex);
+    threadMutexLock(&simpleAllocator->mutex);
 
     // Got a real reallocate
     ChunkHeader* chunk = (ChunkHeader*)allocation->allocatorData;
@@ -419,9 +421,9 @@ static void allocatorReallocate(LdcMemoryAllocator* allocator, LdcMemoryAllocati
 
     // Can current chunk be trimmed to new capacity?
     if (size <= currentCapacity) {
-        splitChunkTail(allocatorSimple, chunk, payloadStart, alignedSize);
+        splitChunkTail(simpleAllocator, chunk, payloadStart, alignedSize);
         allocation->size = size;
-        threadMutexUnlock(&allocatorSimple->mutex);
+        threadMutexUnlock(&simpleAllocator->mutex);
         return;
     }
 
@@ -441,13 +443,13 @@ static void allocatorReallocate(LdcMemoryAllocator* allocator, LdcMemoryAllocati
     currentCapacity = chunk->size - payloadOffset - kChunkFooterSize;
     if (currentCapacity >= size) {
         // Managed to extend existing chunk - trim remaining free tail
-        splitChunkTail(allocatorSimple, chunk, payloadStart, alignedSize);
+        splitChunkTail(simpleAllocator, chunk, payloadStart, alignedSize);
         allocation->size = size;
-        threadMutexUnlock(&allocatorSimple->mutex);
+        threadMutexUnlock(&simpleAllocator->mutex);
         return;
     }
 
-    threadMutexUnlock(&allocatorSimple->mutex);
+    threadMutexUnlock(&simpleAllocator->mutex);
 
     // Need to allocate and copy
     LdcMemoryAllocation newAllocation = {0};
@@ -474,31 +476,31 @@ static const LdcMemoryAllocatorFunctions kAllocatorFunctions = {
     allocatorFree,
 };
 
-LdcMemoryAllocator* ldcMemorySimpleAllocatorInitialize(LdcMemorySimpleAllocator* allocatorSimple,
+LdcMemoryAllocator* ldcMemorySimpleAllocatorInitialize(LdcMemorySimpleAllocator* simpleAllocator,
                                                        LdcMemoryAllocator* parentAllocator)
 {
-    assert(allocatorSimple);
+    assert(simpleAllocator);
     assert(parentAllocator);
 
-    allocatorSimple->allocator.functions = &kAllocatorFunctions;
-    allocatorSimple->allocator.allocatorData = allocatorSimple;
-    allocatorSimple->parentAllcoator = parentAllocator;
-    VNCheck(threadMutexInitialize(&allocatorSimple->mutex) == ThreadResultSuccess);
+    simpleAllocator->allocator.functions = &kAllocatorFunctions;
+    simpleAllocator->allocator.allocatorData = simpleAllocator;
+    simpleAllocator->parentAllcoator = parentAllocator;
+    VNCheck(threadMutexInitialize(&simpleAllocator->mutex) == ThreadResultSuccess);
 
-    ldcLinkedListInitialize(&allocatorSimple->blockList);
+    ldcLinkedListInitialize(&simpleAllocator->blockList);
     for (size_t idx = 0; idx < kFreeListCount; ++idx) {
-        ldcLinkedListInitialize(&allocatorSimple->freeLists[idx]);
+        ldcLinkedListInitialize(&simpleAllocator->freeLists[idx]);
     }
-    allocatorSimple->blockSize = kDefaultBlockSize;
+    simpleAllocator->blockSize = kDefaultBlockSize;
 
-    return &allocatorSimple->allocator;
+    return &simpleAllocator->allocator;
 }
 
-void ldcMemorySimpleAllocatorDestroy(LdcMemorySimpleAllocator* allocatorSimple)
+void ldcMemorySimpleAllocatorDestroy(LdcMemorySimpleAllocator* simpleAllocator)
 {
-    assert(allocatorSimple);
+    assert(simpleAllocator);
 
-    LdcLinkedList* blockList = &allocatorSimple->blockList;
+    const LdcLinkedList* blockList = &simpleAllocator->blockList;
 
     for (LdcLinkedNode* node = ldcLinkedFront(blockList); node != NULL; node = ldcLinkedFront(blockList)) {
         BlockHeader* block = nodeToBlock(node);
@@ -506,12 +508,12 @@ void ldcMemorySimpleAllocatorDestroy(LdcMemorySimpleAllocator* allocatorSimple)
         ldcLinkedRemove(&block->node);
 
         LdcMemoryAllocation blockAllocation = block->allocation;
-        VNFree(allocatorSimple->parentAllcoator, &blockAllocation);
+        VNFree(simpleAllocator->parentAllcoator, &blockAllocation);
     }
 
-    ldcLinkedListInitialize(&allocatorSimple->blockList);
+    ldcLinkedListInitialize(&simpleAllocator->blockList);
     for (size_t idx = 0; idx < kFreeListCount; ++idx) {
-        ldcLinkedListInitialize(&allocatorSimple->freeLists[idx]);
+        ldcLinkedListInitialize(&simpleAllocator->freeLists[idx]);
     }
 }
 
@@ -552,7 +554,7 @@ bool ldcMemoryAllocatorSimpleDebugCheck(const LdcMemorySimpleAllocator* simpleAl
 
         size_t offset = kBlockHeaderSize;
         ChunkHeader* previousChunk = NULL;
-        const size_t maxChunks = (block->size - kBlockHeaderSize) / kMinimumChunkSize + 1;
+        const size_t maxChunks = (block->size - kBlockHeaderSize) / VN_MINIMUM_CHUNK_SIZE + 1;
         size_t chunkGuard = 0;
 
         for (ChunkHeader* chunk = firstChunk(block); chunk != NULL; chunk = nextChunk(chunk)) {

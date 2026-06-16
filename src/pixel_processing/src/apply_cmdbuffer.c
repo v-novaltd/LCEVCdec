@@ -81,18 +81,22 @@ bool ldppApplyCmdBuffer(LdcTaskPool* taskPool, LdcTask* parent, LdpEnhancementTi
             applicatorFunction = (CmdBufferApplicator)cmdBufferApplicatorSurfaceSSE;
         }
 
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
         if (!applicatorFunction) {
             applicatorFunction = (CmdBufferApplicator)cmdBufferApplicatorSurfaceScalar;
         }
+#endif
     } else {
         if (acceleration->hasNeon) {
             applicatorFunction = (CmdBufferApplicator)cmdBufferApplicatorBlockNEON;
         } else if (acceleration->hasSSE) {
             applicatorFunction = (CmdBufferApplicator)cmdBufferApplicatorBlockSSE;
         }
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
         if (!applicatorFunction) {
             applicatorFunction = (CmdBufferApplicator)cmdBufferApplicatorBlockScalar;
         }
+#endif
     }
 
     if (cmdBuffer->numEntryPoints == 0 || !cmdBuffer->entryPoints) {

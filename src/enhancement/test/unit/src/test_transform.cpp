@@ -139,7 +139,7 @@ const char* dequantValuesTypeToString(DequantValuesType type)
 // Populates Dequant_t with values that will result in producing dequantized
 // coefficients that will exercise the behavior named in `DequantValuesType`.
 //
-// Noting that it is exected that these values are applied to coefficient values
+// Noting that it is expected that these values are applied to coefficient values
 // all containing 1.
 //
 // This does not populate Dequant_t with values that perform the behavior named

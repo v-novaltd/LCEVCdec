@@ -36,17 +36,17 @@ bool PictureCPU::lock(LdpAccess access, LdpPictureLock*& lockOut)
         return false;
     }
 
-    if (buffer == nullptr) {
+    if (buffer == nullptr && !m_hasExternalPlanes) {
         // Unbound - make buffer with usage according to first access
         // This is a little bit sketchy - infers how picture is used from it's
         // first access, but in practice it seems sufficient.
         switch (access) {
-            case LdpAccessRead: bindMemory(pipeline::BufferUsageIn); break;
-            case LdpAccessWrite: bindMemory(pipeline::BufferUsageOut); break;
+            case LdpAccessRead: bindBuffer(pipeline::BufferUsageIn); break;
+            case LdpAccessWrite: bindBuffer(pipeline::BufferUsageOut); break;
             default: return false;
         }
         if (buffer == nullptr) {
-            // Bind faild
+            // Bind failed
             return false;
         }
     }
@@ -85,7 +85,7 @@ void PictureCPU::getPlaneDescInternal(uint32_t plane, LdpPicturePlaneDesc& desc)
 {
     assert(plane < kLdpPictureMaxNumPlanes);
 
-    if (!m_external) {
+    if (!m_hasExternalPlanes) {
         assert(buffer);
         const BufferCPU* bufferCPU = fromPipeline(buffer);
         desc.firstSample = VNAllocationPtr(bufferCPU->m_allocation, uint8_t) +

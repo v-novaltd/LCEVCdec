@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -74,24 +74,28 @@ LCEVC_PictureDesc parseRawName(std::string_view name, float& rate)
         if (regex_match(lp.c_str(), match, kBitsRe)) {
             bits = stoi(match[1].str());
         }
+    }
 
-        // Get color format if not yet deduced. That's colourspace, chroma subsampling, and
-        // interleaving:
-        if (!format.empty()) {
-            continue;
-        }
+    // Get color format if not yet deduced. That's colourspace, chroma subsampling, and
+    // interleaving:
+    for (auto const & part : split(name, ("-_."))) {
+        std::cmatch match;
+        const std::string lp = lowercase(part);
 
         if (regex_match(lp.c_str(), match, kFormatP420Re)) {
-            format = "p420";
+            format = "p420"; // Don't break on 420/YUV as other formats may be in the string
         }
         if (regex_match(lp.c_str(), match, kFormatP422Re)) {
             format = "p422";
+            break;
         }
         if (regex_match(lp.c_str(), match, kFormatP444Re)) {
             format = "p444";
+            break;
         }
         if (regex_match(lp.c_str(), match, kFormatOtherRe)) {
             format = match[1].str();
+            break;
         }
     }
 

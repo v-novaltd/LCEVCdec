@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -19,6 +19,7 @@
 #include "huffman.h"
 
 #include <LCEVC/enhancement/config_types.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /*------------------------------------------------------------------------------*/
@@ -48,12 +49,13 @@ typedef enum EntropyDecoderType
 typedef struct EntropyDecoder
 {
     uint8_t currHuff;
-    uint32_t rawOffset;
+    size_t rawOffset;
     HuffmanSingleDecoder huffman[HuffTemporalCount]; // Note that HuffTemporalCount == HuffSizeCount
     HuffmanTripleDecodeState comboHuffman;
     HuffmanStream hstream;
     bool rleOnly;
     const uint8_t* rleData;
+    size_t rleSize;
     bool entropyEnabled;
     EntropyDecoderType type;
 } EntropyDecoder;

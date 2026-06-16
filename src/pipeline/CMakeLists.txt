@@ -14,7 +14,7 @@
 
 include("Sources.cmake")
 
-add_library(lcevc_dec_pipeline STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
+add_library(lcevc_dec_pipeline ${VN_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_pipeline)
 
 target_include_directories(lcevc_dec_pipeline PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
@@ -25,4 +25,6 @@ target_link_libraries(
 
 add_library(lcevc_dec::pipeline ALIAS lcevc_dec_pipeline)
 
-lcevc_install(lcevc_dec_pipeline)
+if (NOT BUILD_SHARED_LIBS)
+    lcevc_install(lcevc_dec_pipeline)
+endif ()

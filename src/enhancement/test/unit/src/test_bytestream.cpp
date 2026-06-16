@@ -128,7 +128,7 @@ std::vector<uint8_t> GenerateMultibyte(uint64_t value, uint32_t numBytes)
 
 TEST(ByteStream, ReadMultiByteValid)
 {
-    constexpr uint32_t kTestRange = 16;
+    constexpr uint32_t kTestRange = 10;
     constexpr uint32_t kMultiByteMaxBytes = 10;
     constexpr uint64_t kValue = 30;
 

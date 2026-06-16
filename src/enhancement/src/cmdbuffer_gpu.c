@@ -41,6 +41,7 @@ static bool cmdBufferResidualsResize(LdcMemoryAllocator* allocator, LdeCmdBuffer
                                      uint64_t diagId)
 {
     assert(cmdBufferBuilder);
+    VNUnused(diagId);
 
     int16_t** residualBuffer = NULL;
     uint32_t* capacity = 0;
@@ -64,7 +65,7 @@ static bool cmdBufferResidualsResize(LdcMemoryAllocator* allocator, LdeCmdBuffer
             allocation = &cmdBufferBuilder->allocationClearAndSet;
             break;
         }
-        default: return false;
+        case CBGOSetZero: break;
     }
 
     if (*residualBuffer) {
@@ -151,7 +152,7 @@ void cmdBufferAppendResiduals(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder
             tuBlockPosition = tuIndex % CBGKDDBlockSize;
         }
         const uint16_t maskIndex = tuBlockPosition >> 6;
-        cmd->bitmask[maskIndex] |= (1ULL << (blockSize - 1 - (tuBlockPosition % 64)));
+        cmd->bitmask[maskIndex] |= (1ULL << (63 - (tuBlockPosition % 64)));
         if (cmd->bitCount == 0) {
             cmd->bitStart = clz64(cmd->bitmask[maskIndex]);
         }
@@ -395,6 +396,7 @@ bool ldeCmdBufferGpuBuild(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cm
                 case CBGOSet: cmd->dataOffset += setResidualsStart; break;
                 case CBGOSetZero: continue;
                 case CBGOClearAndSet: cmd->dataOffset += clearResidualsStart; break;
+                default: return false;
             }
         }
     }

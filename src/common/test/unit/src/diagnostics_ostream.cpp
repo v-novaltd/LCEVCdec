@@ -29,8 +29,8 @@
 class DiagnosticsCapture
 {};
 
-extern "C" bool LCEVC_DiagHandlerOStream(void* user, const LdcDiagSite* site,
-                                         const LdcDiagRecord* record, const LdcDiagValue* values)
+extern "C" bool LCEVC_DiagHandlerOStream(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
+                                         const LdcDiagValue* values, uint32_t valuesCount)
 {
     std::ostream* ostream = (std::ostream*)user;
     const char* levelName = "";
@@ -55,7 +55,7 @@ extern "C" bool LCEVC_DiagHandlerOStream(void* user, const LdcDiagSite* site,
 
     switch (site->type) {
         case LdcDiagTypeLog:
-            ldcDiagnosticFormatLog(buffer, sizeof(buffer), site, record, values);
+            ldcDiagnosticFormatLog(buffer, sizeof(buffer), site, record, values, valuesCount);
             fmt::print(*ostream, "{}: {}\n", levelName, buffer);
             break;
 
@@ -69,11 +69,11 @@ extern "C" bool LCEVC_DiagHandlerOStream(void* user, const LdcDiagSite* site,
         case LdcDiagTypeTraceAsyncBegin:
         case LdcDiagTypeTraceAsyncEnd:
         case LdcDiagTypeTraceAsyncInstant:
-            ldcDiagnosticFormatJson(buffer, sizeof(buffer), site, &fixedRecord, 1, values);
+            ldcDiagnosticFormatJson(buffer, sizeof(buffer), site, &fixedRecord, 1, values, valuesCount);
             fmt::print(*ostream, "Trace: {}\n", buffer);
             break;
         case LdcDiagTypeMetric:
-            ldcDiagnosticFormatJson(buffer, sizeof(buffer), site, &fixedRecord, 1, values);
+            ldcDiagnosticFormatJson(buffer, sizeof(buffer), site, &fixedRecord, 1, values, valuesCount);
             fmt::print(*ostream, "Metric: {}\n", buffer);
             break;
 

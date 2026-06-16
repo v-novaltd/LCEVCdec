@@ -12,7 +12,7 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-// Specialisation ID's shared between shadets and pipline build
+// Specialisation ID's shared between shadets and pipeline build
 //
 #define SPECID_LOCAL_SIZE_X 0
 #define SPECID_LOCAL_SIZE_Y 1
@@ -20,12 +20,11 @@
 
 // Conversion
 #define SPECID_8_BIT 3
-#define SPECID_TO_INTERNAL 4
-#define SPECID_NV12 5
+#define SPECID_NV12 4
 
 // Apply
-#define SPECID_DDS 6
-#define SPECID_RASTER_ORDER 7
+#define SPECID_DDS 5
+#define SPECID_RASTER_ORDER 6
 
 // UpscaleH
-#define SPECID_PA 8
+#define SPECID_PA 7

@@ -15,10 +15,19 @@
 #ifndef VN_LCEVC_PIPELINE_VULKAN_PICTURE_VULKAN_H
 #define VN_LCEVC_PIPELINE_VULKAN_PICTURE_VULKAN_H
 
+#include <LCEVC/build_config.h>
 #include <LCEVC/pipeline/picture_base.h>
+
+#if VN_OS(ANDROID)
+#include <memory>
+struct AHardwareBuffer;
+#endif
 
 namespace lcevc_dec::pipeline_vulkan {
 
+#if VN_OS(ANDROID)
+class BufferVulkanAhb;
+#endif
 class PipelineVulkan;
 
 class PictureVulkan : public pipeline::PictureBase
@@ -32,6 +41,12 @@ public:
 
     void getPlaneDescInternal(uint32_t plane, LdpPicturePlaneDesc& desc) const override;
 
+#if VN_OS(ANDROID)
+    // Wrap an externally-supplied AHardwareBuffer and attach it as this
+    // picture's backing buffer.  Returns false on failure.
+    bool setAhbBuffer(PipelineVulkan& pipeline, AHardwareBuffer* ahb);
+#endif
+
     VNNoCopyNoMove(PictureVulkan);
 
 private:
@@ -39,6 +54,11 @@ private:
 
     // Allocation for any current lock
     LdcMemoryAllocation m_lockAllocation = {};
+
+#if VN_OS(ANDROID)
+    // Owned AHB wrapper (non-null when the picture wraps an AHardwareBuffer)
+    std::unique_ptr<BufferVulkanAhb> m_ahbBuffer;
+#endif
 };
 
 } // namespace lcevc_dec::pipeline_vulkan

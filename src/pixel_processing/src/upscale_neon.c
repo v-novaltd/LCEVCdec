@@ -17,6 +17,8 @@
 //
 #include "upscale_common.h"
 
+#include <stddef.h>
+
 #if VN_SDK_FEATURE(NEON)
 
 #include "fp_types.h"
@@ -367,6 +369,7 @@ UpscaleFunction upscaleGetFunctionNEON(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
 {
     VNUnused(srcFP);
     VNUnused(dstFP);
+    VNUnused(interleaving);
     VNUnused(is2d);
     VNUnused(pa);
     VNUnused(dithering);

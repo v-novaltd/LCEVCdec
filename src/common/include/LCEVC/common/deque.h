@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2025-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -38,11 +38,11 @@ typedef struct LdcDeque LdcDeque;
  * Allocate internal buffers of given size, and sets to empty.
  *
  * @param[out] deque             The initialized deque.
- * @param[in]  capacity          Maximum number of elements + 1 - must be a power of 2.
+ * @param[in]  reserved          Maximum number of elements + 1 - must be a power of 2.
  * @param[in]  elementSize       Size in bytes of each element.
  * @param[in]  allocator         The memory allocator to be used.
  */
-void ldcDequeInitialize(LdcDeque* deque, uint32_t capacity, uint32_t elementSize,
+void ldcDequeInitialize(LdcDeque* deque, uint32_t reserved, uint32_t elementSize,
                         LdcMemoryAllocator* allocator);
 
 /*! Destroy a previously initialized deque.

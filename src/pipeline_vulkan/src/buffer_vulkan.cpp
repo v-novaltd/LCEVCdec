@@ -14,199 +14,16 @@
 
 #include "buffer_vulkan.h"
 
-#include "backend_vulkan.h"
-
-#include <LCEVC/common/log.h>
-#include <LCEVC/common/memory.h>
-#include <LCEVC/pipeline/buffer_base.h>
-#include <LCEVC/pipeline/types.h>
-#include <vulkan/vulkan_core.h>
-
 namespace lcevc_dec::pipeline_vulkan {
 
-BufferVulkan::BufferVulkan(BackendVulkan& pipeline, uint32_t size, pipeline::BufferUsage usage)
-    : m_pipeline(pipeline)
-    , m_usage(usage)
+void BufferVulkan::clearWithBarrier(VkCommandBuffer commandBuffer, VkBuffer buffer, uint32_t size)
 {
-    if (size > 0) {
-        createBufferAndMemory(size);
-    }
-}
-
-BufferVulkan::~BufferVulkan() { destroy(); }
-
-void BufferVulkan::destroy()
-{
-    assert(m_mapped == false);
-
-    if (m_buffer != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(m_pipeline.getVmaAllocator(), m_buffer, m_vmaAllocation);
-        m_buffer = VK_NULL_HANDLE;
-    }
-}
-
-pipeline::BufferUsage BufferVulkan::usage() const { return m_usage; }
-
-uint32_t BufferVulkan::size() const { return m_size; }
-
-bool BufferVulkan::createBufferAndMemory(uint32_t size)
-{
-    assert(m_ptr == nullptr);
-    assert(m_size == 0);
-    assert(m_buffer == VK_NULL_HANDLE);
-
-    VkDevice& device = m_pipeline.getDevice();
-    if (!device) {
-        VNLogError("No Vulkan device");
-        return false;
-    }
-    const QueueFamilyIndices indices = m_pipeline.getQueueFamilies();
-    if (!indices.computeFamily) {
-        VNLogError("failed to get compute family index");
-        return false;
-    }
-    const uint32_t queueFamilyIndex = indices.computeFamily.value();
-
-    VkBufferCreateInfo bufferCreateInfo{};
-    bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    bufferCreateInfo.queueFamilyIndexCount = 1;
-    bufferCreateInfo.pQueueFamilyIndices = &queueFamilyIndex;
-    bufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    bufferCreateInfo.size = static_cast<VkDeviceSize>(size);
-
-    VmaAllocationCreateInfo allocInfo = {};
-
-    // Choose allocation usage and flags based on buffer usage
-    //
-    // VK_MEMORY_PROPERTY_HOST_COHERENT_BIT is not set - there is explicit
-    // invalidation and flushing when buffers are mapped and unmapped.
-    //
-    switch (m_usage) {
-        case pipeline::BufferUsageIn:
-            bufferCreateInfo.usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-            allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-            allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
-            break;
-        case pipeline::BufferUsageOut:
-            bufferCreateInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-            allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-            allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
-            break;
-        case pipeline::BufferUsageInternal:
-            bufferCreateInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-            allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-            allocInfo.flags = 0;
-            break;
-        default: assert(0); break;
-    }
-
-    VmaAllocationInfo allocationInfo = {};
-    vmaCreateBuffer(m_pipeline.getVmaAllocator(), &bufferCreateInfo, &allocInfo, &m_buffer,
-                    &m_vmaAllocation, &allocationInfo);
-
-    m_size = size;
-
-    return true;
-}
-
-bool BufferVulkan::map(LdpBufferMapping* mapping, int32_t offset, uint32_t mapSize, LdpAccess access)
-{
-    // Device-local buffers cannot be mapped
-    if (m_usage == pipeline::BufferUsageInternal) {
-        VNLogError("Cannot map a device-local buffer");
-        assert(0);
-        return false;
-    }
-
-    // Is this mapped already?
-    if (m_mapped) {
-        assert(0);
-        return false;
-    }
-
-    // Does requested window fit in buffer?
-    if (offset < 0 || (offset + mapSize) > size()) {
-        assert(0);
-        return false;
-    }
-
-    // Do the mapping
-    void* mappedPtr{};
-    vmaMapMemory(m_pipeline.getVmaAllocator(), m_vmaAllocation, &mappedPtr);
-    m_ptr = static_cast<uint8_t*>(mappedPtr);
-
-    // Make sure CPU sees the GPU writes
-    vmaInvalidateAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation, 0, m_size);
-
-    // Record details
-    mapping->buffer = this;
-    mapping->offset = offset;
-    mapping->size = mapSize;
-    mapping->ptr = m_ptr + offset;
-    mapping->access = access;
-    mapping->userData = (void*)this;
-
-    m_mapped = true;
-    return true;
-}
-
-void BufferVulkan::unmap(const LdpBufferMapping* mapping)
-{
-    assert(mapping->userData == (void*)this);
-
-    // Make sure GPU sees the CPU writes
-    vmaFlushAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation, 0, m_size);
-
-    vmaUnmapMemory(m_pipeline.getVmaAllocator(), m_vmaAllocation);
-    m_mapped = false;
-    m_ptr = nullptr;
-}
-
-void BufferVulkan::clear() // NOLINT(readability-make-member-function-const)
-{
-    if (m_size == 0) {
+    if (size == 0 || buffer == VK_NULL_HANDLE) {
         return;
     }
 
-    // Device-local buffers cannot be cleared from the host.
-    // Use clearGpu() instead within a command buffer recording.
-    //
-    // This is usualyl caused by a test trying to maniplaute buffers
-    // That should be created as 'Input' for the test.
-    //
-    if (m_usage == pipeline::BufferUsageInternal) {
-        VNLogError("Clearing device local buffer - use BufferUsageInput");
-        return;
-    }
+    vkCmdFillBuffer(commandBuffer, buffer, 0, size, 0);
 
-    assert(m_buffer != VK_NULL_HANDLE);
-
-    LdpBufferMapping mapping{};
-    if (!m_mapped) {
-        map(&mapping, 0, m_size, LdpAccessWrite);
-    }
-
-    assert(m_ptr != nullptr);
-    memset(m_ptr, 0, m_size);
-
-    if (mapping.buffer) {
-        unmap(&mapping);
-    }
-}
-
-void BufferVulkan::clearCmd(VkCommandBuffer commandBuffer)
-{
-    if (m_size == 0) {
-        return;
-    }
-
-    assert(m_buffer != VK_NULL_HANDLE);
-
-    vkCmdFillBuffer(commandBuffer, m_buffer, 0, m_size, 0);
-
-    // Barrier: TRANSFER_WRITE -> SHADER_READ so subsequent compute dispatches
-    // see the zeroed contents.
     VkMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -216,56 +33,31 @@ void BufferVulkan::clearCmd(VkCommandBuffer commandBuffer)
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
-void BufferVulkan::copyIn(uint32_t dstOffset, const void* src, uint32_t size)
+void BufferVulkan::imageLayoutTransition(VkCommandBuffer commandBuffer, VkImage image,
+                                         VkImageLayout oldLayout, VkImageLayout newLayout,
+                                         VkAccessFlags srcAccess, VkAccessFlags dstAccess,
+                                         VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage)
 {
-    assert(m_usage != pipeline::BufferUsageInternal);
-    assert(dstOffset + size <= m_size);
-    assert(m_buffer != VK_NULL_HANDLE);
-
-    if (m_size == 0) {
+    if (image == VK_NULL_HANDLE) {
         return;
     }
 
-    LdpBufferMapping mapping{};
-    if (!m_mapped) {
-        map(&mapping, 0, m_size, LdpAccessWrite);
-    }
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = srcAccess;
+    barrier.dstAccessMask = dstAccess;
 
-    assert(m_ptr != nullptr);
-    memcpy(m_ptr + dstOffset, src, size);
-
-    if (mapping.buffer) {
-        unmap(&mapping);
-    }
-}
-
-void BufferVulkan::copyOut(void* dst, uint32_t srcOffset, uint32_t size)
-{
-    assert(m_usage != pipeline::BufferUsageInternal);
-    assert(srcOffset + size <= m_size);
-    assert(m_buffer != VK_NULL_HANDLE);
-
-    if (m_size == 0) {
-        return;
-    }
-
-    LdpBufferMapping mapping{};
-    if (!m_mapped) {
-        map(&mapping, 0, m_size, LdpAccessRead);
-    }
-
-    assert(m_ptr != nullptr);
-    memcpy(dst, m_ptr + srcOffset, size);
-
-    if (mapping.buffer) {
-        unmap(&mapping);
-    }
-}
-
-bool BufferVulkan::resize(uint32_t size)
-{
-    destroy();
-    return createBufferAndMemory(size);
+    vkCmdPipelineBarrier(commandBuffer, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
 } // namespace lcevc_dec::pipeline_vulkan

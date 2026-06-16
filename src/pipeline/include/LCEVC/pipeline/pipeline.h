@@ -20,6 +20,7 @@
 #include <LCEVC/common/shared_library.h>
 #include <LCEVC/pipeline/event_sink.h>
 #include <LCEVC/pipeline/picture.h>
+#include <LCEVC/pipeline/types.h>
 
 #include <memory>
 
@@ -88,14 +89,16 @@ public:
     // "Trick-play"
     virtual LdcReturnCode flush(uint64_t timestamp) = 0;
     virtual LdcReturnCode peekDecoder(uint64_t timestamp, uint32_t& widthOut, uint32_t& heightOut) = 0;
+    virtual LdcReturnCode peekDecoderPictureDesc(uint64_t timestamp, LdpPictureDesc* desc) = 0;
     virtual LdcReturnCode skip(uint64_t timestamp) = 0;
     virtual LdcReturnCode synchronizeDecoder(uint64_t timestamp, bool dropPending) = 0;
 
     // Picture-handling
-    virtual LdpPicture* allocPicture(const LdpPictureDesc& desc) = 0;
-    virtual LdpPicture* allocPictureExternal(const LdpPictureDesc& desc,
-                                             const LdpPicturePlaneDesc* planeDescArr,
-                                             const LdpPictureBufferDesc* buffer) = 0;
+    virtual LdcReturnCode allocPicture(const LdpPictureDesc& desc, LdpPicture*& pictureOut) = 0;
+    virtual LdcReturnCode allocPictureExternal(const LdpPictureDesc& desc,
+                                               const LdpPicturePlaneDesc* planeDescArr,
+                                               const LdpPictureBufferDesc* buffer,
+                                               LdpPicture*& pictureOut) = 0;
 
     virtual void freePicture(LdpPicture* picture) = 0;
 

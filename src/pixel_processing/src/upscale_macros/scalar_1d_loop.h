@@ -26,6 +26,7 @@
 #else
 
 {
+    VNUnused(srcHeight); // 1d doesn't need height
     const bool ditherEnabled = (dither != NULL);
     const bool paEnabled = (params.applyPA != 0);
 
