@@ -169,7 +169,7 @@
     v0aHi = vmlal_s16(v0aHi, vget_high_s16(src2a), k1);
     v0aHi = vmlal_s16(v0aHi, vget_high_s16(src3a), k0);
 
-    int16x8_t v0a = vcombine_s16(vrshrn_n_s32(v0aLo, 14), vrshrn_n_s32(v0aHi, 14));
+    int16x8_t v0a = vcombine_s16(vqrshrn_n_s32(v0aLo, 14), vqrshrn_n_s32(v0aHi, 14));
     v0a = vmaxq_s16(vminq_s16(v0a, kMax16), kMin16); // limit to S15 range
 
     int32x4_t v0bLo = vmull_s16(vget_low_s16(src0b), k3);
@@ -182,7 +182,7 @@
     v0bHi = vmlal_s16(v0bHi, vget_high_s16(src2b), k1);
     v0bHi = vmlal_s16(v0bHi, vget_high_s16(src3b), k0);
 
-    int16x8_t v0b = vcombine_s16(vrshrn_n_s32(v0bLo, 14), vrshrn_n_s32(v0bHi, 14));
+    int16x8_t v0b = vcombine_s16(vqrshrn_n_s32(v0bLo, 14), vqrshrn_n_s32(v0bHi, 14));
     v0b = vmaxq_s16(vminq_s16(v0b, kMax16), kMin16); // limit to S15 range
 
     // === Vertical convolution for row1 src1-src4 -> v1a, v1b ===
@@ -196,7 +196,7 @@
     v1aHi = vmlal_s16(v1aHi, vget_high_s16(src3a), k2);
     v1aHi = vmlal_s16(v1aHi, vget_high_s16(src4a), k3);
 
-    int16x8_t v1a = vcombine_s16(vrshrn_n_s32(v1aLo, 14), vrshrn_n_s32(v1aHi, 14));
+    int16x8_t v1a = vcombine_s16(vqrshrn_n_s32(v1aLo, 14), vqrshrn_n_s32(v1aHi, 14));
     v1a = vmaxq_s16(vminq_s16(v1a, kMax16), kMin16); // limit to S15 range
 
     int32x4_t v1bLo = vmull_s16(vget_low_s16(src1b), k0);
@@ -209,7 +209,7 @@
     v1bHi = vmlal_s16(v1bHi, vget_high_s16(src3b), k2);
     v1bHi = vmlal_s16(v1bHi, vget_high_s16(src4b), k3);
 
-    int16x8_t v1b = vcombine_s16(vrshrn_n_s32(v1bLo, 14), vrshrn_n_s32(v1bHi, 14));
+    int16x8_t v1b = vcombine_s16(vqrshrn_n_s32(v1bLo, 14), vqrshrn_n_s32(v1bHi, 14));
     v1b = vmaxq_s16(vminq_s16(v1b, kMax16), kMin16); // limit to S15 range
 #endif
 
@@ -289,16 +289,16 @@
     row1b_even = vmlal_s16(row1b_even, v1b_s3, k2);
     row1b_even = vmlal_s16(row1b_even, v1b_s4, k3);
 
-    // === Pack and interleave results ===
-    const int16x4_t row0a_odd_16 = vrshrn_n_s32(row0a_odd, 14);
-    const int16x4_t row0a_even_16 = vrshrn_n_s32(row0a_even, 14);
-    const int16x4_t row0b_odd_16 = vrshrn_n_s32(row0b_odd, 14);
-    const int16x4_t row0b_even_16 = vrshrn_n_s32(row0b_even, 14);
+    // === Saturating pack and interleave results ===
+    const int16x4_t row0a_odd_16 = vqrshrn_n_s32(row0a_odd, 14);
+    const int16x4_t row0a_even_16 = vqrshrn_n_s32(row0a_even, 14);
+    const int16x4_t row0b_odd_16 = vqrshrn_n_s32(row0b_odd, 14);
+    const int16x4_t row0b_even_16 = vqrshrn_n_s32(row0b_even, 14);
 
-    const int16x4_t row1a_odd_16 = vrshrn_n_s32(row1a_odd, 14);
-    const int16x4_t row1a_even_16 = vrshrn_n_s32(row1a_even, 14);
-    const int16x4_t row1b_odd_16 = vrshrn_n_s32(row1b_odd, 14);
-    const int16x4_t row1b_even_16 = vrshrn_n_s32(row1b_even, 14);
+    const int16x4_t row1a_odd_16 = vqrshrn_n_s32(row1a_odd, 14);
+    const int16x4_t row1a_even_16 = vqrshrn_n_s32(row1a_even, 14);
+    const int16x4_t row1b_odd_16 = vqrshrn_n_s32(row1b_odd, 14);
+    const int16x4_t row1b_even_16 = vqrshrn_n_s32(row1b_even, 14);
 
     const int16x4x2_t row0a_zip = vzip_s16(row0a_odd_16, row0a_even_16);
     int16x8_t row0a_16 = vcombine_s16(row0a_zip.val[0], row0a_zip.val[1]);

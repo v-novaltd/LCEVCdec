@@ -20,13 +20,17 @@ option(VN_MSVC_RUNTIME_STATIC "Use static multi-threaded runtime for MSVC" ON)
 option(VN_STRIP_RELEASE "Strip any debug information from release binaries" ON)
 option(VN_SDK_SIMD "Enable SIMD for current architecture (SSE + AVX2 or NEON)" ON)
 option(VN_SDK_LTO "Enable link time optimisation in the linker" OFF)
+option(VN_SDK_MINIMUM_LIB_SIZE "Disable optional features to minimize output library sizes" OFF)
+if (VN_SDK_MINIMUM_LIB_SIZE)
+    set(VN_SDK_LTO ON)
+endif ()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/CMakeSetup.cmake")
 
 project(
     LCEVCdec_SDK
     DESCRIPTION "The Open Source LCEVC Decoder SDK"
-    VERSION 4.2.0
+    VERSION 4.2.1
     LANGUAGES CXX C)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
@@ -47,6 +51,7 @@ option(VN_SDK_TRACING
        "Configurable tracing information recorder for function entry/exit in perfetto format" ON)
 option(VN_SDK_METRICS "Configurable metrics recording" ON)
 option(VN_SDK_MEMORY_DIAGNOSTICS "Record memory allocation and free events in diagnostics" OFF)
+option(VN_SDK_STD_FILE "Allow use of the C standard library's FILE struct" ON)
 option(VN_SDK_DIAGNOSTICS_ASYNC "Enable asynchronous output of logging, tracing and metrics" ON)
 set(VN_SDK_MAXIMUM_LOG_LEVEL
     "VERBOSE"
@@ -55,7 +60,9 @@ option(VN_SDK_WARNINGS_FAIL "Compiler warnings will cause a build to fail" OFF)
 option(VN_SDK_BUILD_DETAILS "Include build time and origin in libraries - non-reproducible build"
        OFF)
 option(VN_SDK_SYSTEM_INSTALL "Install licences and docs to the system or to a package" ON)
-option(VN_SDK_STATIC_LIBS_AS_OBJECTS "Build STATIC libraries as OBJECT" OFF)
+set(VN_SDK_STATIC_LIB_TYPE
+    "STATIC"
+    CACHE STRING "Override library type for STATIC libraries (options: STATIC, INTERFACE, OBJECT)")
 option(VN_SDK_MINIMUM_LIB_SIZE "Disable optional features to minimize output library sizes" OFF)
 option(VN_SDK_FUZZER
        "Build libFuzzer fuzz targets with ASan+UBSan instrumentation (requires Clang)" OFF)
@@ -66,8 +73,8 @@ set(VN_SDK_FFMPEG_LIBS_PACKAGE "" CACHE STRING
 # cmake-format: on
 
 if (VN_SDK_MINIMUM_LIB_SIZE)
-    if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
-        message(FATAL_ERROR "Cannot build for minimum size with executables or unit tests")
+    if (VN_SDK_UNIT_TESTS)
+        message(FATAL_ERROR "Cannot build for minimum size with unit tests")
     endif ()
     if (NOT VN_STRIP_RELEASE OR "${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
         message(WARNING "VN_SDK_MINIMUM_LIB_SIZE enabled but other, non-optimal options present")
@@ -76,8 +83,7 @@ if (VN_SDK_MINIMUM_LIB_SIZE)
     set(VN_SDK_METRICS OFF)
     set(VN_SDK_TRACING OFF)
     set(VN_SDK_DIAGNOSTICS_ASYNC OFF)
-    set(VN_SDK_LTO ON)
-    set(VN_SDK_MAXIMUM_LOG_LEVEL "ERROR")
+    set(VN_SDK_MAXIMUM_LOG_LEVEL "FATAL")
 endif ()
 
 if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
@@ -86,10 +92,12 @@ else ()
     set(VN_SDK_BASE_DECODER OFF)
 endif ()
 
-if (VN_SDK_STATIC_LIBS_AS_OBJECTS)
-    set(VN_STATIC_LIB_TYPE OBJECT)
+if (VN_SDK_STATIC_LIB_TYPE STREQUAL INTERFACE)
+    set(VN_PRIVATE_LINKAGE INTERFACE)
+    set(VN_PUBLIC_LINKAGE INTERFACE)
 else ()
-    set(VN_STATIC_LIB_TYPE STATIC)
+    set(VN_PRIVATE_LINKAGE PRIVATE)
+    set(VN_PUBLIC_LINKAGE PUBLIC)
 endif ()
 
 if ((VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS) AND NOT VN_SDK_JSON_CONFIG)
@@ -118,11 +126,17 @@ endif ()
 
 # Performance options
 option(VN_SDK_THREADING "Enable multithreading" ON)
-option(VN_SDK_THREADS_CUSTOM "Use a custom threading implementation." OFF)
-option(VN_SDK_TIME_CUSTOM "Use a custom time implementation." OFF)
 option(VN_SDK_GENERATE_PGO "Make an instrumented build for profile-guided optimization (PGO)." OFF)
 option(VN_SDK_USE_PGO "Use previously-generated PGO profiles to optimize this build." OFF)
 option(VN_SDK_BENCHMARK "Build benchmark google benchmark tests" OFF)
+option(VN_SDK_LDE_FLOATS
+       "Allow floating point maths in the LDE. If disabled, fixed-point maths will be preferred" ON)
+
+# Custom header options
+option(VN_SDK_ATOMIC_CUSTOM "Use a custom atomic implementation." OFF)
+option(VN_SDK_CLOCK_CUSTOM "Use a custom clock implementation." OFF)
+option(VN_SDK_STDLIB_CUSTOM "Use a custom stdlib implementation." OFF)
+option(VN_SDK_THREADS_CUSTOM "Use a custom threading implementation." OFF)
 
 if (NOT VN_SDK_THREADING AND VN_SDK_DIAGNOSTICS_ASYNC)
     message(STATUS "VN_SDK_DIAGNOSTICS_ASYNC cannot be enabled without threading, disabling")

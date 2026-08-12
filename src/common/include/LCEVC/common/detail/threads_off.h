@@ -15,8 +15,8 @@
 #ifndef VN_LCEVC_COMMON_DETAIL_THREADS_OFF_H
 #define VN_LCEVC_COMMON_DETAIL_THREADS_OFF_H
 
-#include <stddef.h>
-#include <time.h>
+#include <LCEVC/common/clock.h>
+#include <LCEVC/common/stdlib.h>
 
 struct Thread
 {
@@ -72,15 +72,7 @@ static inline void threadSetName(const char* name) { VNUnused(name); }
 
 static inline uint64_t threadTimeMicroseconds(int32_t offset)
 {
-    if (offset == -1) {
-        return UINT64_MAX;
-    }
-
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    const uint64_t uSecs = ts.tv_sec * 1000000LL + ts.tv_nsec / 1000L;
-
-    return uSecs + offset;
+    return ldcClockDeadlineMicroseconds(offset);
 }
 
 // Stub Mutexes

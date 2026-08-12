@@ -19,7 +19,6 @@
 
 #include <cassert>
 #include <cstdio>
-#include <sstream>
 
 namespace lcevc_dec::pipeline_vulkan {
 

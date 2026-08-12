@@ -88,6 +88,9 @@ class Runner:
     def get_param(self, param, default=None):
         return self._config[param] if param in self._config else default
 
+    def set_timeout(self, timeout):
+        self._timeout = timeout
+
     def command_as_list(self):
         params = list()
         for param, param_value in self._config.items():
@@ -123,7 +126,8 @@ class Runner:
                     f"STDERR:\n{process.stderr.decode('utf-8')}"
             return process
         except subprocess.TimeoutExpired:
-            raise RuntimeError(f"Command did not exit within {self._timeout}s")
+            raise RuntimeError(
+                f"Command '{self.get_command_line(as_string=True)}' did not exit within {self._timeout}s")
 
     def call_subprocess(self, kwargs):
         self.is_performance = kwargs.pop('is_performance', False)

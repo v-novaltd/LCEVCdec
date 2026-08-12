@@ -12,18 +12,13 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include <LCEVC/common/simple_allocator.h>
+//
 #include <LCEVC/common/bitutils.h>
 #include <LCEVC/common/check.h>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/common/platform.h>
-#include <LCEVC/common/simple_allocator.h>
-//
-#include <assert.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <LCEVC/common/stdlib.h>
 
 // Implements a simple block/chunk/free list memory allocator.
 //
@@ -60,7 +55,7 @@ static inline size_t freeListIndexForSize(size_t size)
 {
     assert(size > 0);
     // floor(log2) of size
-    const size_t log = 63 - clz64(size);
+    const size_t log = log2_64(size);
 
     if (log < kFreeListMinLog2) {
         return 0;

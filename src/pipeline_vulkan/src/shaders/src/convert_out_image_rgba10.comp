@@ -39,9 +39,9 @@ void main()
     const int cx = x >> chromaWidthShift;
     const int cy = y >> chromaHeightShift;
 
-    const float yf = internalToUnorm(loadInternalValue(x, y, containerStrideY, containerOffsetY), 5, 1023);
-    const float uf = internalToUnorm(loadInternalValue(cx, cy, containerStrideU, containerOffsetU), 5, 1023) - 0.5;
-    const float vf = internalToUnorm(loadInternalValue(cx, cy, containerStrideV, containerOffsetV), 5, 1023) - 0.5;
+    const float yf = internalToUnorm(loadInternalValue(x, y, containerStrideY, containerOffsetY, containerStrideTemporalY, containerOffsetTemporalY), 5, 1023);
+    const float uf = internalToUnorm(loadInternalValue(cx, cy, containerStrideU, containerOffsetU, containerStrideTemporalU, containerOffsetTemporalU), 5, 1023) - 0.5;
+    const float vf = internalToUnorm(loadInternalValue(cx, cy, containerStrideV, containerOffsetV, containerStrideTemporalV, containerOffsetTemporalV), 5, 1023) - 0.5;
 
     imageStore(dstImage, ivec2(x, y), vec4(yuvToRgb601(yf, uf, vf), 1.0));
 }

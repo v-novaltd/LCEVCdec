@@ -30,7 +30,10 @@
     const bool ditherEnabled = (dither != NULL);
     const bool paEnabled = (params.applyPA != 0);
 
-    int16_t kernel[4] = {params.kernel[0], params.kernel[1], params.kernel[2], params.kernel[3]};
+    const int32_t kernel[4] = {upscaleKernelGetPreparedCoefficient(&params, 0),
+                               upscaleKernelGetPreparedCoefficient(&params, 1),
+                               upscaleKernelGetPreparedCoefficient(&params, 2),
+                               upscaleKernelGetPreparedCoefficient(&params, 3)};
 
     const int32_t srcWidthI = (int32_t)srcWidth;
     const int32_t rightEdgeSrcX = (srcWidthI >= 4) ? (srcWidthI - 4) : 0;
@@ -73,10 +76,12 @@
 
             int16_t row_16[8];
             for (int32_t i = 0; i < 4; ++i) {
-                const int32_t rowOdd = (srcPel[i + 0] * kernel[3]) + (srcPel[i + 1] * kernel[2]) +
-                                       (srcPel[i + 2] * kernel[1]) + (srcPel[i + 3] * kernel[0]);
-                const int32_t rowEven = (srcPel[i + 1] * kernel[0]) + (srcPel[i + 2] * kernel[1]) +
-                                        (srcPel[i + 3] * kernel[2]) + (srcPel[i + 4] * kernel[3]);
+                const int64_t rowOdd =
+                    ((int64_t)srcPel[i + 0] * kernel[3]) + ((int64_t)srcPel[i + 1] * kernel[2]) +
+                    ((int64_t)srcPel[i + 2] * kernel[1]) + (srcPel[i + 3] * kernel[0]);
+                const int64_t rowEven =
+                    ((int64_t)srcPel[i + 1] * kernel[0]) + ((int64_t)srcPel[i + 2] * kernel[1]) +
+                    ((int64_t)srcPel[i + 3] * kernel[2]) + (srcPel[i + 4] * kernel[3]);
 
                 row_16[(i << 1) + 0] = scalarShiftRoundS15(rowOdd);
                 row_16[(i << 1) + 1] = scalarShiftRoundS15(rowEven);

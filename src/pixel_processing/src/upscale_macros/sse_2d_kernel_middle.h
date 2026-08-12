@@ -200,8 +200,8 @@
     row1b_16 = _mm_max_epi16(_mm_min_epi16(row1b_16, kMax16), kMin16);
 
 #if APPLY_PA == 1
-    sseApplyPA(&row0a_16, &row1a_16, base0, kPAOnes, kPATwos);
-    sseApplyPA(&row0b_16, &row1b_16, base1, kPAOnes, kPATwos);
+    sseApplyPA(&row0a_16, &row1a_16, base0);
+    sseApplyPA(&row0b_16, &row1b_16, base1);
 #endif
 
 #if DITHER == 1

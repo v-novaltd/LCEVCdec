@@ -41,6 +41,9 @@ static const ConfigMemberMap<PipelineConfigBase> kConfigMemberMap = {
 
 PipelineBuilderBase::PipelineBuilderBase(LdcMemoryAllocator* allocator, PipelineConfigBase& configuration)
     : m_configurableMembersBase(kConfigMemberMap, configuration)
+{}
+
+void PipelineBuilderBase::setDefaultThreadCount(PipelineConfigBase& configuration)
 {
 #if VN_OS(ANDROID) || !VN_SDK_FEATURE(THREADING)
     // Special case for Android, single threaded operation often gives better performance on mobile

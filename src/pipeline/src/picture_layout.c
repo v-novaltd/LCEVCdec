@@ -180,15 +180,16 @@ uint8_t ldpPictureLayoutPlaneForComponent(const LdpPictureLayout* layout, uint8_
 
 uint8_t ldpPictureLayoutComponentForPlane(const LdpPictureLayout* layout, uint8_t plane)
 {
+    const uint8_t colorComponents = layout->layoutInfo->colorComponents;
     uint8_t component = 0;
-    for (uint8_t testPlane = 0; testPlane < plane; testPlane++) {
+    for (uint8_t testPlane = 0; testPlane < plane && component < colorComponents; testPlane++) {
         component += layout->layoutInfo->interleave[component];
     }
     // Proceed through the components in this plane until you find the one with no offset
-    while (layout->layoutInfo->offset[component] != 0) {
+    while (component < colorComponents && layout->layoutInfo->offset[component] != 0) {
         component++;
     }
-    return component;
+    return (component < colorComponents) ? component : 0;
 }
 
 // Work out minimum stride from width

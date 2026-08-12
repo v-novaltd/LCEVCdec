@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -225,15 +225,16 @@ uint8_t PictureLayout::getPlaneForComponent(uint8_t component) const
 
 uint8_t PictureLayout::getComponentForPlane(uint8_t plane) const
 {
+    const uint8_t colorComponents = m_layoutInfo->colorComponents;
     uint8_t component = 0;
-    for (uint8_t testPlane = 0; testPlane < plane; testPlane++) {
+    for (uint8_t testPlane = 0; testPlane < plane && component < colorComponents; testPlane++) {
         component += m_layoutInfo->interleave[component];
     }
     // Proceed through the components in this plane until you find the one with no offset
-    while (m_layoutInfo->offset[component] != 0) {
+    while (component < colorComponents && m_layoutInfo->offset[component] != 0) {
         component++;
     }
-    return component;
+    return (component < colorComponents) ? component : 0;
 }
 
 // Work out minimum stride from width

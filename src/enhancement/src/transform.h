@@ -33,12 +33,8 @@
  * Additionally when there is 1D upscaling from LOQ-1 to LOQ-0 the transform for
  * LOQ-0 has a specialized implementation.
  *
- * This module has 2 "modes" of operation:
- *
- *    1. Applying the transform to dequantized coefficients.
- *    2. Applying the transform to raw coefficients by first dequantizing them.
- *
- * The first mode is essentially deprecated.
+ * This module applies the transform to already-dequantized coefficients. Dequantization of the
+ * raw coefficients is performed separately by the decode loop (see decode_utilities.h).
  */
 
 /*------------------------------------------------------------------------------*/
@@ -52,21 +48,6 @@ typedef void (*TransformFunction)(const int16_t* coeffs, int16_t* residuals);
  *
  * \return A valid function pointer if a function is available, otherwise NULL. */
 TransformFunction transformGetFunction(LdeTransformType transform, LdeScalingMode scaling);
-
-/*------------------------------------------------------------------------------*/
-
-typedef struct Dequant Dequant;
-typedef void (*DequantTransformFunction)(const Dequant* dequant, TemporalSignal temporalSignal,
-                                         const int16_t* coeffs, int16_t* residuals);
-
-/*! \brief Retrieve a function pointer to a transform function that also
- *         performs dequantization.
- *
- * \param transform       The transform type.
- * \param scaling         The scaling mode for the target LOQ.
- *
- * \return A valid function pointer if a function is available, otherwise NULL. */
-DequantTransformFunction dequantTransformGetFunction(LdeTransformType transform, LdeScalingMode scaling);
 
 /*------------------------------------------------------------------------------*/
 

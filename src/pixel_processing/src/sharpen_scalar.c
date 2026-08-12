@@ -54,6 +54,10 @@ static inline void sharpenKernelU16(int32_t strength, uint32_t x, uint16_t* src[
 static inline void sharpenU8(uint8_t* src, uint32_t stride, uint32_t width, uint32_t height,
                              float strength, LdppDitherSlice* dither)
 {
+    if (width < 3 || height < 3) {
+        return;
+    }
+
     const int32_t strengthInt = f32ToU16(strength);
 
     const uint32_t tmpSize = width - 2;
@@ -95,6 +99,10 @@ static inline void sharpenU8(uint8_t* src, uint32_t stride, uint32_t width, uint
 static inline void sharpenU16(uint8_t* src, uint32_t stride, uint32_t width, uint32_t height,
                               float strength, int32_t resultClamp, LdppDitherSlice* dither)
 {
+    if (width < 3 || height < 3) {
+        return;
+    }
+
     const int32_t strengthInt = f32ToU16(strength);
 
     const uint32_t tmpPixelCount = width - 2;

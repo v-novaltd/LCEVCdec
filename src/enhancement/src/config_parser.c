@@ -15,6 +15,7 @@
 #include <LCEVC/common/check.h>
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/printf_macros.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/bitstream_types.h>
 #include <LCEVC/enhancement/config_parser.h>
 #include <LCEVC/enhancement/dimensions.h>
@@ -26,11 +27,6 @@
 #include "config_parser_types.h"
 #include "dequant.h"
 #include "log_utilities.h"
-
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
 
 /*------------------------------------------------------------------------------*/
 
@@ -532,9 +528,12 @@ static bool parseBlockGlobalConfig(ByteStream* stream, LdeGlobalConfig* globalCo
     }
     VNLogDebug("  Plane count: %u", globalConfig->numPlanes);
 
-    /* temporal_step_width_modifier: 8 bits. (if absent, correct default is already set in initialization). */
+    /* temporal_step_width_modifier: 8 bits. */
     if (useTemporalStepWidthModifier != 0) {
         VNCheckB(bytestreamReadU8(stream, &globalConfig->temporalStepWidthModifier));
+    } else {
+        /* When not signaled, the value is reset to the default */
+        globalConfig->temporalStepWidthModifier = kDefaultTemporalStepWidthModifier;
     }
     VNLogDebug("  Temporal step-width modifier: %u", globalConfig->temporalStepWidthModifier);
 
@@ -546,18 +545,16 @@ static bool parseBlockGlobalConfig(ByteStream* stream, LdeGlobalConfig* globalCo
         globalConfig->kernel.approximatedPA = false;
 
         for (int16_t i = 0; i < kernelSize; i++) {
-            /* First and last coefficients are negative */
-            const int16_t multiplier = ((i % 3) == 0) ? -1 : 1;
             uint16_t coeff = 0;
 
             VNCheckB(bytestreamReadU16(stream, &coeff));
 
-            globalConfig->kernel.coeffs[i] = (int16_t)(multiplier * coeff);
+            globalConfig->kernel.coeffs[i] = coeff;
         }
 
-        VNLogDebug("  Adaptive upsampler kernel: %d %d %d %d", globalConfig->kernel.coeffs[0],
-                   globalConfig->kernel.coeffs[1], globalConfig->kernel.coeffs[2],
-                   globalConfig->kernel.coeffs[3]);
+        VNLogDebug("  Adaptive upsampler kernel magnitudes: %u %u %u %u",
+                   globalConfig->kernel.coeffs[0], globalConfig->kernel.coeffs[1],
+                   globalConfig->kernel.coeffs[2], globalConfig->kernel.coeffs[3]);
     } else {
         globalConfig->kernel = kKernels[upsample];
     }
@@ -600,9 +597,12 @@ static bool parseBlockGlobalConfig(ByteStream* stream, LdeGlobalConfig* globalCo
         VNLogDebug("  Custom resolution height: %u", globalConfig->height);
     }
 
-    /* chroma_step_width_multiplier: 8 bits. If absent, correct default is already set by initialization */
+    /* chroma_step_width_multiplier: 8 bits. */
     if (chromaStepWidthFlag) {
         VNCheckB(bytestreamReadU8(stream, &globalConfig->chromaStepWidthMultiplier));
+    } else {
+        /* When not signaled, the value is reset to the default */
+        globalConfig->chromaStepWidthMultiplier = kDefaultChromaStepWidthMultiplier;
     }
 
     VNLogDebug("  Chroma step-width multiplier: %u", globalConfig->chromaStepWidthMultiplier);
@@ -637,7 +637,7 @@ static bool parseEncodedData(ByteStream* stream, LdeFrameConfig* frameConfig, co
     VNCheckB(chunkCheckAlloc(frameConfig, globalConfig));
 
     /* --- Read the enabled & RLE-only flags --- */
-    BitStream chunkHeadersStream = {{0}};
+    BitStream chunkHeadersStream = {0};
     VNCheckB(bitstreamInitialize(&chunkHeadersStream, bytestreamCurrent(stream),
                                  bytestreamRemaining(stream)));
 
@@ -805,7 +805,7 @@ static bool parseEncodedDataTiled(ByteStream* stream, LdeFrameConfig* frameConfi
     calculateTileChunkIndices(frameConfig, globalConfig);
     VNCheckB(chunkCheckAlloc(frameConfig, globalConfig));
 
-    BitStream rleOnlyBS = {{0}};
+    BitStream rleOnlyBS = {0};
     VNCheckB(bitstreamInitialize(&rleOnlyBS, bytestreamCurrent(stream), bytestreamRemaining(stream)));
 
     /* --- Read the RLE-only flags --- */
@@ -859,7 +859,7 @@ static bool parseEncodedDataTiled(ByteStream* stream, LdeFrameConfig* frameConfi
 
     /* --- Read the entropy enabled flags --- */
     TiledRLEDecoder entropyEnabledRLE = {0};
-    BitStream entropyEnabledBS = {{0}};
+    BitStream entropyEnabledBS = {0};
     if (globalConfig->perTileCompressionEnabled) {
         VNCheckB(tiledRLEDecoderInitialize(&entropyEnabledRLE, stream));
     } else {
@@ -1035,7 +1035,7 @@ static bool parseVUIParameters(ByteStream* stream, LdeVUIInfo* vuiInfo, uint32_t
     uint8_t bit = 0;
     int32_t bits = 0;
 
-    BitStream bitstream = {{0}};
+    BitStream bitstream = {0};
     VNCheckB(bitstreamInitialize(&bitstream, bytestreamCurrent(stream), vuiSize));
 
     /* aspect_ratio_info_present_flag: 1 bit */
@@ -1162,10 +1162,16 @@ static bool parseSFilterPayload(ByteStream* stream, LdeGlobalConfig* globalConfi
     VNCheckB(bytestreamReadU8(stream, &sfilterByte));
 
     globalConfig->sharpenType = (LdeSharpenType)((sfilterByte & 0xE0) >> 5);
-    const uint8_t signalledSharpenStrength = (sfilterByte & 0x1F);
-    globalConfig->sharpenStrength = (float)(signalledSharpenStrength + 1) * 0.01f;
     VNLogVerbose("    sharpen_type: %s", sharpenTypeToString(globalConfig->sharpenType));
+
+    const uint8_t signalledSharpenStrength = (sfilterByte & 0x1F);
+#if VN_SDK_FEATURE(LDE_FLOATS)
+    globalConfig->sharpenStrength = (float)(signalledSharpenStrength + 1) * 0.01f;
     VNLogVerboseF("    sharpen_strength: %d [%f]", signalledSharpenStrength, globalConfig->sharpenStrength);
+#else
+    globalConfig->signalledSharpenStrength = signalledSharpenStrength;
+    VNLogVerboseF("    sharpen_strength: %d", globalConfig->signalledSharpenStrength);
+#endif
     return true;
 }
 
@@ -1511,7 +1517,7 @@ bool ldeConfigsParse(const uint8_t* serialized, const size_t serializedSize, Lde
                      LdeFrameConfig* frameConfig, bool* globalConfigModified)
 {
     if (!serialized || !serializedSize) {
-        VNLogError("Serialised NULL or no size");
+        VNLogError("LCEVC NAl is NULL or zero size");
         return false;
     }
 

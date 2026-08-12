@@ -15,9 +15,9 @@
 #ifndef VN_LCEVC_ENHANCEMENT_CONFIG_PARSER_TYPES_H
 #define VN_LCEVC_ENHANCEMENT_CONFIG_PARSER_TYPES_H
 
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/bitstream_types.h>
-#include <stdbool.h>
-#include <stdint.h>
+
 /*------------------------------------------------------------------------------*/
 
 static const uint32_t kDefaultDeblockCoefficient = 16;        /* 8.9.2 */
@@ -113,10 +113,10 @@ static const LdeKernel kKernels[] = {
     {{0, 12288, 4096, 0}, 2, false},
 
     /* Cubic (a = -0.6) */
-    {{-1382, 14285, 3942, -461}, 4, false},
+    {{1382, 14285, 3942, 461}, 4, false},
 
     /* ModifiedCubic */
-    {{-2360, 15855, 4165, -1276}, 4, false},
+    {{2360, 15855, 4165, 1276}, 4, false},
 
     /* AdaptiveCubic */
     {{0}, 0, false},

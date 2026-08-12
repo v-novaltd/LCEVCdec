@@ -72,7 +72,8 @@ public:
     bool isInitialised() const { return m_isInitialised; }
     void setRotation(uint32_t rotation) { m_rotation = rotation; }
 
-    std::vector<const char*> getRenderingExtensions();
+    std::vector<const char*> getRenderingInstanceExtensions() const;
+    std::vector<const char*> getRenderingDeviceExtensions() const;
 
     SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device);
     bool createSurface();

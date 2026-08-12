@@ -30,18 +30,30 @@ if (VN_SDK_MINIMUM_LIB_SIZE)
     )
 endif ()
 
+# Detect -fanalyzer use
+set(_VN_SDK_GNU_CXX_ANALYZER_REGEX "(^|[ \t\r\n])-fanalyzer([ \t\r\n]|$)")
+set(_VN_SDK_GNU_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+set(VN_SDK_GCC_ANALYZER OFF)
+if (CMAKE_BUILD_TYPE)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _VN_SDK_GNU_BUILD_TYPE)
+    string(APPEND _VN_SDK_GNU_CXX_FLAGS " ${CMAKE_CXX_FLAGS_${_VN_SDK_GNU_BUILD_TYPE}}")
+endif ()
+if (_VN_SDK_GNU_CXX_FLAGS MATCHES "${_VN_SDK_GNU_CXX_ANALYZER_REGEX}")
+    set(VN_SDK_GCC_ANALYZER ON)
+endif ()
+
 target_compile_options(
     lcevc_dec::compiler
-    INTERFACE $<$<BOOL:${VN_SDK_WARNINGS_FAIL}>:-Werror>
-              $<$<BOOL:${VN_SDK_MINIMUM_LIB_SIZE}>:-fno-exceptions>
-              $<$<AND:$<BOOL:${VN_SDK_MINIMUM_LIB_SIZE}>,$<COMPILE_LANGUAGE:CXX>>:-fno-rtti>
-              -Wall
-              -Wwrite-strings
-              $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>
-              $<$<COMPILE_LANGUAGE:C>:--std=gnu11>
-              $<$<COMPILE_LANGUAGE:CXX>:--std=c++17>
-              -Wno-error=missing-field-initializers
-              -Wno-error=unused-parameter
-              -Wno-error=type-limits
-              -Wno-error=sign-compare
-              -fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.)
+    INTERFACE
+        $<$<BOOL:${VN_SDK_WARNINGS_FAIL}>:-Werror>
+        -Wall
+        -Wwrite-strings
+        $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>
+        $<$<COMPILE_LANGUAGE:C>:--std=gnu11>
+        $<$<COMPILE_LANGUAGE:CXX>:--std=c++17>
+        -Wno-error=missing-field-initializers
+        -Wno-error=unused-parameter
+        -Wno-error=type-limits
+        -Wno-error=sign-compare
+        $<$<AND:$<BOOL:${VN_SDK_GCC_ANALYZER}>,$<COMPILE_LANGUAGE:CXX>>:-Wno-analyzer-malloc-leak>
+        -fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.)

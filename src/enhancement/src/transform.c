@@ -14,38 +14,17 @@
 
 #include "transform.h"
 
-#include "dequant.h"
-
 #include <LCEVC/common/acceleration.h>
 #include <LCEVC/common/limit.h>
+#include <LCEVC/common/neon.h>
+#include <LCEVC/common/sse.h>
 
 /*------------------------------------------------------------------------------*/
 
-/* Performs dequantization on an array of coefficients. This is the standard
- * LCEVC implementation. */
-static inline void dequantScalarImpl(const Dequant* dequant, TemporalSignal temporalSignal,
-                                     int32_t numLayers, const int16_t* coeffs, int16_t* dequantizedCoeffs)
-{
-    for (int32_t i = 0; i < numLayers; i++) {
-        const int16_t coeffSign = (coeffs[i] > 0) ? 1 : ((coeffs[i] < 0) ? (-1) : 0);
-
-        /* Simple dequant */
-        dequantizedCoeffs[i] = (int16_t)(coeffs[i] * dequant->stepWidth[temporalSignal][i]);
-
-        /* Applying dead zone */
-        dequantizedCoeffs[i] =
-            (int16_t)(dequantizedCoeffs[i] + (int16_t)(coeffSign * dequant->offset[temporalSignal][i]));
-    }
-}
-
-/* Non-static wrapper to expose this functionality outside of this module for testing purposes. */
-void dequantScalar(const Dequant* dequant, TemporalSignal temporalSignal, int32_t numLayers,
-                   const int16_t* coeffs, int16_t* dequantizedCoeffs)
-{
-    dequantScalarImpl(dequant, temporalSignal, numLayers, coeffs, dequantizedCoeffs);
-}
-
-/*------------------------------------------------------------------------------*/
+/* The scalar transform implementations are only used as a fallback when no SIMD acceleration is
+ * available. They are omitted from minimum size builds, which target platforms that are
+ * guaranteed to provide SIMD. */
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
 
 static inline void inverseDD1D(const int16_t* coeffs, int16_t* residuals)
 {
@@ -55,28 +34,12 @@ static inline void inverseDD1D(const int16_t* coeffs, int16_t* residuals)
     residuals[3] = saturateS16(coeffs[3] - coeffs[1] + coeffs[2]);
 }
 
-void dequantInverseDD1D(const Dequant* dequant, TemporalSignal temporalSignal,
-                        const int16_t* coeffs, int16_t* residuals)
-{
-    int16_t dqCoeffs[RCLayerCountDD];
-    dequantScalarImpl(dequant, temporalSignal, RCLayerCountDD, coeffs, dqCoeffs);
-    inverseDD1D(dqCoeffs, residuals);
-}
-
 static inline void inverseDD2D(const int16_t* coeffs, int16_t* residuals)
 {
     residuals[0] = saturateS16(coeffs[0] + coeffs[1] + coeffs[2] + coeffs[3]);
     residuals[1] = saturateS16(coeffs[0] - coeffs[1] + coeffs[2] - coeffs[3]);
     residuals[2] = saturateS16(coeffs[0] + coeffs[1] - coeffs[2] - coeffs[3]);
     residuals[3] = saturateS16(coeffs[0] - coeffs[1] - coeffs[2] + coeffs[3]);
-}
-
-void dequantInverseDD2D(const Dequant* dequant, TemporalSignal temporalSignal,
-                        const int16_t* coeffs, int16_t* residuals)
-{
-    int16_t dqCoeffs[RCLayerCountDD];
-    dequantScalarImpl(dequant, temporalSignal, RCLayerCountDD, coeffs, dqCoeffs);
-    inverseDD2D(dqCoeffs, residuals);
 }
 
 void inverseDDS1D(const int16_t* coeffs, int16_t* residuals)
@@ -134,14 +97,6 @@ void inverseDDS1D(const int16_t* coeffs, int16_t* residuals)
     residuals[15] = saturateS16(d[2] - d[1] + d[3]);
 }
 
-void dequantInverseDDS1D(const Dequant* dequant, TemporalSignal temporalSignal,
-                         const int16_t* coeffs, int16_t* residuals)
-{
-    int16_t dqCoeffs[RCLayerCountDDS];
-    dequantScalarImpl(dequant, temporalSignal, RCLayerCountDDS, coeffs, dqCoeffs);
-    inverseDDS1D(dqCoeffs, residuals);
-}
-
 void inverseDDS2D(const int16_t* coeffs, int16_t* residuals)
 {
     const int32_t a[4] = {coeffs[0] + coeffs[1] + coeffs[2] + coeffs[3],
@@ -189,46 +144,9 @@ void inverseDDS2D(const int16_t* coeffs, int16_t* residuals)
     residuals[15] = saturateS16(d[0] - d[1] - d[2] + d[3]);
 }
 
-void dequantInverseDDS2D(const Dequant* dequant, TemporalSignal temporalSignal,
-                         const int16_t* coeffs, int16_t* residuals)
-{
-    int16_t dqCoeffs[RCLayerCountDDS];
-    dequantScalarImpl(dequant, temporalSignal, RCLayerCountDDS, coeffs, dqCoeffs);
-    inverseDDS2D(dqCoeffs, residuals);
-}
+#endif /* !VN_SDK_FEATURE(MINIMUM_LIB_SIZE) */
 
 #if VN_SDK_FEATURE(SSE)
-
-/*------------------------------------------------------------------------------*/
-
-static inline __m128i dequantDD_SSE(const Dequant* dequant, TemporalSignal temporalSignal,
-                                    const int16_t* coeffs)
-{
-    const __m128i data = _mm_loadl_epi64((const __m128i*)coeffs);
-
-    /* value *= stepWidth */
-    __m128i tmp = _mm_mullo_epi16(data, dequant->stepWidthVector[temporalSignal][0]);
-
-    /* value += sign * offset */
-    return _mm_add_epi16(tmp, _mm_sign_epi16(dequant->offsetVector[temporalSignal][0], data));
-}
-
-static inline void dequantDDS_SSE(const Dequant* dequant, TemporalSignal temporalSignal,
-                                  const int16_t* coeffs, __m128i dequantizedCoeffs[2])
-{
-    const __m128i coeffs0 = _mm_load_si128((const __m128i*)&coeffs[0]);
-    const __m128i coeffs1 = _mm_load_si128((const __m128i*)&coeffs[8]);
-
-    /* value *= stepWidth */
-    __m128i tmp0 = _mm_mullo_epi16(coeffs0, dequant->stepWidthVector[temporalSignal][0]);
-    __m128i tmp1 = _mm_mullo_epi16(coeffs1, dequant->stepWidthVector[temporalSignal][1]);
-
-    /* value += sign * offset */
-    dequantizedCoeffs[0] =
-        _mm_add_epi16(tmp0, _mm_sign_epi16(dequant->offsetVector[temporalSignal][0], coeffs0));
-    dequantizedCoeffs[1] =
-        _mm_add_epi16(tmp1, _mm_sign_epi16(dequant->offsetVector[temporalSignal][1], coeffs1));
-}
 
 /*------------------------------------------------------------------------------*/
 
@@ -257,12 +175,6 @@ void inverseDD1D_SSE(const int16_t* coeffs, int16_t* residuals)
     inverseDD1DImpl_SSE(_mm_loadl_epi64((const __m128i*)coeffs), residuals);
 }
 
-void dequantInverseDD1D_SSE(const Dequant* dequant, TemporalSignal temporalSignal,
-                            const int16_t* coeffs, int16_t* residuals)
-{
-    inverseDD1DImpl_SSE(dequantDD_SSE(dequant, temporalSignal, coeffs), residuals);
-}
-
 /*------------------------------------------------------------------------------*/
 
 static inline void inverseDD2DImpl_SSE(__m128i ahvd, int16_t* residuals)
@@ -289,12 +201,6 @@ static inline void inverseDD2DImpl_SSE(__m128i ahvd, int16_t* residuals)
 void inverseDD2D_SSE(const int16_t* coeffs, int16_t* residuals)
 {
     inverseDD2DImpl_SSE(_mm_loadl_epi64((const __m128i*)coeffs), residuals);
-}
-
-void dequantInverseDD2D_SSE(const Dequant* dequant, TemporalSignal temporalSignal,
-                            const int16_t* coeffs, int16_t* residuals)
-{
-    inverseDD2DImpl_SSE(dequantDD_SSE(dequant, temporalSignal, coeffs), residuals);
 }
 
 /*------------------------------------------------------------------------------*/
@@ -330,23 +236,15 @@ static inline void inverseDDS1DImpl_SSE(const __m128i coeffs[2], int16_t* residu
     temp3 = _mm_add_epi32(_mm_sub_epi32(_mm_sub_epi32(row0, row1), row2), row3); /* DA DH DV DD */
 
     /* Output */
-    _mm_store_si128((__m128i*)&residuals[0], _mm_packs_epi32(temp0, temp1));
-    _mm_store_si128((__m128i*)&residuals[8], _mm_packs_epi32(temp2, temp3));
+    _mm_storeu_si128((__m128i*)&residuals[0], _mm_packs_epi32(temp0, temp1));
+    _mm_storeu_si128((__m128i*)&residuals[8], _mm_packs_epi32(temp2, temp3));
 }
 
 void inverseDDS1D_SSE(const int16_t* coeffs, int16_t* residuals)
 {
-    const __m128i coeffsV[2] = {_mm_load_si128((const __m128i*)&coeffs[0]),
-                                _mm_load_si128((const __m128i*)&coeffs[8])};
+    const __m128i coeffsV[2] = {_mm_loadu_si128((const __m128i*)&coeffs[0]),
+                                _mm_loadu_si128((const __m128i*)&coeffs[8])};
     inverseDDS1DImpl_SSE(coeffsV, residuals);
-}
-
-void dequantInverseDDS1D_SSE(const Dequant* dequant, TemporalSignal temporalSignal,
-                             const int16_t* coeffs, int16_t* residuals)
-{
-    __m128i dqCoeffs[2];
-    dequantDDS_SSE(dequant, temporalSignal, coeffs, dqCoeffs);
-    inverseDDS1DImpl_SSE(dqCoeffs, residuals);
 }
 
 /*------------------------------------------------------------------------------*/
@@ -382,22 +280,14 @@ void inverseDDS2DImpl_SSE(const __m128i coeffs[2], int16_t* residuals)
     temp3 = _mm_add_epi32(_mm_sub_epi32(_mm_sub_epi32(row0, row1), row2), row3); /* DA DH DV DD */
 
     /* Output */
-    _mm_store_si128((__m128i*)&residuals[0], _mm_packs_epi32(temp0, temp1));
-    _mm_store_si128((__m128i*)&residuals[8], _mm_packs_epi32(temp2, temp3));
+    _mm_storeu_si128((__m128i*)&residuals[0], _mm_packs_epi32(temp0, temp1));
+    _mm_storeu_si128((__m128i*)&residuals[8], _mm_packs_epi32(temp2, temp3));
 }
 
 void inverseDDS2D_SSE(const int16_t* coeffs, int16_t* residuals)
 {
-    const __m128i coeffsV[2] = {_mm_load_si128((const __m128i*)&coeffs[0]),
-                                _mm_load_si128((const __m128i*)&coeffs[8])};
-    inverseDDS2DImpl_SSE(coeffsV, residuals);
-}
-
-void dequantInverseDDS2D_SSE(const Dequant* dequant, TemporalSignal temporalSignal,
-                             const int16_t* coeffs, int16_t* residuals)
-{
-    __m128i coeffsV[2];
-    dequantDDS_SSE(dequant, temporalSignal, coeffs, coeffsV);
+    const __m128i coeffsV[2] = {_mm_loadu_si128((const __m128i*)&coeffs[0]),
+                                _mm_loadu_si128((const __m128i*)&coeffs[8])};
     inverseDDS2DImpl_SSE(coeffsV, residuals);
 }
 
@@ -406,72 +296,6 @@ void dequantInverseDDS2D_SSE(const Dequant* dequant, TemporalSignal temporalSign
 #endif
 
 #if VN_SDK_FEATURE(NEON)
-
-/*------------------------------------------------------------------------------*/
-
-static int16x4_t vsign_s16(int16x4_t a, int16x4_t b)
-{
-    /* (b < 0) ? 0xFFFF : 0 */
-    const uint16x4_t ltMask = vreinterpret_u16_s16(vshr_n_s16(b, 15));
-
-    /* (b == 0) ? 0xFFFF : 0 */
-#if defined(__aarch64__)
-    const int16x4_t zeroMask = vreinterpret_s16_u16(vceqz_s16(b));
-#else
-    const int16x4_t zeroMask = vreinterpret_s16_u16(vceq_s16(b, vdup_n_s16(0)));
-#endif
-
-    /* bitwise select either a or negative 'a' based on ltMask */
-    const int16x4_t masked = vbsl_s16(ltMask, vneg_s16(a), a);
-
-    /* res = masked & (~zeroMask) */
-    return vbic_s16(masked, zeroMask);
-}
-
-static int16x8_t vsignq_s16(int16x8_t a, int16x8_t b)
-{
-    /* (b < 0) ? 0xFFFF : 0 */
-    const uint16x8_t ltMask = vreinterpretq_u16_s16(vshrq_n_s16(b, 15));
-
-    /* (b == 0) ? 0xFFFF : 0 */
-#if defined(__aarch64__)
-    const int16x8_t zeroMask = vreinterpretq_s16_u16(vceqzq_s16(b));
-#else
-    const int16x8_t zeroMask = vreinterpretq_s16_u16(vceqq_s16(b, vdupq_n_s16(0)));
-#endif
-
-    /* bitwise select either a or negative 'a' based on ltMask */
-    const int16x8_t masked = vbslq_s16(ltMask, vnegq_s16(a), a);
-
-    /* res = masked & (~zeroMask) */
-    return vbicq_s16(masked, zeroMask);
-}
-
-static inline int16x4_t dequantDD_NEON(const Dequant* dequant, TemporalSignal temporal, const int16_t* coeffs)
-{
-    const int16x4_t data = vld1_s16(coeffs);
-
-    /* value *= stepwidth */
-    const int16x4_t tmp = vmul_s16(data, vget_low_s16(dequant->stepWidthVector[temporal][0]));
-
-    /* value += sign * offset */
-    return vadd_s16(tmp, vsign_s16(vget_low_s16(dequant->offsetVector[temporal][0]), data));
-}
-
-static inline void dequantDDS_NEON(const Dequant* dequant, TemporalSignal temporal,
-                                   const int16_t* coeffs, int16x8_t dequantizedCoeffs[2])
-{
-    const int16x8_t coeffs0 = vld1q_s16(&coeffs[0]);
-    const int16x8_t coeffs1 = vld1q_s16(&coeffs[8]);
-
-    /* value *= stepWidth */
-    const int16x8_t tmp0 = vmulq_s16(coeffs0, dequant->stepWidthVector[temporal][0]);
-    const int16x8_t tmp1 = vmulq_s16(coeffs1, dequant->stepWidthVector[temporal][1]);
-
-    /* value += sign * offset */
-    dequantizedCoeffs[0] = vaddq_s16(tmp0, vsignq_s16(dequant->offsetVector[temporal][0], coeffs0));
-    dequantizedCoeffs[1] = vaddq_s16(tmp1, vsignq_s16(dequant->offsetVector[temporal][1], coeffs1));
-}
 
 /*------------------------------------------------------------------------------*/
 
@@ -497,12 +321,6 @@ static inline void inverseDD1DImpl_NEON(const int16x4_t coeffs, int16_t* residua
 void inverseDD1D_NEON(const int16_t* coeffs, int16_t* residuals)
 {
     inverseDD1DImpl_NEON(vld1_s16(coeffs), residuals);
-}
-
-void dequantInverseDD1D_NEON(const Dequant* dequant, TemporalSignal temporalSignal,
-                             const int16_t* coeffs, int16_t* residuals)
-{
-    inverseDD1DImpl_NEON(dequantDD_NEON(dequant, temporalSignal, coeffs), residuals);
 }
 
 /*------------------------------------------------------------------------------*/
@@ -532,12 +350,6 @@ static inline void inverseDD2DImpl_NEON(const int16x4_t coeffs, int16_t* residua
 void inverseDD2D_NEON(const int16_t* coeffs, int16_t* residuals)
 {
     inverseDD2DImpl_NEON(vld1_s16(coeffs), residuals);
-}
-
-void dequantInverseDD2D_NEON(const Dequant* dequant, TemporalSignal temporalSignal,
-                             const int16_t* coeffs, int16_t* residuals)
-{
-    inverseDD2DImpl_NEON(dequantDD_NEON(dequant, temporalSignal, coeffs), residuals);
 }
 
 /*------------------------------------------------------------------------------*/
@@ -603,14 +415,6 @@ void inverseDDS1D_NEON(const int16_t* coeffs, int16_t* residuals)
     inverseDDS1DImpl_NEON(coeffsV, residuals);
 }
 
-void dequantInverseDDS1D_NEON(const Dequant* dequant, TemporalSignal temporalSignal,
-                              const int16_t* coeffs, int16_t* residuals)
-{
-    int16x8_t dqCoeffs[2];
-    dequantDDS_NEON(dequant, temporalSignal, coeffs, dqCoeffs);
-    inverseDDS1DImpl_NEON(dqCoeffs, residuals);
-}
-
 /*------------------------------------------------------------------------------*/
 
 static inline void inverseDDS2DImpl_NEON(const int16x8_t coeffs[2], int16_t* residuals)
@@ -635,20 +439,14 @@ void inverseDDS2D_NEON(const int16_t* coeffs, int16_t* residuals)
     inverseDDS2DImpl_NEON(coeffsV, residuals);
 }
 
-void dequantInverseDDS2D_NEON(const Dequant* dequant, TemporalSignal temporalSignal,
-                              const int16_t* coeffs, int16_t* residuals)
-{
-    int16x8_t dqCoeffs[2];
-    dequantDDS_NEON(dequant, temporalSignal, coeffs, dqCoeffs);
-    inverseDDS2DImpl_NEON(dqCoeffs, residuals);
-}
-
 #endif
 
 /*------------------------------------------------------------------------------*/
 
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
 static const TransformFunction kTable[2][2] = {{&inverseDD2D, &inverseDD1D},
                                                {&inverseDDS2D, &inverseDDS1D}};
+#endif
 
 #if VN_SDK_FEATURE(SSE)
 
@@ -676,48 +474,11 @@ TransformFunction transformGetFunction(LdeTransformType transform, LdeScalingMod
         res = kTableSIMD[transform][scalingIndex];
     }
 
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
     if (!res) {
         res = kTable[transform][scalingIndex];
     }
-
-    return res;
-}
-
-/*------------------------------------------------------------------------------*/
-
-static const DequantTransformFunction kDequantTable[2][2] = {{&dequantInverseDD2D, &dequantInverseDD1D},
-                                                             {&dequantInverseDDS2D, &dequantInverseDDS1D}};
-
-#if VN_SDK_FEATURE(SSE)
-
-static const DequantTransformFunction kDequantTableSIMD[2][2] = {
-    {&dequantInverseDD2D_SSE, &dequantInverseDD1D_SSE},
-    {&dequantInverseDDS2D_SSE, &dequantInverseDDS1D_SSE}};
-
-#elif VN_SDK_FEATURE(NEON)
-
-static const DequantTransformFunction kDequantTableSIMD[2][2] = {
-    {&dequantInverseDD2D_NEON, &dequantInverseDD1D_NEON},
-    {&dequantInverseDDS2D_NEON, &dequantInverseDDS1D_NEON}};
-
-#else
-
-static const DequantTransformFunction kDequantTableSIMD[2][2] = {{NULL, NULL}, {NULL, NULL}};
-
 #endif
-
-DequantTransformFunction dequantTransformGetFunction(LdeTransformType transform, LdeScalingMode scaling)
-{
-    const int32_t scalingIndex = (scaling == Scale1D) ? 1 : 0;
-    DequantTransformFunction res = NULL;
-
-    if (ldcAccelerationGet()->hasSIMD) {
-        res = kDequantTableSIMD[transform][scalingIndex];
-    }
-
-    if (!res) {
-        res = kDequantTable[transform][scalingIndex];
-    }
 
     return res;
 }

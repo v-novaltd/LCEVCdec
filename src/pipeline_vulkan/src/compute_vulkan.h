@@ -161,7 +161,7 @@ private:
     bool createComputeCommandPool();
     void updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst, VkDescriptorSet descriptorSet);
     void updateComputeImageDescriptorSets(BufferVulkan* src, BufferVulkan* dst,
-                                          VkDescriptorSet descriptorSet);
+                                          BufferVulkan* temporal, VkDescriptorSet descriptorSet);
     void updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst1, BufferVulkan* dst2,
                                      VkDescriptorSet descriptorSet);
 
@@ -206,6 +206,14 @@ private:
     ComputePipeline m_pipelineConversionFromInternalRgba10Image{};
     ComputePipeline m_pipelineConversionFromInternalP010Image{};
     ComputePipeline m_pipelineConversionFromInternalNv12Image{};
+    ComputePipeline m_pipelineConversionFromInternal8BitAddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternal8BitNV12AddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternal16BitAddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternal16BitP010AddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalRgba8ImageAddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalRgba10ImageAddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalP010ImageAddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalNv12ImageAddTemporal{};
     ComputePipeline m_pipelineAdd{};
 
     DescriptorSetLayouts m_descriptorSetLayouts{};

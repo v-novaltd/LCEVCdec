@@ -16,8 +16,7 @@
 #define VN_LCEVC_COMMON_THREADS_H
 
 #include <LCEVC/common/platform.h>
-#include <stdbool.h>
-#include <stdint.h>
+#include <LCEVC/common/stdlib.h>
 
 #ifndef VN_SDK_FEATURE_PRIVATE_DEF_THREADING
 #define VN_SDK_FEATURE_PRIVATE_DEF_THREADING() 1

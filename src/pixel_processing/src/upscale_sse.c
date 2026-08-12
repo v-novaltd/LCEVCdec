@@ -39,19 +39,23 @@
 #define S16ToU16(value, kOffset, kRightShift, kMidpoint) \
     _mm_add_epi16(_mm_sra_epi16(_mm_add_epi16((value), (kOffset)), (kRightShift)), (kMidpoint))
 
-static inline void sseApplyPA(__m128i* row0, __m128i* row1, const __m128i base,
-                              const __m128i kPAOnes, const __m128i kPATwos)
+static inline void sseApplyPA(__m128i* row0, __m128i* row1, const __m128i base)
 {
-    const __m128i sum0 = _mm_madd_epi16(*row0, kPAOnes);
-    const __m128i sum1 = _mm_madd_epi16(*row1, kPAOnes);
-    const __m128i mean4_32 = _mm_srai_epi32(_mm_add_epi32(_mm_add_epi32(sum0, sum1), kPATwos), 2);
-    const __m128i mean4_16 = _mm_packs_epi32(mean4_32, _mm_setzero_si128());
+    const __m128i kOnes = _mm_set1_epi16(1);
+    const __m128i sum0 = _mm_madd_epi16(*row0, kOnes);
+    const __m128i sum1 = _mm_madd_epi16(*row1, kOnes);
+    const __m128i mean = _mm_srai_epi32(_mm_add_epi32(_mm_add_epi32(sum0, sum1), _mm_set1_epi32(2)), 2);
+    const __m128i adjust = _mm_sub_epi32(_mm_cvtepi16_epi32(base), mean);
+    const __m128i adjustLo = _mm_unpacklo_epi32(adjust, adjust);
+    const __m128i adjustHi = _mm_unpackhi_epi32(adjust, adjust);
 
-    const __m128i adjust4 = _mm_sub_epi16(base, mean4_16);
-    const __m128i adjust8 = _mm_unpacklo_epi16(adjust4, adjust4);
+    const __m128i row0Lo = _mm_add_epi32(_mm_cvtepi16_epi32(*row0), adjustLo);
+    const __m128i row0Hi = _mm_add_epi32(_mm_cvtepi16_epi32(_mm_srli_si128(*row0, 8)), adjustHi);
+    const __m128i row1Lo = _mm_add_epi32(_mm_cvtepi16_epi32(*row1), adjustLo);
+    const __m128i row1Hi = _mm_add_epi32(_mm_cvtepi16_epi32(_mm_srli_si128(*row1, 8)), adjustHi);
 
-    *row0 = _mm_adds_epi16(*row0, adjust8);
-    *row1 = _mm_adds_epi16(*row1, adjust8);
+    *row0 = _mm_packs_epi32(row0Lo, row0Hi);
+    *row1 = _mm_packs_epi32(row1Lo, row1Hi);
 }
 
 static inline __m128i sseApplyDither(__m128i values, const uint16_t** ditherBuffer,

@@ -56,6 +56,10 @@ bool ldppSharpen(const LdpPictureLayout* layout, LdpPicturePlaneDesc* plane, uin
     const LdpFixedPoint fixedPoint = layout->layoutInfo->fixedPoint;
     assert(strength >= 0.0f && strength <= 1.0f);
 
+    if (width < 3 || height < 3) {
+        return true;
+    }
+
     SharpenFunction function = sharpenGetFunction(fixedPoint);
 
     if (!function) {

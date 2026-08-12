@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -15,10 +15,7 @@
 #ifndef VN_LCEVC_COMMON_LIMIT_H
 #define VN_LCEVC_COMMON_LIMIT_H
 
-#include <assert.h>
-#include <math.h>
-#include <stddef.h>
-#include <stdint.h>
+#include <LCEVC/common/stdlib.h>
 
 /* This function is used help convert upsample kernel coeffs for 8bit pipeline. 64 is 2^6. */
 static inline int16_t fpS15ToS7(int16_t val) { return (int16_t)((val + 64) >> 7); }
@@ -134,7 +131,28 @@ static inline float clampF32(float value, float minValue, float maxValue)
     return ret;
 }
 
-static inline float floorF32(float value) { return floorf(value); }
+static inline float floorF32(float value)
+{
+#if VN_SDK_FEATURE(LDE_FLOATS)
+    return floorf(value);
+#else
+    if (value > (float)(INT64_MAX)) {
+        return INT64_MAX;
+    }
+    if (value < (float)(INT64_MIN)) {
+        return INT64_MIN;
+    }
+    // Truncate
+    int64_t out = (int64_t)value;
+
+    // If negative, truncate will chop of the decimal, whereas float should round down
+    if (value < 0.f) {
+        out--;
+    }
+
+    return (float)value;
+#endif
+}
 
 static inline int32_t minS16(int16_t x, int16_t y) { return x < y ? x : y; }
 

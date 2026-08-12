@@ -106,6 +106,10 @@ if (ANDROID_PLATFORM)
 endif ()
 
 # Setup LTO
+if (VN_SDK_LTO AND (TARGET_PLATFORM STREQUAL "Android" OR TARGET_PLATFORM STREQUAL "iOS"))
+    message(STATUS "VN_SDK_LTO requested but disabled on ${TARGET_PLATFORM}")
+    set(VN_SDK_LTO OFF)
+endif ()
 if (VN_SDK_LTO)
     if (TARGET_COMPILER STREQUAL "ClangGNU" OR TARGET_COMPILER STREQUAL "ClangApple")
         message(STATUS "IPO/LTO enabled (full)")

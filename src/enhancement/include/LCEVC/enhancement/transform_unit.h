@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -15,8 +15,7 @@
 #ifndef VN_LCEVC_ENHANCEMENT_TRANSFORM_UNIT_H
 #define VN_LCEVC_ENHANCEMENT_TRANSFORM_UNIT_H
 
-#include <stdbool.h>
-#include <stdint.h>
+#include <LCEVC/common/stdlib.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -158,16 +157,6 @@ bool ldeTuStateInitialize(TUState* state, uint32_t width, uint32_t height, uint3
  *         if the requested tuIndex is past the end of the plane bounded by state
  */
 TuStateReturn ldeTuCoordsSurfaceRaster(const TUState* state, uint32_t tuIndex, uint32_t* x, uint32_t* y);
-
-/*! \brief Given an x, y coordinate within a surface raster ordered plane, returns the TU index
- *
- * \param state    The state to use
- * \param x        The x coordinate
- * \param y        The y coordinate
- *
- * \return TU index of the coordinate
- */
-uint32_t ldeTuCoordsSurfaceIndex(const TUState* state, uint32_t x, uint32_t y);
 
 /*! \brief Given a transform index calculate the absolute destination surface coordinates
  *         using the surface raster access pattern where the dimensions of the surface are rounded

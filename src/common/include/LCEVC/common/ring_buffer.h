@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -17,10 +17,8 @@
 
 #include <LCEVC/common/memory.h>
 #include <LCEVC/common/platform.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/common/threads.h>
-//
-#include <stdbool.h>
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C"

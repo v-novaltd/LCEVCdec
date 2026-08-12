@@ -12,11 +12,10 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include <assert.h>
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/memory.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/cmdbuffer_cpu.h>
-#include <memory.h>
 
 /*! \brief Private constants used for the command buffer format and storage behavior. */
 enum CmdBufferCpuConfig
@@ -50,7 +49,7 @@ static bool cmdBufferStorageResize(LdeCmdBufferCpuStorage* store, uint32_t capac
     assert(store);
     VNUnused(diagId);
 
-    if (capacity == store->end - store->start) {
+    if (capacity == (uint32_t)(store->end - store->start)) {
         return true;
     }
 
@@ -220,50 +219,43 @@ bool ldeCmdBufferCpuAppend(LdeCmdBufferCpu* cmdBuffer, LdeCmdBufferCpuCmd comman
     assert(cmdBuffer->transformSize > 0);
     LdeCmdBufferCpuStorage* dataStore = &cmdBuffer->data;
 
+    uint8_t* cmd = dataStore->currentCommand;
     if (jump < CBCKBigJumpSignal) {
-        *dataStore->currentCommand = (uint8_t)command | (uint8_t)jump;
-        dataStore->currentCommand++;
+        cmd[0] = (uint8_t)command | (uint8_t)jump;
+        cmd += 1;
     } else if (jump < CBCKExtraBigJump) {
-        dataStore->currentCommand[0] = (uint8_t)command | (uint8_t)CBCKBigJumpSignal;
-        dataStore->currentCommand[1] = jump & 0xff;
-        dataStore->currentCommand[2] = (jump >> 8) & 0xff;
-        dataStore->currentCommand += 3;
+        cmd[0] = (uint8_t)command | (uint8_t)CBCKBigJumpSignal;
+        cmd[1] = jump & 0xff;
+        cmd[2] = (jump >> 8) & 0xff;
+        cmd += 3;
     } else {
         assert(jump < 0x1000000);
-        dataStore->currentCommand[0] = (uint8_t)command | (uint8_t)CBCKExtraBigJumpSignal;
-        dataStore->currentCommand[1] = jump & 0xff;
-        dataStore->currentCommand[2] = (jump >> 8) & 0xff;
-        dataStore->currentCommand[3] = (jump >> 16) & 0xff;
-        dataStore->currentCommand += 4;
+        cmd[0] = (uint8_t)command | (uint8_t)CBCKExtraBigJumpSignal;
+        cmd[1] = jump & 0xff;
+        cmd[2] = (jump >> 8) & 0xff;
+        cmd[3] = (jump >> 16) & 0xff;
+        cmd += 4;
     }
+    dataStore->currentCommand = cmd;
 
     const uint8_t layerSize =
         (cmdBuffer->transformSize == CBCKDDSLayers ? CBCKDDSLayerSize : CBCKDDLayerSize);
     if (command == CBCCAdd || command == CBCCSet) {
         dataStore->currentResidual -= layerSize;
         if (cmdBuffer->transformSize == CBCKDDSLayers) {
-            /* Note that we reorder the values when we copy here. This differs from the
-             * non-command-buffer implementation, where the reordering is done at the apply stage,
-             * rather than the residual-generation stage. */
-            int16_t* dstData = (int16_t*)dataStore->currentResidual;
-            dstData[0] = values[0];
-            dstData[1] = values[1];
-            dstData[2] = values[4];
-            dstData[3] = values[5];
-            dstData[4] = values[2];
-            dstData[5] = values[3];
-            dstData[6] = values[6];
-            dstData[7] = values[7];
-            dstData[8] = values[8];
-            dstData[9] = values[9];
-            dstData[10] = values[12];
-            dstData[11] = values[13];
-            dstData[12] = values[10];
-            dstData[13] = values[11];
-            dstData[14] = values[14];
-            dstData[15] = values[15];
+            /* Note that we reorder the values when we copy here. */
+            uint8_t* dst = dataStore->currentResidual;
+            const uint8_t* src = (const uint8_t*)values;
+            memcpy(dst + 0, src + 0, 4);
+            memcpy(dst + 4, src + 8, 4);
+            memcpy(dst + 8, src + 4, 4);
+            memcpy(dst + 12, src + 12, 4);
+            memcpy(dst + 16, src + 16, 4);
+            memcpy(dst + 20, src + 24, 4);
+            memcpy(dst + 24, src + 20, 4);
+            memcpy(dst + 28, src + 28, 4);
         } else {
-            memcpy((int16_t*)dataStore->currentResidual, values, layerSize);
+            memcpy(dataStore->currentResidual, values, layerSize);
         }
     }
 

@@ -15,10 +15,9 @@
 #ifndef VN_LCEVC_COMMON_DETAIL_DIAGNOSTICS_BUFFER_H
 #define VN_LCEVC_COMMON_DETAIL_DIAGNOSTICS_BUFFER_H
 
-#include <assert.h>
 #include <LCEVC/common/memory.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/common/threads.h>
-#include <string.h>
 
 // The guts of the diagnostics buffer implementation.
 //

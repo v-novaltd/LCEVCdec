@@ -24,6 +24,7 @@ list(
     "src/convert_neon.c"
     "src/convert_sse.c"
     "src/convert.c"
+    "src/convert_scalar.c"
     "src/dither.c"
     "src/fp_types.c"
     "src/upscale.c"
@@ -34,14 +35,8 @@ list(
     "src/sharpen_sse.c")
 
 if (NOT VN_SDK_MINIMUM_LIB_SIZE)
-    list(
-        APPEND
-        SOURCES
-        "src/add_scalar.c"
-        "src/apply_cmdbuffer_scalar.c"
-        "src/convert_scalar.c"
-        "src/upscale_scalar.c"
-        "src/sharpen_scalar.c")
+    list(APPEND SOURCES "src/add_scalar.c" "src/apply_cmdbuffer_scalar.c" "src/upscale_scalar.c"
+         "src/sharpen_scalar.c")
 endif ()
 
 list(

@@ -12,12 +12,11 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/memory.h>
-#include <LCEVC/common/platform.h>
 //
-#include <assert.h>
-#include <string.h>
+#include <LCEVC/common/diagnostics.h>
+#include <LCEVC/common/platform.h>
+#include <LCEVC/common/stdlib.h>
 
 void ldcMemoryInitialize(LdcMemoryAllocator* allocator, size_t alignment, LdcMemoryAllocation* allocation)
 {

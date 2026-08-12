@@ -16,6 +16,7 @@ list(
     APPEND
     SOURCES
     "src/diagnostics_ostream.cpp"
+    "src/test_allocators.cpp"
     "src/test_clock.cpp"
     "src/test_configure.cpp"
     "src/test_cpp_tools.cpp"
@@ -24,7 +25,7 @@ list(
     "src/test_diagnostics_c.c"
     "src/test_diagnostics_cpp.cpp"
     "src/test_free_pool.cpp"
-    "src/test_allocators.cpp"
+    "src/test_ln_fp_scaled.cpp"
     "src/test_ring_buffer.cpp"
     "src/test_simple_allocator.cpp"
     "src/test_string_format.cpp"

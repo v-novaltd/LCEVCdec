@@ -16,24 +16,31 @@ list(
     APPEND
     SOURCES
     "src/acceleration.c"
-    "src/common_configuration.cpp"
-    "src/configure.cpp"
     "src/deque.c"
     "src/diagnostics.c"
     "src/diagnostics_buffer.c"
     "src/diagnostics_stdio.c"
-    "src/diagnostics_tracefile.c"
+    "src/ln_fp_scaled.c"
     "src/memory.c"
     "src/memory_malloc.c"
     "src/random.c"
     "src/ring_buffer.c"
     "src/recycling_allocator.c"
     "src/rolling_arena.c"
-    "src/shared_library.c"
     "src/simple_allocator.c"
     "src/string_format.c"
     "src/task_pool.c"
     "src/vector.c")
+
+# configure.cpp and common_configuration.cpp are only referenced by decoder_context.cpp in src/api.
+# Omit them when the API isn't being built.
+if (VN_SDK_API_LAYER)
+    list(APPEND SOURCES "src/configure.cpp" "src/common_configuration.cpp")
+endif ()
+
+if (VN_SDK_TRACING)
+    list(APPEND SOURCES "src/diagnostics_tracefile.c")
+endif ()
 
 if (NOT VN_SDK_THREADS_CUSTOM)
     if (WIN32)
@@ -43,12 +50,17 @@ if (NOT VN_SDK_THREADS_CUSTOM)
     endif ()
 endif ()
 
+if (BUILD_SHARED_LIBS)
+    list(APPEND SOURCES "src/shared_library.c")
+endif ()
+
 list(APPEND HEADERS "src/string_format.h")
 
 list(
     APPEND
     INTERFACES
     "include/LCEVC/common/acceleration.h"
+    "include/LCEVC/common/atomic.h"
     "include/LCEVC/common/bitutils.h"
     "include/LCEVC/common/check.h"
     "include/LCEVC/common/class_utils.hpp"
@@ -62,6 +74,7 @@ list(
     "include/LCEVC/common/diagnostics_buffer.h"
     "include/LCEVC/common/linked_list.h"
     "include/LCEVC/common/limit.h"
+    "include/LCEVC/common/ln_fp_scaled.h"
     "include/LCEVC/common/log.h"
     "include/LCEVC/common/memory.h"
     "include/LCEVC/common/neon.h"
@@ -72,16 +85,21 @@ list(
     "include/LCEVC/common/return_code.h"
     "include/LCEVC/common/rolling_arena.h"
     "include/LCEVC/common/ring_buffer.h"
-    "include/LCEVC/common/shared_library.h"
     "include/LCEVC/common/simple_allocator.h"
     "include/LCEVC/common/sse.h"
+    "include/LCEVC/common/stdlib.h"
     "include/LCEVC/common/task_pool.h"
     "include/LCEVC/common/threads.h"
     "include/LCEVC/common/vector.h")
 
+if (BUILD_SHARED_LIBS)
+    list(APPEND INTERFACES "include/LCEVC/common/shared_library.h")
+endif ()
+
 list(
     APPEND
     INTERFACES_DETAIL
+    "include/LCEVC/common/detail/atomic_default.h"
     "include/LCEVC/common/detail/clock_unix.h"
     "include/LCEVC/common/detail/clock_win32.h"
     "include/LCEVC/common/detail/deque.h"
@@ -91,6 +109,7 @@ list(
     "include/LCEVC/common/detail/recycling_allocator.h"
     "include/LCEVC/common/detail/rolling_arena.h"
     "include/LCEVC/common/detail/simple_allocator.h"
+    "include/LCEVC/common/detail/stdlib_c.h"
     "include/LCEVC/common/detail/task_pool.h"
     "include/LCEVC/common/detail/threads_off.h"
     "include/LCEVC/common/detail/threads_pthread.h"

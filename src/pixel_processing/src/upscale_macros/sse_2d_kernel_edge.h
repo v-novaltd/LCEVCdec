@@ -177,7 +177,7 @@
     row1_16 = _mm_max_epi16(_mm_min_epi16(row1_16, kMax16), kMin16);
 
 #if APPLY_PA == 1
-    sseApplyPA(&row0_16, &row1_16, base, kPAOnes, kPATwos);
+    sseApplyPA(&row0_16, &row1_16, base);
 #endif
 
 #if DITHER == 1

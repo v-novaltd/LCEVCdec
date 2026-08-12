@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -93,17 +93,6 @@ bool bitstreamReadBit(BitStream* stream, uint8_t* out)
     stream->nextBit++;
 
     return true;
-}
-
-void bitstreamReadBitUnchecked(BitStream* stream, uint8_t* out)
-{
-    assert(out && !streamComplete(stream));
-    if (stream->nextBit == 32) {
-        loadWordUnchecked(stream);
-    }
-    *out = stream->word >> 31;
-    stream->word <<= 1;
-    stream->nextBit++;
 }
 
 bool bitstreamReadBits(BitStream* stream, uint8_t numBits, int32_t* out)

@@ -188,45 +188,53 @@ def format_include_guard(path, check_only=False):
 
     with open(path, 'r') as f:
         file_contents = f.read()
-    top_guards = re.search(r"#ifndef (.*)\n#define (.*)\n", file_contents)
-    existing_guards = list(top_guards.groups()) if top_guards else []
-    bottom_guard = re.search(r"#endif +// +([^\n ]*)\n", file_contents)
-    if bottom_guard and bottom_guard.groups()[0] is not None:
-        existing_guards.extend(list(bottom_guard.groups()))
+
+    # Note that top_guard doesn't require the ifndef'd string to match the define'd one, in case
+    # there's a typo. Beware: this is a bit too broad, and will overwrite code of the following form
+    # "#ifndef PATH_MAX #define PATH_MAX MAX_PATH", (if such code is the first "ifndef" in the file)
+    top_guard = re.search(r"#ifndef (.*)\n#define (.*)\n", file_contents)
+    existing_guards = list(top_guard.groups()) if top_guard else []
+
+    # We assume that the LAST "#endif" with a comment is the bottom guard
+    commented_endifs = list(re.finditer(r"#endif +// +([^\n ]*)\n", file_contents))
+    bottom_guard = (commented_endifs[-1].groups()[0] if commented_endifs else None)
+    if bottom_guard:
+        existing_guards.append(bottom_guard)
+
     if len(existing_guards) == 3 and all(guard == correct_guard for guard in existing_guards):
         return 0
     if check_only:
-        existing_guards_str = "'" + "', '".join(set(existing_guards)) + "'"
+        existing_guards_str = "'" + "', '".join(existing_guards) + "'"
         print_warn(f"Incorrect include guards in {path}, found {len(existing_guards)} guards of "
                    f"{existing_guards_str} - should be '{correct_guard}'")
         return 1
-    else:
-        def save_file(new_contents):
-            with open(path, 'w', newline='') as f:
-                f.write(new_contents)
-        if len(existing_guards) == 0:
-            if (top_pos := file_contents.find('#include')) != -1:
-                file_contents = file_contents[:top_pos] + f"#ifndef {correct_guard}\n#define {correct_guard}\n\n" + \
-                    file_contents[top_pos:] + f"\n#endif // {correct_guard}\n"
-                save_file(file_contents)
-                print_success(f'Added new include guards in {path}')
-                return 0
-            else:
-                print_warn(f"Please add include guards to {path} with name '{correct_guard}'")
-                return 1
-        if len(existing_guards) == 2 and (not bottom_guard or bottom_guard.groups()[0] is None):
-            file_contents = file_contents[:file_contents.rfind(
-                '#endif')] + f'#endif // {correct_guard}\n'
+
+    def save_file(new_contents):
+        with open(path, 'w', newline='') as f:
+            f.write(new_contents)
+    if len(existing_guards) == 0:
+        if (top_pos := file_contents.find('#include')) != -1:
+            file_contents = file_contents[:top_pos] + f"#ifndef {correct_guard}\n#define {correct_guard}\n\n" + \
+                file_contents[top_pos:] + f"\n#endif // {correct_guard}\n"
             save_file(file_contents)
-            print_success(f'Fixed bottom include guard comment in {path}')
-        if any(guard != correct_guard for guard in existing_guards):
-            for wrong_guard in set(existing_guards):
-                if not wrong_guard:
-                    continue
-                file_contents = re.sub(wrong_guard, correct_guard, file_contents)
-            save_file(file_contents)
-            print_success(f'Fixed incorrect include guards in {path}')
-        return 0
+            print_success(f'Added new include guards in {path}')
+            return 0
+        else:
+            print_warn(f"Please add include guards to {path} with name '{correct_guard}'")
+            return 1
+    if len(existing_guards) == 2 and (not bottom_guard or bottom_guard.groups()[0] is None):
+        file_contents = file_contents[:file_contents.rfind(
+            '#endif')] + f'#endif // {correct_guard}\n'
+        save_file(file_contents)
+        print_success(f'Fixed bottom include guard comment in {path}')
+    if any(guard != correct_guard for guard in existing_guards):
+        for wrong_guard in set(existing_guards):
+            if not wrong_guard:
+                continue
+            file_contents = re.sub(wrong_guard, correct_guard, file_contents)
+        save_file(file_contents)
+        print_success(f'Fixed incorrect include guards in {path}')
+    return 0
 
 
 def format_include_braces(path, check_only=False):
@@ -425,12 +433,12 @@ def parse_args():
 
 def main():
     args = parse_args()
-    print_normal("lint.py: check mode" if args.check_only else "lint.py: fix mode")
+    print_normal("check mode" if args.check_only else "fix mode")
     changed_files = get_changed_files(args.diff_main) if not args.all_files else False
     errors = 0
 
-    clang_format_exe = find_clang_format()
     for path in get_paths(CLANG_FORMAT_TYPES, changed_files):
+        clang_format_exe = find_clang_format()
         format_include_braces(path, args.check_only)
         cmd = [clang_format_exe, path]
         if args.check_only:
@@ -445,8 +453,8 @@ def main():
         if path.endswith('.h'):
             errors += format_include_guard(path, args.check_only)
 
-    cmake_format_exe = find_formatter('cmake-format', '0.6.')
     for path in get_paths(CMAKE_TYPES, changed_files):
+        cmake_format_exe = find_formatter('cmake-format', '0.6.')
         cmd = [cmake_format_exe, path]
         if args.check_only:
             cmd.insert(1, '--check')
@@ -457,10 +465,10 @@ def main():
             print_fail('cmake-format', f'on {path}')
             errors += 1
 
-    flake_exe = find_formatter('flake8', '7.1.0')
-    autopep_exe = find_formatter('autopep8', '2.3')
     python_files = get_paths(PYTHON_TYPES, changed_files)
     if python_files:
+        flake_exe = find_formatter('flake8', '7.1.0')
+        autopep_exe = find_formatter('autopep8', '2.3')
         process = run_cmd([flake_exe, '--exclude', '.venv'] + python_files)
         if process.returncode != 0:
             print_fail('flake8', f":\n{process.stdout.decode('utf-8')}")
@@ -485,9 +493,10 @@ def main():
             print_normal(f"google-java-format failed: {process.stdout.decode('utf-8')}")
             errors += 1
 
-    for path in get_paths(COPYRIGHT_TYPES, changed_files):
-        if not copyright_file(path, args.check_only):
-            errors += 1
+    if not args.all_files:
+        for path in get_paths(COPYRIGHT_TYPES, changed_files):
+            if not copyright_file(path, args.check_only):
+                errors += 1
     if not lint_readme():
         errors += 1
 
@@ -496,7 +505,7 @@ def main():
             errors += 1
 
     for path in get_paths(WORKFLOW_TYPES, changed_files, global_dirs=['.github/workflows/**'], excluded_dirs=None):
-        cmd = ['zizmor', path]
+        cmd = ['uvx', 'zizmor', path]
         process = run_cmd(cmd)
         if process.returncode != 0:
             print_fail('zizmor', f"on {process.stdout.decode('utf-8')}")

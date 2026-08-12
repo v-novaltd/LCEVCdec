@@ -45,7 +45,10 @@
     const bool ditherEnabled = (dither != NULL);
     const bool paEnabled = (params.applyPA != 0);
 
-    int16_t kernel[4] = {params.kernel[0], params.kernel[1], params.kernel[2], params.kernel[3]};
+    const int32_t kernel[4] = {upscaleKernelGetPreparedCoefficient(&params, 0),
+                               upscaleKernelGetPreparedCoefficient(&params, 1),
+                               upscaleKernelGetPreparedCoefficient(&params, 2),
+                               upscaleKernelGetPreparedCoefficient(&params, 3)};
 
     const int32_t srcWidthI = (int32_t)srcWidth;
     const int32_t rightEdgeSrcX = (srcWidthI >= 8) ? (srcWidthI - 8) : 0;

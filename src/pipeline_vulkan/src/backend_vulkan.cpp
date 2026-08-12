@@ -15,7 +15,10 @@
 #include "compute_vulkan.h"
 
 #include <LCEVC/build_config.h>
+#include <LCEVC/common/log.h>
 #include <vulkan/vulkan_core.h>
+
+#include <string>
 
 #define VMA_IMPLEMENTATION
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
@@ -45,6 +48,8 @@
 #include <set>
 
 namespace lcevc_dec::pipeline_vulkan {
+
+const std::vector<const char*> BackendVulkan::validationLayers = {"VK_LAYER_KHRONOS_validation"};
 
 BackendVulkan::BackendVulkan(bool renderingEnabled, int32_t deviceOverride,
                              bool enableValidationLayers, int32_t timestampsLimit, int32_t contextCount)
@@ -144,17 +149,32 @@ bool BackendVulkan::setupDebugMessenger()
     return true;
 }
 
-std::vector<const char*> BackendVulkan::getRequiredInstanceExtensions()
+std::vector<const char*> BackendVulkan::getRequiredInstanceExtensions() const
 {
     std::vector<const char*> extensions;
     if (m_renderingEnabled) {
-        extensions = m_render.getRenderingExtensions();
+        extensions = m_render.getRenderingInstanceExtensions();
     }
-    extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
-    extensions.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
+    extensions.push_back("VK_KHR_get_physical_device_properties2");
+    extensions.push_back("VK_KHR_external_memory_capabilities");
     if (m_enableValidationLayers) {
-        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        extensions.push_back("VK_EXT_debug_utils");
     }
+    return extensions;
+}
+
+std::vector<const char*> BackendVulkan::getRequiredDeviceExtensions() const
+{
+    std::vector<const char*> extensions;
+
+    if (m_renderingEnabled) {
+        extensions = m_render.getRenderingDeviceExtensions();
+    }
+
+#if VN_OS(ANDROID)
+    extensions.push_back("VK_ANDROID_external_memory_android_hardware_buffer");
+#endif
+
     return extensions;
 }
 
@@ -225,20 +245,49 @@ bool BackendVulkan::createInstance()
 
 bool BackendVulkan::checkDeviceExtensionSupport(VkPhysicalDevice device) const
 {
-    uint32_t extensionCount;
+    uint32_t extensionCount = 0;
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
 
     std::vector<VkExtensionProperties> availableExtensions(extensionCount);
     vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
 
-    std::set<std::string, std::less<>> requiredExtensions(deviceExtensions.begin(),
-                                                          deviceExtensions.end());
+    const auto rde = getRequiredDeviceExtensions();
+    std::set<std::string, std::less<>> requiredDeviceExtensions(rde.begin(), rde.end());
 
-    for (const auto& extension : availableExtensions) {
-        requiredExtensions.erase(extension.extensionName);
+    VNLogInfo("Required %d device extensions:", requiredDeviceExtensions.size());
+    for (const auto& e : requiredDeviceExtensions) {
+        VNLogInfoF(" - %s", e.c_str());
     }
 
-    return requiredExtensions.empty();
+    for (const auto& e : availableExtensions) {
+        requiredDeviceExtensions.erase(e.extensionName);
+    }
+
+    if (!requiredDeviceExtensions.empty()) {
+        VNLogError("Missing %d device extensions:", requiredDeviceExtensions.size());
+        for (const auto& e : requiredDeviceExtensions) {
+            VNLogErrorF("  - %s", e.c_str());
+        }
+    }
+
+    return requiredDeviceExtensions.empty();
+}
+
+bool BackendVulkan::checkDeviceExtension(VkPhysicalDevice device, const char* ext) const
+{
+    uint32_t extensionCount = 0;
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+    std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+    vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+    for (const auto& e : availableExtensions) {
+        if (!strcmp(ext, e.extensionName)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 QueueFamilyIndices BackendVulkan::findQueueFamilies(VkPhysicalDevice device, bool renderingRequired,
@@ -337,7 +386,9 @@ VkPhysicalDevice BackendVulkan::pickBestDevice(const std::vector<VkPhysicalDevic
         return VK_NULL_HANDLE;
     }
 
-    std::vector<std::pair<VkPhysicalDevice, uint32_t>> scoredList;
+    VkPhysicalDevice bestDevice = VK_NULL_HANDLE;
+    uint32_t bestScore = 0;
+    bool haveBest = false;
     for (const auto& device : devices) {
         uint32_t score = 0; // TODO - needs to be tuned
 
@@ -378,21 +429,22 @@ VkPhysicalDevice BackendVulkan::pickBestDevice(const std::vector<VkPhysicalDevic
         VNLogDebug("maxMemoryAllocationCount: %u",
                    deviceProperties2.properties.limits.maxMemoryAllocationCount);
 
-        scoredList.emplace_back(device, score);
+        if (!haveBest || score > bestScore) {
+            bestScore = score;
+            bestDevice = device;
+            haveBest = true;
+        }
     }
 
     // Allow the device choice to be over-ridden from configuration
     if (m_deviceOverride >= 0) {
-        if ((size_t)m_deviceOverride >= scoredList.size()) {
+        if ((size_t)m_deviceOverride >= devices.size()) {
             return VK_NULL_HANDLE;
         }
-        return scoredList[m_deviceOverride].first;
+        return devices[m_deviceOverride];
     }
 
-    std::sort(scoredList.begin(), scoredList.end(),
-              [](const auto& a, const auto& b) { return a.second > b.second; });
-
-    return scoredList.front().first;
+    return bestDevice;
 }
 
 bool BackendVulkan::pickPhysicalDevice()
@@ -457,6 +509,12 @@ bool BackendVulkan::createLogicalDeviceAndQueues()
     deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
     deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
+
+    // Device entensions - add VK_EXT_queue_family_foreign if available
+    auto deviceExtensions = getRequiredDeviceExtensions();
+    if (checkDeviceExtension(m_physicalDevice, "VK_EXT_queue_family_foreign")) {
+        deviceExtensions.push_back("VK_EXT_queue_family_foreign");
+    }
     deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
     deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
@@ -577,10 +635,6 @@ bool BackendVulkan::initRemaningRender()
 
 bool BackendVulkan::initVulkan()
 {
-    if (m_renderingEnabled) {
-        deviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    }
-
     if (m_renderingEnabled && !m_render.initWindow(false)) {
         return false;
     }

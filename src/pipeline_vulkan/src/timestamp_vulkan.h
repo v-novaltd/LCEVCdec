@@ -18,7 +18,6 @@
 #include <vulkan/vulkan.h>
 //
 #include <cstddef>
-#include <string>
 #include <vector>
 
 namespace lcevc_dec::pipeline_vulkan {

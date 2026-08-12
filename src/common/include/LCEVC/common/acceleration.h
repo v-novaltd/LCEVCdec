@@ -15,7 +15,7 @@
 #ifndef VN_LCEVC_COMMON_ACCELERATION_H
 #define VN_LCEVC_COMMON_ACCELERATION_H
 
-#include <stdbool.h>
+#include <LCEVC/common/stdlib.h>
 
 #ifdef __cplusplus
 extern "C"

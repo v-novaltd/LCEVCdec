@@ -146,10 +146,13 @@
 #if APPLY_PA == 1
     const __m128i sum = _mm_madd_epi16(row16, kPAOnes);
     const __m128i mean32 = _mm_srai_epi32(_mm_add_epi32(sum, kPARound), 1);
-    const __m128i mean16 = _mm_packs_epi32(mean32, _mm_setzero_si128());
-    const __m128i avg4 = _mm_sub_epi16(base, mean16);
+    const __m128i adjust32 = _mm_sub_epi32(_mm_cvtepi16_epi32(base), mean32);
+    const __m128i adjustLo = _mm_unpacklo_epi32(adjust32, adjust32);
+    const __m128i adjustHi = _mm_unpackhi_epi32(adjust32, adjust32);
+    const __m128i rowLo = _mm_add_epi32(_mm_cvtepi16_epi32(row16), adjustLo);
+    const __m128i rowHi = _mm_add_epi32(_mm_cvtepi16_epi32(_mm_srli_si128(row16, 8)), adjustHi);
 
-    row16 = _mm_adds_epi16(row16, _mm_unpacklo_epi16(avg4, avg4));
+    row16 = _mm_packs_epi32(rowLo, rowHi);
 #endif
 
     // === Apply dithering ===

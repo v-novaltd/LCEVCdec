@@ -17,7 +17,6 @@
 
 #include <LCEVC/common/configure.hpp>
 #include <LCEVC/common/memory.h>
-#include <LCEVC/common/shared_library.h>
 #include <LCEVC/pipeline/event_sink.h>
 #include <LCEVC/pipeline/picture.h>
 #include <LCEVC/pipeline/types.h>

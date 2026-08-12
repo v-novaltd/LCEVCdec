@@ -55,7 +55,7 @@ TEST_F(ApproximatePA, Cubic)
     EXPECT_TRUE(ldeApproximatePA(&globalConfig));
     EXPECT_TRUE(globalConfig.kernel.approximatedPA);
     EXPECT_EQ(globalConfig.kernel.length, 4);
-    EXPECT_THAT(globalConfig.kernel.coeffs, ::testing::ElementsAreArray({-2662, 16384, 2662, 0}));
+    EXPECT_THAT(globalConfig.kernel.coeffs, ::testing::ElementsAreArray({2662, 16384, 2662, 0}));
 }
 
 TEST_F(ApproximatePA, ModifiedCubic)
@@ -63,7 +63,7 @@ TEST_F(ApproximatePA, ModifiedCubic)
     EXPECT_TRUE(ldeApproximatePA(&globalConfig));
     EXPECT_TRUE(globalConfig.kernel.approximatedPA);
     EXPECT_EQ(globalConfig.kernel.length, 4);
-    EXPECT_THAT(globalConfig.kernel.coeffs, ::testing::ElementsAreArray({-3262, 16384, 3262, 0}));
+    EXPECT_THAT(globalConfig.kernel.coeffs, ::testing::ElementsAreArray({3262, 16384, 3262, 0}));
 }
 
 TEST_F(ApproximatePA, Linear)
@@ -71,12 +71,12 @@ TEST_F(ApproximatePA, Linear)
     EXPECT_TRUE(ldeApproximatePA(&globalConfig));
     EXPECT_TRUE(globalConfig.kernel.approximatedPA);
     EXPECT_EQ(globalConfig.kernel.length, 4);
-    EXPECT_THAT(globalConfig.kernel.coeffs, ::testing::ElementsAreArray({-2048, 16384, 2048, 0}));
+    EXPECT_THAT(globalConfig.kernel.coeffs, ::testing::ElementsAreArray({2048, 16384, 2048, 0}));
 
     // Re-approximate and the kernel should remain as-is
     EXPECT_TRUE(ldeApproximatePA(&globalConfig));
     EXPECT_TRUE(globalConfig.kernel.approximatedPA);
-    EXPECT_THAT(globalConfig.kernel.coeffs, ::testing::ElementsAreArray({-2048, 16384, 2048, 0}));
+    EXPECT_THAT(globalConfig.kernel.coeffs, ::testing::ElementsAreArray({2048, 16384, 2048, 0}));
 }
 
 TEST_F(ApproximatePA, Nearest)
@@ -85,4 +85,20 @@ TEST_F(ApproximatePA, Nearest)
     EXPECT_FALSE(globalConfig.kernel.approximatedPA);
     EXPECT_EQ(globalConfig.kernel.length, 2);
     EXPECT_THAT(globalConfig.kernel.coeffs, ::testing::ElementsAreArray({0, 16384, 0, 0}));
+}
+
+TEST(ApproximatePAWide, PreservesUnsignedMagnitudes)
+{
+    LdeGlobalConfig globalConfig = {};
+    ldeGlobalConfigInitialize(BitstreamVersionUnspecified, &globalConfig);
+    globalConfig.upscale = USAdaptiveCubic;
+    globalConfig.kernel = {{49151, 65535, 65535, 65535}, 4, false};
+    globalConfig.initialized = true;
+    globalConfig.predictedAverageEnabled = true;
+
+    EXPECT_EQ(ldeKernelGetCoefficient(&globalConfig.kernel, 0), -49151);
+    EXPECT_EQ(ldeKernelGetCoefficient(&globalConfig.kernel, 1), 65535);
+    EXPECT_TRUE(ldeApproximatePA(&globalConfig));
+    EXPECT_THAT(globalConfig.kernel.coeffs, ::testing::ElementsAreArray({57343, 16384, 57343, 0}));
+    EXPECT_EQ(ldeKernelGetCoefficient(&globalConfig.kernel, 0), -57343);
 }

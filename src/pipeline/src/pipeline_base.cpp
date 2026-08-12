@@ -122,6 +122,15 @@ LdcReturnCode PipelineBase::sendDecoderEnhancementData(uint64_t timestamp, const
         return LdcReturnCodeInvalidParam;
     }
 
+    // Drop enhancement with a pts less than or equal to current 'processing' limit.
+    if (m_processingLimit != kInvalidTimestamp &&
+        pipeline::compareTimestamps(timestamp, m_processingLimit) <= 0) {
+        VNLogWarning("sendDecoderEnhancementData: dropping ts:%" PRIx64
+                     " <= processing limit ts:%" PRIx64,
+                     timestamp, m_processingLimit.load());
+        return LdcReturnCodeError;
+    }
+
     if (frameLatency() >= configuration().maxLatency) {
         VNLogDebug("sendDecoderEnhancementData: ts:%" PRIx64 " AGAIN", timestamp);
         return LdcReturnCodeAgain;
@@ -163,6 +172,14 @@ LdcReturnCode PipelineBase::sendDecoderBase(uint64_t timestamp, LdpPicture* base
                                             uint32_t timeoutUs, void* userData)
 {
     VNLogDebug("sendDecoderBase: ts:%" PRIx64 " %p", timestamp, (void*)basePicture);
+
+    // Drop a base that has a pts less than current 'processing' limit
+    if (m_processingLimit != kInvalidTimestamp &&
+        pipeline::compareTimestamps(timestamp, m_processingLimit) < 0) {
+        VNLogWarning("sendDecoderBase: dropping ts:%" PRIx64 " < processing limit ts:%" PRIx64,
+                     timestamp, m_processingLimit.load());
+        return LdcReturnCodeError;
+    }
 
     // Find the frame associated with PTS
     FrameBase* frame{findFrame(timestamp, true)};
@@ -539,8 +556,12 @@ LdcReturnCode PipelineBase::synchronizeDecoder(uint64_t timestamp, bool flushPen
         }
     } else {
         // For frames that are not blocked on input - wait in timestamp order
-        while (m_processingIndex.size() > 0 && m_processingIndex[0]->canComplete()) {
-            m_processingIndex[0]->waitForTasks();
+        while (m_processingIndex.size() > 0) {
+            FrameBase* const frame = m_processingIndex[0];
+            if (!frame->canComplete()) {
+                break;
+            }
+            frame->waitForTasks();
         }
     }
 
@@ -706,8 +727,13 @@ FrameBase* PipelineBase::getNextReordered()
     }
 
     // If exceeded reorder limit, or flushing
-    if (m_reorderIndex.size() >= m_maxReorder || isProcessing(m_reorderIndex[0])) {
-        FrameBase* const frame{m_reorderIndex[0]};
+    FrameBase** const firstFrame = m_reorderIndex.at(0);
+    if (!firstFrame || !*firstFrame) {
+        return nullptr;
+    }
+
+    if (m_reorderIndex.size() >= m_maxReorder || isProcessing(*firstFrame)) {
+        FrameBase* const frame{*firstFrame};
         m_reorderIndex.removeIndex(0);
         // Tell API there is enhancement space
         m_eventSink->generate(pipeline::EventCanSendEnhancement);
@@ -821,8 +847,9 @@ void PipelineBase::connectOutputPictures()
             common::ScopedLock lock(m_interTaskMutex);
 
             for (uint32_t idx = 0; idx < m_processingIndex.size(); ++idx) {
-                if (!m_processingIndex[idx]->outputPicture && m_processingIndex[idx]->baseDataValid()) {
-                    frame = m_processingIndex[idx];
+                FrameBase** const framePtr = m_processingIndex.at(idx);
+                if (framePtr && *framePtr && !(*framePtr)->outputPicture && (*framePtr)->baseDataValid()) {
+                    frame = *framePtr;
                     break;
                 }
             }
@@ -839,7 +866,9 @@ void PipelineBase::connectOutputPictures()
         //  Get the picture
         LdpPicture* ldpPicture{};
         m_outputPictureAvailableBuffer.pop(ldpPicture);
-        assert(ldpPicture);
+        if (!ldpPicture) {
+            return;
+        }
         auto* bp = static_cast<PictureBase*>(ldpPicture);
 
         // Set output picture layout and bind buffer
@@ -874,8 +903,11 @@ void PipelineBase::releaseFlushedFrames()
         FrameBase* frame{nullptr};
         {
             common::ScopedLock lock(m_interTaskMutex);
-            frame = m_flushIndex[0];
-            assert(frame);
+            FrameBase** const framePtr = m_flushIndex.at(0);
+            if (!framePtr || !*framePtr) {
+                return;
+            }
+            frame = *framePtr;
             m_flushIndex.removeIndex(0);
         }
         VNLogDebug("Released flushed frame: ts:%" PRIx64, frame->timestamp);
@@ -948,7 +980,11 @@ void PipelineBase::transferTemporalBuffer(FrameBase* frame, uint32_t plane)
 
         // Do any of the pending frames want this buffer?
         for (uint32_t idx = 0; idx < m_processingIndex.size(); ++idx) {
-            FrameBase* nextFrame{m_processingIndex[idx]};
+            FrameBase** const nextFramePtr = m_processingIndex.at(idx);
+            if (!nextFramePtr || !*nextFramePtr) {
+                continue;
+            }
+            FrameBase* nextFrame{*nextFramePtr};
             if (nextFrame->tryAttachTemporalBuffer(plane, tb)) {
                 foundNextFrame = nextFrame;
                 break;

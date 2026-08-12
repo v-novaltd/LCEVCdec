@@ -50,6 +50,9 @@ namespace {
         }
 
         auto* srcPicture = fromPipeline(context->getFrame()->basePicture);
+        if (!srcPicture) {
+            return nullptr;
+        }
         // external base check
         LdpPictureBufferDesc exDesc{};
         const bool hasBufferDesc = srcPicture->getBufferDesc(exDesc);
@@ -160,6 +163,10 @@ namespace {
         args.bitDepth = bitDepth;
         args.chroma = pipeline->getChroma();
         args.sharpenStrength = gc ? context->getFrame()->sharpeningStrength(0) : 0.0f;
+        args.temporal = pipeline->m_temporalPicture;
+        args.numEnhancedPlanes = context->getFrame()->numEnhancedPlanes();
+        args.addTemporal = gc && gc->temporalEnabled && !context->getFrame()->isPassthrough() &&
+                           pipeline->m_temporalPicture && pipeline->m_temporalPicture->buffer != nullptr;
         args.context = context;
 
         if (!pipeline->backend().convertOut(&args)) {
@@ -297,39 +304,6 @@ namespace {
 
         if (!pipeline->backend().applyTile(&args)) {
             VNLogError("Vulkan apply temporal failed");
-        }
-
-        return nullptr;
-    }
-
-    //// ApplyAddTemporal
-    //
-    // Add a temporal buffer to a picture plane.
-    //
-    void* vApplyAddTemporal(PipelineVulkan* pipeline, VulkanFrameContext* context, uint8_t intermediatePtr)
-    {
-        if (pipeline->isFlushed(context->getFrame()) || context->getFrame()->isPassthrough()) {
-            // Just move temporal buffer along pipeline
-            pipeline->transferTemporalBuffer(context->getFrame(), 0); // TODO - check this
-            return nullptr;
-        }
-
-        VNLogDebug("taskApplyAddTemporal timestamp:%" PRIx64 "", context->getFrame()->timestamp);
-
-        if (pipeline->m_temporalPicture->buffer == nullptr) {
-            VNLogDebug("  No temporal");
-            return nullptr;
-        }
-
-        VulkanAddArgs args{};
-        args.src = pipeline->m_temporalPicture;
-        args.dst = context->getFrame()->getIntermediatePicture(intermediatePtr);
-        args.numEnhancedPlanes = context->getFrame()->numEnhancedPlanes();
-        args.chroma = pipeline->getChroma();
-        args.context = context;
-
-        if (!pipeline->backend().add(&args)) {
-            VNLogError("Vulkan add failed");
         }
 
         return nullptr;
@@ -480,9 +454,6 @@ namespace {
             if (gpuCommandBufferSize[LOQ0] > 0) {
                 frameContext->insertComputeBarrier();
             }
-
-            // NB: Accumulated temporal buffer is added even if temporal was not enabled in this frame.
-            vApplyAddTemporal(pipeline, frameContext, intermediatePtr);
 
             // Signal that this frame's temporal writes are complete
             frameContext->setEvent();

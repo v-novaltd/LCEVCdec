@@ -20,6 +20,8 @@
 #include <LCEVC/pixel_processing/upscale.h>
 extern "C"
 {
+#include "upscale_common.h"
+
 #include <log_utilities.h> // Pulled from enhancement/src
 }
 
@@ -107,7 +109,7 @@ const LdeKernel getUpscaleKernel(LdeUpscaleType type)
     } else if (type == USLinear) {
         return {{0, 12288, 4096, 0}, 2, false};
     } else if (type == USCubic) {
-        return {{-1382, 14285, 3942, -461}, 4, false};
+        return {{1382, 14285, 3942, 461}, 4, false};
     }
     assert(false); // Add additional kernels here, they usually come from the globalConfig
     return {{0}, 0, false};
@@ -192,6 +194,138 @@ TEST_P(UpscaleTest, HashPlane)
     );
 
     EXPECT_EQ(params.hash, hashActiveRegion(m_dst));
+}
+
+TEST(UpscaleTest, WideKernelUsesScalarWith64BitAccumulators)
+{
+    constexpr uint32_t width = 8;
+    constexpr uint32_t height = 5;
+    constexpr uint16_t wideKernel[4] = {49151, 65535, 65535, 65535};
+    std::vector<int16_t> src(width * height);
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            src[(y * width) + x] = static_cast<int16_t>(((x * 7919) + (y * 12347)) - 16384);
+        }
+    }
+
+    LdppUpscaleParams params = {};
+    std::copy(std::begin(wideKernel), std::end(wideKernel), params.kernel);
+    params.kernelIsWide = true;
+
+    ldcAccelerationInitialize(true);
+    const int32_t kernel[4] = {-49151, 65535, 65535, -65535};
+    const auto shiftAndSaturate = [](int64_t value) {
+        return static_cast<int16_t>(std::clamp<int64_t>((value + 0x2000) >> 14, -0x4000, 0x3fff));
+    };
+    const auto convolve = [&kernel, &shiftAndSaturate](const auto& sample, int32_t pos, bool second) {
+        int64_t value = 0;
+        if (!second) {
+            value = ((int64_t)sample(pos - 2) * kernel[3]) + ((int64_t)sample(pos - 1) * kernel[2]) +
+                    ((int64_t)sample(pos) * kernel[1]) + ((int64_t)sample(pos + 1) * kernel[0]);
+        } else {
+            value = ((int64_t)sample(pos - 1) * kernel[0]) + ((int64_t)sample(pos) * kernel[1]) +
+                    ((int64_t)sample(pos + 1) * kernel[2]) + ((int64_t)sample(pos + 2) * kernel[3]);
+        }
+        return shiftAndSaturate(value);
+    };
+
+    for (const bool is2D : {false, true}) {
+        const UpscaleFunction scalar =
+            upscaleGetFunctionScalar(LdpFPS8, LdpFPS8, ILNone, is2D, false, false);
+        const UpscaleFunction selected =
+            getUpscaleFunction(LdpFPS8, LdpFPS8, ILNone, is2D, false, false, wideKernel);
+        ASSERT_NE(scalar, nullptr);
+        ASSERT_EQ(selected, scalar);
+
+        const uint32_t dstHeight = is2D ? height * 2 : height;
+        std::vector<int16_t> dst(width * 2 * dstHeight);
+        selected(reinterpret_cast<uint8_t*>(src.data()), reinterpret_cast<uint8_t*>(dst.data()),
+                 width * sizeof(int16_t), (width * 2) * sizeof(int16_t), width, height, 0, height,
+                 params, nullptr);
+
+        std::vector<int16_t> vertical(width * dstHeight);
+        if (is2D) {
+            for (int32_t y = 0; y < static_cast<int32_t>(height); ++y) {
+                for (int32_t x = 0; x < static_cast<int32_t>(width); ++x) {
+                    const auto sample = [&src, x](int32_t sampleY) {
+                        const int32_t y = std::clamp(sampleY, 0, static_cast<int32_t>(height) - 1);
+                        return src[(y * width) + x];
+                    };
+                    vertical[((y * 2) * width) + x] = convolve(sample, y, false);
+                    vertical[(((y * 2) + 1) * width) + x] = convolve(sample, y, true);
+                }
+            }
+        } else {
+            vertical = src;
+        }
+
+        std::vector<int16_t> expected(width * 2 * dstHeight);
+        for (int32_t y = 0; y < static_cast<int32_t>(dstHeight); ++y) {
+            for (int32_t x = 0; x < static_cast<int32_t>(width); ++x) {
+                const auto sample = [&vertical, y](int32_t sampleX) {
+                    const int32_t x = std::clamp(sampleX, 0, static_cast<int32_t>(width) - 1);
+                    return vertical[(y * width) + x];
+                };
+                expected[(y * width * 2) + (x * 2)] = convolve(sample, x, false);
+                expected[(y * width * 2) + (x * 2) + 1] = convolve(sample, x, true);
+            }
+        }
+        EXPECT_EQ(dst, expected) << "is2D: " << is2D;
+    }
+}
+
+TEST(UpscaleTest, SIMDConvolutionSaturatesBeforeNarrowing)
+{
+    constexpr uint32_t width = 16;
+    constexpr uint32_t height = 8;
+    constexpr int16_t cubicKernel[4] = {-1382, 14285, 3942, -461};
+
+    std::vector<int16_t> src(width * height);
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            const uint32_t patternIndex = x & 3;
+            const bool positive = patternIndex == 1 || patternIndex == 2;
+            src[(y * width) + x] = positive ? std::numeric_limits<int16_t>::max()
+                                            : std::numeric_limits<int16_t>::min();
+        }
+    }
+
+    LdppUpscaleParams params = {};
+    std::copy(std::begin(cubicKernel), std::end(cubicKernel), params.kernel);
+
+    for (const LdeScalingMode mode : {Scale1D, Scale2D}) {
+        const bool is2D = mode == Scale2D;
+        const uint32_t dstWidth = width * 2;
+        const uint32_t dstHeight = is2D ? height * 2 : height;
+        std::vector<int16_t> scalarDst(dstWidth * dstHeight);
+        std::vector<int16_t> simdDst(dstWidth * dstHeight);
+
+        ldcAccelerationInitialize(true);
+        const UpscaleFunction scalarFunction =
+            upscaleGetFunctionScalar(LdpFPS8, LdpFPS8, ILNone, is2D, false, false);
+        UpscaleFunction simdFunction = nullptr;
+        if (ldcAccelerationGet()->hasNeon) {
+            simdFunction = upscaleGetFunctionNEON(LdpFPS8, LdpFPS8, ILNone, is2D, false, false);
+        } else if (ldcAccelerationGet()->hasSSE) {
+            simdFunction = upscaleGetFunctionSSE(LdpFPS8, LdpFPS8, ILNone, is2D, false, false);
+        }
+
+        ASSERT_NE(scalarFunction, nullptr);
+        if (!simdFunction) {
+            GTEST_SKIP() << "No SIMD upscaler available";
+        }
+
+        scalarFunction(reinterpret_cast<uint8_t*>(src.data()),
+                       reinterpret_cast<uint8_t*>(scalarDst.data()), width * sizeof(int16_t),
+                       dstWidth * sizeof(int16_t), width, height, 0, height, params, nullptr);
+        simdFunction(reinterpret_cast<uint8_t*>(src.data()),
+                     reinterpret_cast<uint8_t*>(simdDst.data()), width * sizeof(int16_t),
+                     dstWidth * sizeof(int16_t), width, height, 0, height, params, nullptr);
+
+        EXPECT_EQ(scalarDst, simdDst) << "Scaling mode: " << scalingModeToString(mode);
+        EXPECT_NE(std::find(scalarDst.begin(), scalarDst.end(), 0x3fff), scalarDst.end());
+        EXPECT_NE(std::find(scalarDst.begin(), scalarDst.end(), -0x4000), scalarDst.end());
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(UpscaleTests, UpscaleTest, testing::ValuesIn(kUpscaleTestParams), testNames);

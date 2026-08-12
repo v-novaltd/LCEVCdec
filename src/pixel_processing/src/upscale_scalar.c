@@ -31,9 +31,10 @@ static inline int16_t scalarU16ToS16(int16_t value, int16_t shift)
     return (int16_t)(((int32_t)value << shift) - 0x4000);
 }
 
-static inline int16_t scalarShiftRoundS15(int32_t value)
+static inline int16_t scalarShiftRoundS15(int64_t value)
 {
-    return saturateS15((value + 0x2000) >> 14);
+    const int64_t rounded = (value + 0x2000) >> 14;
+    return (int16_t)((rounded < -0x4000) ? -0x4000 : ((rounded > 0x3fff) ? 0x3fff : rounded));
 }
 
 static inline uint8_t scalarS16ToU8(int16_t value)
@@ -62,28 +63,30 @@ static inline void scalarNV12LoadDeinterleaved8(const uint8_t* srcRow, int32_t s
 
 static inline void scalarConvolveVerticalPair8(const int16_t src0[8], const int16_t src1[8],
                                                const int16_t src2[8], const int16_t src3[8],
-                                               const int16_t src4[8], const int16_t kernel[4],
+                                               const int16_t src4[8], const int32_t kernel[4],
                                                int16_t v0[8], int16_t v1[8])
 {
     for (int32_t i = 0; i < 8; ++i) {
-        const int32_t acc0 = (src0[i] * kernel[3]) + (src1[i] * kernel[2]) + (src2[i] * kernel[1]) +
-                             (src3[i] * kernel[0]);
-        const int32_t acc1 = (src1[i] * kernel[0]) + (src2[i] * kernel[1]) + (src3[i] * kernel[2]) +
-                             (src4[i] * kernel[3]);
+        const int64_t acc0 = ((int64_t)src0[i] * kernel[3]) + ((int64_t)src1[i] * kernel[2]) +
+                             ((int64_t)src2[i] * kernel[1]) + (src3[i] * kernel[0]);
+        const int64_t acc1 = ((int64_t)src1[i] * kernel[0]) + ((int64_t)src2[i] * kernel[1]) +
+                             ((int64_t)src3[i] * kernel[2]) + (src4[i] * kernel[3]);
 
         v0[i] = scalarShiftRoundS15(acc0);
         v1[i] = scalarShiftRoundS15(acc1);
     }
 }
 
-static inline void scalarConvolveHorizontal8(const int16_t srcPel[8], const int16_t kernel[4],
+static inline void scalarConvolveHorizontal8(const int16_t srcPel[8], const int32_t kernel[4],
                                              int16_t row[8])
 {
     for (int32_t i = 0; i < 4; ++i) {
-        const int32_t rowOdd = (srcPel[i + 0] * kernel[3]) + (srcPel[i + 1] * kernel[2]) +
-                               (srcPel[i + 2] * kernel[1]) + (srcPel[i + 3] * kernel[0]);
-        const int32_t rowEven = (srcPel[i + 1] * kernel[0]) + (srcPel[i + 2] * kernel[1]) +
-                                (srcPel[i + 3] * kernel[2]) + (srcPel[i + 4] * kernel[3]);
+        const int64_t rowOdd = ((int64_t)srcPel[i + 0] * kernel[3]) +
+                               ((int64_t)srcPel[i + 1] * kernel[2]) +
+                               ((int64_t)srcPel[i + 2] * kernel[1]) + (srcPel[i + 3] * kernel[0]);
+        const int64_t rowEven = ((int64_t)srcPel[i + 1] * kernel[0]) +
+                                ((int64_t)srcPel[i + 2] * kernel[1]) +
+                                ((int64_t)srcPel[i + 3] * kernel[2]) + (srcPel[i + 4] * kernel[3]);
 
         row[(i << 1) + 0] = scalarShiftRoundS15(rowOdd);
         row[(i << 1) + 1] = scalarShiftRoundS15(rowEven);

@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,23 +12,19 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include <LCEVC/common/atomic.h>
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/common/platform.h>
-//
-#include <assert.h>
-#include <stdatomic.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <LCEVC/common/stdlib.h>
 
 typedef struct
 {
     LdcMemoryAllocator allocator;
-    atomic_size_t allocatedBytes;
-    atomic_size_t allocations;
-    atomic_size_t totalAllocations;
-    atomic_size_t totalReallocations;
+    LdcAtomicSizeT allocatedBytes;
+    LdcAtomicSizeT allocations;
+    LdcAtomicSizeT totalAllocations;
+    LdcAtomicSizeT totalReallocations;
 } LdcMemoryAllocatorMalloc;
 
 static LdcMemoryAllocatorMalloc mallocMemoryAllocator; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -66,13 +62,13 @@ static void mallocAllocate(LdcMemoryAllocator* allocator, LdcMemoryAllocation* a
     allocation->alignment = alignment;
     allocation->allocatorData = 0;
 
-    atomic_fetch_add(&ma->allocations, 1);
-    atomic_fetch_add(&ma->allocatedBytes, size);
-    atomic_fetch_add(&ma->totalAllocations, 1);
+    atomicFetchAddSizeT(&ma->allocations, 1);
+    atomicFetchAddSizeT(&ma->allocatedBytes, size);
+    atomicFetchAddSizeT(&ma->totalAllocations, 1);
 
-    VNMetricUInt64("mallocAllocations", atomic_load(&ma->allocations));
-    VNMetricUInt64("mallocAllocatedBytes", atomic_load(&ma->allocatedBytes));
-    VNMetricUInt64("mallocTotalAllocations", atomic_load(&ma->totalAllocations));
+    VNMetricUInt64("mallocAllocations", atomicLoadSizeT(&ma->allocations));
+    VNMetricUInt64("mallocAllocatedBytes", atomicLoadSizeT(&ma->allocatedBytes));
+    VNMetricUInt64("mallocTotalAllocations", atomicLoadSizeT(&ma->totalAllocations));
 }
 
 static void mallocFree(LdcMemoryAllocator* allocator, LdcMemoryAllocation* allocation,
@@ -91,12 +87,11 @@ static void mallocFree(LdcMemoryAllocator* allocator, LdcMemoryAllocation* alloc
     free(allocation->ptr);
 #endif
 
-    atomic_fetch_sub(&ma->allocations, 1);
-    atomic_fetch_sub(&ma->allocatedBytes, allocation->size);
+    atomicFetchSubSizeT(&ma->allocations, 1);
+    atomicFetchSubSizeT(&ma->allocatedBytes, allocation->size);
 
-    VNMetricUInt64("mallocAllocations", atomic_load(&ma->allocations));
-    ;
-    VNMetricUInt64("mallocAllocatedBytes", atomic_load(&ma->allocatedBytes));
+    VNMetricUInt64("mallocAllocations", atomicLoadSizeT(&ma->allocations));
+    VNMetricUInt64("mallocAllocatedBytes", atomicLoadSizeT(&ma->allocatedBytes));
 }
 
 static void mallocReallocate(LdcMemoryAllocator* allocator, LdcMemoryAllocation* allocation,
@@ -115,14 +110,14 @@ static void mallocReallocate(LdcMemoryAllocator* allocator, LdcMemoryAllocation*
 
         allocation->ptr = newPtr;
 
-        atomic_fetch_sub(&ma->allocatedBytes, allocation->size);
-        atomic_fetch_add(&ma->allocatedBytes, size);
-        atomic_fetch_add(&ma->totalReallocations, 1);
+        atomicFetchSubSizeT(&ma->allocatedBytes, allocation->size);
+        atomicFetchAddSizeT(&ma->allocatedBytes, size);
+        atomicFetchAddSizeT(&ma->totalReallocations, 1);
 
         allocation->size = size;
 
-        VNMetricUInt64("mallocAllocatedBytes", atomic_load(&ma->allocatedBytes));
-        VNMetricUInt64("mallocTotalAllocations", atomic_load(&ma->totalAllocations));
+        VNMetricUInt64("mallocAllocatedBytes", atomicLoadSizeT(&ma->allocatedBytes));
+        VNMetricUInt64("mallocTotalAllocations", atomicLoadSizeT(&ma->totalAllocations));
 
     } else {
         // Large alignment, or not really a realloc() - do alloc/copy/free
@@ -148,7 +143,7 @@ static void mallocReallocate(LdcMemoryAllocator* allocator, LdcMemoryAllocation*
             mallocFree(allocator, &prev, site);
         }
     }
-    VNMetricUInt64("mallocTotalReallocations", atomic_load(&ma->totalReallocations));
+    VNMetricUInt64("mallocTotalReallocations", atomicLoadSizeT(&ma->totalReallocations));
 }
 
 /*
@@ -161,8 +156,8 @@ static const LdcMemoryAllocatorFunctions kMallocMemoryFunctions = {
     mallocFree
 };
 
-static LdcMemoryAllocatorMalloc mallocMemoryAllocator = {   //NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-    { &kMallocMemoryFunctions, NULL },
-    0
+//NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static LdcMemoryAllocatorMalloc mallocMemoryAllocator = {
+    .allocator = { &kMallocMemoryFunctions, NULL }
 };
 /* clang-format on */

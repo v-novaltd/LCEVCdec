@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -41,11 +41,11 @@
 #endif
 
 #else
-#include <inttypes.h>
+#include <LCEVC/common/stdlib.h>
 #endif
 #else
 #define __STDC_FORMAT_MACROS
-#include <inttypes.h>
+#include <LCEVC/common/stdlib.h>
 #ifndef PRId32
 #define PRId32 "d"
 #endif

@@ -44,11 +44,6 @@
     const __m128i kRightShift = _mm_cvtsi32_si128((int32_t)params.shift);
 #endif
 
-#if APPLY_PA == 1
-    const __m128i kPAOnes = _mm_set1_epi16(1);
-    const __m128i kPATwos = _mm_set1_epi32(2);
-#endif
-
     const int32_t dstHeight = (int32_t)(srcHeight << 1);
 
     const __m128i kLeftEdgeShuffle = _mm_set_epi8(11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 0, 1, 0);

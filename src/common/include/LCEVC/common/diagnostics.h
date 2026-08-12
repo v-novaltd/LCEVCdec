@@ -24,9 +24,7 @@
 #include <LCEVC/common/class_utils.hpp>
 #endif
 #include <LCEVC/common/cpp_tools.h>
-//
-#include <stdbool.h>
-#include <stdint.h>
+#include <LCEVC/common/stdlib.h>
 
 /* Maximum number of handlers that can be registered
  */

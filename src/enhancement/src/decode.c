@@ -12,8 +12,10 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include <LCEVC/common/bitutils.h>
 #include <LCEVC/common/check.h>
 #include <LCEVC/common/limit.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/bitstream_types.h>
 #include <LCEVC/enhancement/cmdbuffer_cpu.h>
 #include <LCEVC/enhancement/cmdbuffer_gpu.h>
@@ -23,48 +25,81 @@
 //
 #include "chunk.h"
 #include "config_parser_types.h"
+#include "decode_utilities.h"
 #include "dequant.h"
 #include "entropy.h"
 #include "transform.h"
 
-#include <assert.h>
-#include <limits.h>
-#include <stdbool.h>
-#include <stdint.h>
-
 /*------------------------------------------------------------------------------*/
 
-static inline int32_t entropyDecodeAllLayers(const uint8_t numLayers, const bool decoderExists,
-                                             const int32_t tuTotal,
-                                             EntropyDecoder residualDecoders[RCLayerCountDDS],
-                                             int32_t zerosOut[RCLayerCountDDS],
-                                             int16_t coeffsOut[RCLayerCountDDS], int32_t* minZeroCountOut)
+/* Decode a fresh (coefficient, zero-run) pair for each layer listed in expiredMask, storing the
+ * coefficient and the layer's next event TU (the absolute TU index at which its new run expires).
+ * The caller has already zeroed coeffsOut. Returns the nonzero-coefficient mask (negative on
+ * error). */
+static inline int32_t entropyDecodeExpiredLayers(uint32_t expiredMask, const bool decoderExists,
+                                                 const int32_t tuTotal, const int32_t tuIndex,
+                                                 EntropyDecoder residualDecoders[RCLayerCountDDS],
+                                                 int32_t nextEventTu[RCLayerCountDDS],
+                                                 int16_t coeffsOut[RCLayerCountDDS])
 {
     int32_t coeffsNonZeroMask = 0;
-    for (uint8_t layer = 0; layer < numLayers; layer++) {
-        if (zerosOut[layer] > 0) {
-            zerosOut[layer]--;
-            coeffsOut[layer] = 0;
-        } else if (decoderExists) {
-            const int32_t layerZero = entropyDecode(&residualDecoders[layer], &coeffsOut[layer]);
-            zerosOut[layer] = (layerZero == EntropyNoData) ? (tuTotal - 1) : layerZero;
-            if (zerosOut[layer] < 0) {
-                return zerosOut[layer];
+    while (expiredMask != 0) {
+        const uint32_t layer = ctz32(expiredMask);
+        expiredMask &= expiredMask - 1;
+
+        if (decoderExists) {
+            int32_t layerZeros = entropyDecode(&residualDecoders[layer], &coeffsOut[layer]);
+            if (layerZeros == EntropyNoData) {
+                layerZeros = tuTotal - 1;
             }
+            if (layerZeros < 0) {
+                return layerZeros;
+            }
+            /* Clamp to the end of the tile: a longer run behaves identically (the layer simply
+             * never expires again), and the clamp keeps tuIndex + run + 1 far from overflow. */
+            nextEventTu[layer] = tuIndex + minS32(layerZeros, tuTotal - 1) + 1;
 
             /* set i-th bit if nonzero */
             coeffsNonZeroMask |= ((coeffsOut[layer] != 0) << layer);
         } else {
             /* No decoder, skip over whole surface. */
-            zerosOut[layer] = tuTotal - 1;
-            coeffsOut[layer] = 0;
-        }
-
-        /* Calculate lowest common zero run */
-        if (*minZeroCountOut > zerosOut[layer]) {
-            *minZeroCountOut = zerosOut[layer];
+            nextEventTu[layer] = tuIndex + tuTotal;
         }
     }
+    return coeffsNonZeroMask;
+}
+
+/* Handle the residual layers at the current TU. Layer runs are tracked as absolute "next event"
+ * TU indices, with the earliest one (and the set of layers on it) cached across events. So when
+ * the current TU is not a layer event (it was reached because of temporal signalling), there is
+ * no per-layer work at all; coeffsOut is only valid when the returned mask is nonzero, which is
+ * the only case in which the caller reads it.
+ *
+ * Returns the nonzero-coefficient mask (negative on error), and sets minZeroCountOut to the
+ * number of all-zero TUs between this TU and the next layer event. */
+static inline int32_t entropyDecodeAllLayers(const uint8_t numLayers, const bool decoderExists,
+                                             const int32_t tuTotal, const int32_t tuIndex,
+                                             EntropyDecoder residualDecoders[RCLayerCountDDS],
+                                             int32_t nextEventTu[RCLayerCountDDS],
+                                             int32_t* minNextTuInOut, uint32_t* expiredMaskInOut,
+                                             int16_t coeffsOut[RCLayerCountDDS], int32_t* minZeroCountOut)
+{
+    int32_t coeffsNonZeroMask = 0;
+
+    /* Temporal signalling can stop short of the next layer event, but never jump past it. */
+    assert(tuIndex <= *minNextTuInOut);
+
+    if (tuIndex == *minNextTuInOut) {
+        memset(coeffsOut, 0, RCLayerCountDDS * sizeof(int16_t));
+        coeffsNonZeroMask = entropyDecodeExpiredLayers(*expiredMaskInOut, decoderExists, tuTotal, tuIndex,
+                                                       residualDecoders, nextEventTu, coeffsOut);
+        if (coeffsNonZeroMask < 0) {
+            return coeffsNonZeroMask;
+        }
+        findNextLayerEvent(numLayers, nextEventTu, minNextTuInOut, expiredMaskInOut);
+    }
+
+    *minZeroCountOut = *minNextTuInOut - tuIndex - 1;
     return coeffsNonZeroMask;
 }
 
@@ -94,16 +129,6 @@ static inline void deblockResiduals(const LdeDeblock* deblock, int16_t residuals
     /* clang-format on */
 }
 
-static inline void applyUserData(const LdeUserDataConfig* userData, int16_t coeffs[16])
-{
-    int32_t coeff = coeffs[userData->layerIndex];
-    coeff >>= userData->shift;
-    const int32_t sign = (coeff & 0x01) ? -1 : 1;
-    coeffs[userData->layerIndex] = (int16_t)((coeff >> 1) * sign);
-}
-
-/*------------------------------------------------------------------------------*/
-
 bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameConfig* frameConfig,
                           const LdeLOQIndex loq, const uint32_t planeIdx, const uint32_t tileIdx,
                           LdeCmdBufferCpu* cmdBufferCpu, LdeCmdBufferGpu* cmdBufferGpu,
@@ -126,7 +151,9 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
 
     /* general */
     Dequant dequant;
-    calculateDequant(&dequant, globalConfig, frameConfig, planeIdx, loq);
+    if (!calculateDequant(&dequant, globalConfig, frameConfig, planeIdx, loq)) {
+        return false;
+    }
     const bool temporalEnabled = globalConfig->temporalEnabled;
     const bool temporalRefresh = temporalEnabled && frameConfig->temporalRefresh;
     const uint8_t numLayers = globalConfig->numLayers;
@@ -158,8 +185,11 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
 
     int16_t coeffs[RCLayerCountDDS] = {0};
     int16_t residuals[RCLayerCountDDS] = {0};
-    int32_t zeros[RCLayerCountDDS] = {0}; /* Current zero run in each layer */
-    int32_t temporalRun = 0;              /* Current symbol run in temporal layer */
+    /* Absolute TU index of each layer's next symbol; every layer starts by decoding at TU 0. */
+    int32_t layerNextEventTu[RCLayerCountDDS] = {0};
+    int32_t layerMinNextTu = 0; /* Earliest entry of layerNextEventTu, cached across events */
+    uint32_t layerExpiredMask = (1u << globalConfig->numLayers) - 1; /* Layers at layerMinNextTu */
+    int32_t temporalRun = 0; /* Current symbol run in temporal layer */
     uint32_t tuIndex = 0;
     uint32_t lastTuIndex = 0;
     TUState tuState = {0};
@@ -176,9 +206,10 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
     TransformFunction transformFn = transformGetFunction(globalConfig->transform, scaling);
 
     /* Setup decoders */
-    EntropyDecoder residualDecoders[RCLayerCountDDS] = {{0}};
-    EntropyDecoder temporalDecoder = {0};
+    EntropyDecoder residualDecoders[RCLayerCountDDS];
+    EntropyDecoder temporalDecoder;
     if (tileHasEntropyDecode) {
+        memset(residualDecoders, 0, sizeof(EntropyDecoder) * numLayers);
         for (uint8_t layerIdx = 0; layerIdx < numLayers; ++layerIdx) {
             VNCheckB(entropyInitialize(&residualDecoders[layerIdx], &chunks[layerIdx], EDTDefault,
                                        bitstreamVersion));
@@ -186,6 +217,7 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
     }
 
     if (temporalChunk) {
+        memset(&temporalDecoder, 0, sizeof(temporalDecoder));
         VNCheckB(entropyInitialize(&temporalDecoder, temporalChunk, EDTTemporal, bitstreamVersion));
     }
 
@@ -201,9 +233,11 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
     /* Break loop once tile is fully decoded. */
     while (true) {
         /* Decode bitstream and track zero runs */
-        int32_t minZeroCount = INT_MAX;
-        coeffsNonzeroMask = entropyDecodeAllLayers(numLayers, tileHasEntropyDecode, (int32_t)tuState.tuTotal,
-                                                   residualDecoders, zeros, coeffs, &minZeroCount);
+        int32_t minZeroCount = 0;
+        coeffsNonzeroMask =
+            entropyDecodeAllLayers(numLayers, tileHasEntropyDecode, (int32_t)tuState.tuTotal,
+                                   (int32_t)tuIndex, residualDecoders, layerNextEventTu,
+                                   &layerMinNextTu, &layerExpiredMask, coeffs, &minZeroCount);
 
         if (coeffsNonzeroMask < 0) {
             VNLogError("Entropy decode failed - likely stream corruption");
@@ -216,16 +250,21 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
         }
 
         /* Decode temporal and track temporal run */
-        const bool blockStart = ldeTuIsBlockStart(&tuState, tuIndex);
+        const bool blockStart = tileHasTemporalDecode ? ldeTuIsBlockStart(&tuState, tuIndex) : false;
         if (clearBlockQueue == 0 && tileHasTemporalDecode && temporalEnabled) {
             if (temporalRun <= 0) {
-                temporalRun = entropyDecodeTemporal(&temporalDecoder, &temporal);
                 clearBlockRemainder = false;
 
-                if (temporalRun == EntropyNoData || temporalRun > (int32_t)tuState.tuTotal) {
-                    temporalRun = (int32_t)tuState.tuTotal;
-                }
-                if (temporalRun <= 0) {
+                /* A zero-length run is a valid transition to the next temporal state without
+                 * consuming a TU. Keep decoding at this TU until a non-empty run is reached. */
+                do {
+                    temporalRun = entropyDecodeTemporal(&temporalDecoder, &temporal);
+                    if (temporalRun == EntropyNoData || temporalRun > (int32_t)tuState.tuTotal) {
+                        temporalRun = (int32_t)tuState.tuTotal;
+                    }
+                } while (temporalRun == 0);
+
+                if (temporalRun < 0) {
                     VNLogError("Invalid temporalRun value %d - likely stream corruption", temporalRun);
                     res = false;
                     break;
@@ -254,7 +293,7 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
             }
         }
 
-        uint32_t blockTUCount = ldeTuCoordsBlockTuCount(&tuState, tuIndex);
+        uint32_t blockTUCount = tileHasTemporalDecode ? ldeTuCoordsBlockTuCount(&tuState, tuIndex) : 0;
         bool clearedBlock = false;
 
         /* Handle clearing (either clear the block, or generate a "clear" command). */
@@ -289,20 +328,7 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
                 /* Apply SW to coeffs - this is not performed in decode loop as the temporal
                  * signal residual could be zero (implied inter), however the block signal
                  * could be intra. */
-
-                for (uint8_t layer = 0; layer < numLayers; layer++) {
-                    if (coeffs[layer] > 0) {
-                        coeffs[layer] =
-                            (int16_t)clampS32((int32_t)coeffs[layer] * dequant.stepWidth[temporal][layer] +
-                                                  dequant.offset[temporal][layer],
-                                              INT16_MIN, INT16_MAX);
-                    } else if (coeffs[layer] < 0) {
-                        coeffs[layer] =
-                            (int16_t)clampS32((int32_t)coeffs[layer] * dequant.stepWidth[temporal][layer] -
-                                                  dequant.offset[temporal][layer],
-                                              INT16_MIN, INT16_MAX);
-                    }
-                }
+                dequantCoeffs(&dequant, temporal, numLayers, coeffs);
 
                 /* Inverse hadamard */
                 transformFn(coeffs, residuals);
@@ -387,15 +413,6 @@ bool ldeDecodeEnhancement(const LdeGlobalConfig* globalConfig, const LdeFrameCon
 
         if (tuIndex >= tuState.tuTotal) {
             break;
-        }
-
-        if (minZeroCount > 0) {
-            /* Note: if you're tempted to "optimize" this by loop-unrolling, to do 4 operations
-             * at once, don't worry. Compilers are smart enough to do this already (and indeed,
-             * they even turn this into SIMD code, if they have SIMD). */
-            for (uint8_t layer = 0; layer < numLayers; layer++) {
-                zeros[layer] -= minZeroCount;
-            }
         }
     }
 

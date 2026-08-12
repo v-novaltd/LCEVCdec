@@ -16,7 +16,6 @@
 #define VN_LCEVC_PIPELINE_VULKAN_TASKS_VULKAN_H
 
 #include "frame_vulkan.h"
-#include "pipeline_config_vulkan.h"
 #include "pipeline_vulkan.h"
 
 #include <cstdint>

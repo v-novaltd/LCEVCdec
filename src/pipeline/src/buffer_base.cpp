@@ -36,10 +36,16 @@ namespace {
     bool map(struct LdpBuffer* buffer, LdpBufferMapping* mapping, int32_t offset, uint32_t size,
              LdpAccess access)
     {
+        if (!buffer || !mapping) {
+            return false;
+        }
         return static_cast<BufferBase*>(buffer)->map(mapping, offset, size, access);
     }
     void unmap(struct LdpBuffer* buffer, const LdpBufferMapping* mapping)
     {
+        if (!buffer || !mapping) {
+            return;
+        }
         static_cast<BufferBase*>(buffer)->unmap(mapping);
     }
 

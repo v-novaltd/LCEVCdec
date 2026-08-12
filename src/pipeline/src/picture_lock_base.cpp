@@ -35,6 +35,10 @@ bool PictureLockBase::getBufferDesc(LdpPictureBufferDesc* desc) const
 {
     assert(desc);
 
+    if (!desc) {
+        return false;
+    }
+
     if (mapping.ptr == nullptr) {
         return false;
     }
@@ -53,7 +57,7 @@ bool PictureLockBase::getPlaneDesc(uint32_t planeIndex, LdpPicturePlaneDesc* pla
     assert(planeIndex < kLdpPictureMaxColorComponents);
     assert(planeDescOut);
 
-    if (planeIndex >= kLdpPictureMaxColorComponents) {
+    if (!picture || !planeDescOut || planeIndex >= kLdpPictureMaxColorComponents) {
         return false;
     }
 
@@ -66,12 +70,18 @@ bool PictureLockBase::getPlaneDesc(uint32_t planeIndex, LdpPicturePlaneDesc* pla
 namespace {
     bool getBufferDesc(const LdpPictureLock* pictureLock, LdpPictureBufferDesc* desc)
     {
+        if (!pictureLock || !desc) {
+            return false;
+        }
         return static_cast<const PictureLockBase*>(pictureLock)->getBufferDesc(desc);
     }
 
     bool getPlaneDesc(const LdpPictureLock* pictureLock, uint32_t planeIndex,
                       LdpPicturePlaneDesc planeDescOut[kLdpPictureMaxNumPlanes])
     {
+        if (!pictureLock || !planeDescOut) {
+            return false;
+        }
         return static_cast<const PictureLockBase*>(pictureLock)->getPlaneDesc(planeIndex, planeDescOut);
     }
 

@@ -23,9 +23,7 @@
  * such that the blobs remain contiguous.
  */
 #include <LCEVC/common/memory.h>
-//
-#include <stdbool.h>
-#include <stdint.h>
+#include <LCEVC/common/stdlib.h>
 
 #ifdef __cplusplus
 extern "C"

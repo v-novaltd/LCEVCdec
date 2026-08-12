@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -15,8 +15,7 @@
 #ifndef VN_LCEVC_COMMON_LINKED_LIST_H
 #define VN_LCEVC_COMMON_LINKED_LIST_H
 
-#include <assert.h>
-#include <stdlib.h>
+#include <LCEVC/common/stdlib.h>
 
 #ifdef __cplusplus
 extern "C"

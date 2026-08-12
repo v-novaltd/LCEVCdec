@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -17,8 +17,7 @@
 
 #include "bytestream.h"
 
-#include <assert.h>
-#include <stdbool.h>
+#include <LCEVC/common/stdlib.h>
 
 /*------------------------------------------------------------------------------*/
 
@@ -56,10 +55,6 @@ bool bitstreamInitialize(BitStream* stream, const uint8_t* data, size_t size);
  *  \return bit True on success, otherwise false */
 bool bitstreamReadBit(BitStream* stream, uint8_t* out);
 
-/*! \brief Read a single bit from the stream, without bounds checking. Use this if you know there's
- *         at least 1 bit remaining in the stream. */
-void bitstreamReadBitUnchecked(BitStream* stream, uint8_t* out);
-
 /*! \brief read n bits from the stream.
  *
  *  \return True on success, otherwise false */
@@ -71,65 +66,6 @@ static inline bool streamComplete(const BitStream* stream)
     const bool byteStreamComplete = bytestreamRemaining(&stream->byteStream) == 0;
     const bool wordComplete = (stream->nextBit == 32);
     return byteStreamComplete && wordComplete;
-}
-
-/*! \brief Helper function to load a new DWORD from the bytestream. */
-static inline void loadWordUnchecked(BitStream* stream)
-{
-    const size_t remaining = bytestreamRemaining(&stream->byteStream);
-
-    assert(remaining > 0);
-
-    if (remaining >= 4) {
-        /* Enough to read a complete word */
-        stream->byteStream.offset +=
-            readU32(stream->byteStream.data + stream->byteStream.offset, &stream->word);
-        stream->nextBit = 0;
-    } else {
-        /* Not enough for a word, read in as much as possible. */
-        stream->word = 0;
-
-        uint8_t byte = 0;
-        for (size_t i = 0; i < remaining; ++i) {
-            byte = *(stream->byteStream.data + stream->byteStream.offset);
-            stream->byteStream.offset += 1;
-            stream->word <<= 8;
-            stream->word |= byte;
-        }
-
-        stream->nextBit = (uint8_t)(8 * (4 - remaining));
-        stream->word <<= stream->nextBit;
-    }
-}
-
-/*! \brief Read n bits from the stream, without bounds checking. Use this if you've already checked
- *         that numBits is less than the number of remaining bits, and less than kMaxBitsAtOnce. */
-static inline void bitstreamReadBitsUnchecked(BitStream* stream, uint8_t numBits, int32_t* out)
-{
-    assert(out && (numBits <= kMaxBitsAtOnce) && !streamComplete(stream));
-
-    if (stream->nextBit == 32) {
-        loadWordUnchecked(stream);
-    }
-
-    /* Load up current word bits. */
-    const uint8_t wordRemaining = 32 - stream->nextBit;
-    *out = (int32_t)(stream->word >> (32 - numBits));
-
-    if (wordRemaining >= numBits) {
-        stream->nextBit += numBits;
-        stream->word <<= numBits;
-    } else {
-        /* Handle outstanding bits to be read in. */
-        const uint8_t readRemaining = numBits - wordRemaining;
-
-        loadWordUnchecked(stream);
-
-        stream->nextBit += readRemaining;
-        const int32_t trailBits = (int32_t)(stream->word >> (32 - readRemaining));
-        stream->word <<= readRemaining;
-        *out |= trailBits;
-    }
 }
 
 /*! \brief Read a variable length exponential-Golomb encoded 32-bit unsigned integer. Exponential-

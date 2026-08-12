@@ -22,15 +22,8 @@
 #include <LCEVC/common/diagnostics_buffer.h>
 #include <LCEVC/common/platform.h>
 #include <LCEVC/common/printf_macros.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/common/threads.h>
-//
-#include <assert.h>
-#include <stdarg.h>
-#include <stdio.h>
-
-#if !VN_OS(WINDOWS)
-#include <time.h>
-#endif
 
 // Capacity of diagnostic ring buffer in records
 #define VN_CAPACITY 1024
@@ -59,7 +52,7 @@ static inline void localDiagnosticsLock(void) { threadMutexLock(&localDiagnostic
 static inline void localDiagnosticsUnlock(void) { threadMutexUnlock(&localDiagnosticsMutex); }
 
 // Special site used to mark scoped trace ends
-const LdcDiagSite ldcDiagnosticsTraceScopedEndSite = {LdcDiagTypeTraceEnd};
+const LdcDiagSite ldcDiagnosticsTraceScopedEndSite = {.type = LdcDiagTypeTraceEnd};
 
 // Apply all registered handlers to the given record - starting with most recently registered
 //
@@ -82,7 +75,7 @@ static void applyDiagnosticsHandlers(const LdcDiagSite* site, const LdcDiagRecor
 #if VN_SDK_FEATURE(DIAGNOSTICS_ASYNC)
 
 // Special site used to mark a flush in buffer
-static const LdcDiagSite kDiagnosticsFlushSite = {LdcDiagTypeFlush};
+static const LdcDiagSite kDiagnosticsFlushSite = {.type = LdcDiagTypeFlush};
 
 static intptr_t diagnosticThreadFn(void* argument)
 {
@@ -132,8 +125,7 @@ void ldcDiagnosticsInitialize(void* parentState)
         state = parentState ? (DiagnosticState*)parentState : &localState;
     }
 
-    const unsigned int previousRefCount =
-        atomic_fetch_add_explicit(&state->refCount, 1, memory_order_acq_rel);
+    const unsigned int previousRefCount = atomicFetchAddU32(&state->refCount, 1);
     ldcDiagnosticsState = state;
 
     if (previousRefCount == 0) {
@@ -170,8 +162,7 @@ void ldcDiagnosticsRelease(void)
         return;
     }
 
-    const unsigned int previousRefCount =
-        atomic_fetch_sub_explicit(&state->refCount, 1, memory_order_acq_rel);
+    const unsigned int previousRefCount = atomicFetchSubU32(&state->refCount, 1);
 
     if (previousRefCount > 1) {
         // DiagnosticState is still in use
@@ -181,7 +172,7 @@ void ldcDiagnosticsRelease(void)
 
     if (previousRefCount == 0) {
         // Clamp use count to 0 - release called too many times
-        atomic_store_explicit(&state->refCount, 0, memory_order_release);
+        atomicStoreU32(&state->refCount, 0);
         ldcDiagnosticsState = NULL;
         localDiagnosticsUnlock();
         return;
@@ -396,6 +387,7 @@ uint32_t ldcDiagnosticsCopyArguments(const LdcDiagSite* site, LdcDiagValue value
                 values[i].valueConstVoidPtr = va_arg(args, const void*);
                 break;
             }
+#if VN_SDK_FEATURE(LDE_FLOATS)
             case LdcDiagArgFloat32: {
                 // Float values are promoted to double in variadic calls.
                 values[i].valueFloat32 = (float)va_arg(args, double);
@@ -405,6 +397,7 @@ uint32_t ldcDiagnosticsCopyArguments(const LdcDiagSite* site, LdcDiagValue value
                 values[i].valueFloat64 = va_arg(args, double);
                 break;
             }
+#endif
 
             case LdcDiagArgNone:
                 // Handles weird case with MSVC generating extra arguments in VNLog() expansion

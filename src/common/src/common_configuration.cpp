@@ -37,8 +37,9 @@ public:
         return true;
     }
 
-    bool setTraceFile(const std::string& val)
+    bool setTraceFile([[maybe_unused]] const std::string& val)
     {
+#if VN_SDK_FEATURE(TRACING)
         if (val == m_traceFile) {
             return true;
         }
@@ -55,12 +56,18 @@ public:
                 m_traceFile = val;
             }
         }
+#endif
         return true;
     }
 
     bool setDisableSIMD(const bool& val)
     {
+#if VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
+        /* Minimum size builds contain no scalar implementations */
+        VNUnused(val);
+#else
         ldcAccelerationInitialize(!val);
+#endif
         return true;
     }
 
@@ -75,7 +82,9 @@ public:
 
 private:
     bool m_logStdout = false;
+#if VN_SDK_FEATURE(TRACING)
     std::string m_traceFile;
+#endif
 };
 
 static const common::ConfigMemberMap<CommonConfiguration> kConfigMemberMap = {

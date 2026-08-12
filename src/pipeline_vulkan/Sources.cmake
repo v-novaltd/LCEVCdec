@@ -71,3 +71,34 @@ list(
 list(APPEND INTERFACES "include/LCEVC/pipeline_vulkan/create_pipeline.h")
 
 set(ALL_FILES ${SOURCES} ${HEADERS} ${INTERFACES} "Sources.cmake")
+
+set(SHADER_INPUT_FILES
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/apply.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/add.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/common.glsl
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_common.glsl
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_in.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_p010.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_nv12.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_rgba8.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_rgba10.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/render_fragment.frag
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/render_vertex.vert
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_constants.glsl
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_horizontal.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_vertical.comp)
+
+set(SHADER_OUTPUT_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/apply.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/add.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_in.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_p010.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_nv12.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba8.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba10.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/render_fragment.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/render_vertex.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_horizontal.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_vertical.h)

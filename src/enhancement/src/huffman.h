@@ -17,19 +17,15 @@
 
 #include "bitstream.h"
 
+#include <LCEVC/common/bitutils.h>
+
 // VN_BIG_TABLE_LEADING_ZEROES_BITS, VN_BIG_TABLE_MAX_CODE_SIZE, and VN_SMALL_TABLE_MAX_SIZE are
 // defined via cmake, defaults in CMakeLists.txt.
 
 #define VN_BIG_TABLE_MAX_SIZE (VN_BIG_TABLE_LEADING_ZEROES_BITS + VN_BIG_TABLE_MAX_CODE_SIZE)
 
 #define VN_BIG_TABLE_MAX_NUM_LEADING_ZEROES ((1 << VN_BIG_TABLE_LEADING_ZEROES_BITS) - 1)
-#define VN_BIG_TABLE_CODE_SIZE_TO_READ \
-    (VN_BIG_TABLE_MAX_NUM_LEADING_ZEROES + VN_BIG_TABLE_MAX_CODE_SIZE)
-
-#define VN_BIG_HUFFMAN_IDX_MASK ((1 << VN_BIG_TABLE_MAX_SIZE) - 1)
 #define VN_BIG_HUFFMAN_CODE_MASK ((1 << VN_BIG_TABLE_MAX_CODE_SIZE) - 1)
-
-#define VN_SMALL_HUFFMAN_CODE_MASK ((1 << VN_SMALL_TABLE_MAX_SIZE) - 1)
 
 /* VN_MAX_NUM_SYMBOLS is a feature of the stream: for sparse symbols, 5 bits store the symbol
  * count (so, at most 32 symbols). For dense symbols, there's a presence bitmap of size 256. */
@@ -56,16 +52,124 @@ enum
 static inline bool nextSymbolIsMSB(uint8_t symbol) { return (symbol & 0x01); }
 static inline bool nextSymbolIsRL(uint8_t symbol) { return (symbol & 0x80); }
 
-/*------------------------------------------------------------------------------*/
+/*- HuffmanStream -------------------------------------------------------------------------------*/
 
+/*! \brief Bit-reader over a big-endian (MSB-first) byte stream.
+ *
+ * `word` is an MSB-aligned bit buffer: the top `bitCount` bits are bits which have been loaded
+ * from the stream and not yet consumed. Bits below the top `bitCount` bits are either zero, or
+ * hold a preview of the NEXT bits of the stream (this happens when a bulk refill loads more bits
+ * than it can account for in `bitCount`; the unaccounted bytes are not counted in
+ * byteStream.offset either, so a later refill simply ORs the same values over them again).
+ *
+ * The intended usage in a decode hot-loop is: refill once (guaranteeing at least
+ * min(56, bits-left-in-stream) available bits), peek at up to 32 bits, then consume however many
+ * bits were actually used. Reads past the end of the stream yield zero bits. */
 typedef struct HuffmanStream
 {
     ByteStream byteStream;
-    uint32_t word;
-    uint8_t wordStartBit;
-    uint8_t wordEndBit;
-    uint64_t bitsRead;
+    uint64_t word;    /**< MSB-aligned bit buffer. */
+    int32_t bitCount; /**< Number of valid (loaded, unconsumed) bits at the top of word. */
 } HuffmanStream;
+
+/*! \brief Initialize a HuffmanStream
+ *
+ *  \param stream  Huffman stream to initialize
+ *  \param data    pointer to start of data, so that Huffman stream points there.
+ *  \param size    size of data, in bytes.
+ *
+ *  \return True on success, otherwise false. */
+bool huffmanStreamInitialize(HuffmanStream* stream, const uint8_t* data, size_t size);
+
+/*! \brief Get number of remaining bits on the HuffmanStream */
+static inline size_t huffmanStreamGetRemainingBits(const HuffmanStream* stream)
+{
+    return (size_t)stream->bitCount + bytestreamRemaining(&stream->byteStream) * 8;
+}
+
+/*! \brief Top up the bit buffer so that at least min(56, remaining-in-stream) bits are available.
+ *
+ * In the common case (8 or more bytes left in the stream) this is a single unaligned 8-byte load.
+ * Near the end of the stream it falls back to byte-at-a-time loading; once the stream is
+ * exhausted, the unfilled space reads as zero bits. */
+static inline void huffmanStreamRefill(HuffmanStream* stream)
+{
+    const uint8_t* ptr = stream->byteStream.data + stream->byteStream.offset;
+    if (bytestreamRemaining(&stream->byteStream) >= 8) {
+        /* This shift-assembled big-endian load compiles to a single load (+byte-swap) on
+         * little-endian targets. */
+        const uint64_t chunk = ((uint64_t)ptr[0] << 56) | ((uint64_t)ptr[1] << 48) |
+                               ((uint64_t)ptr[2] << 40) | ((uint64_t)ptr[3] << 32) |
+                               ((uint64_t)ptr[4] << 24) | ((uint64_t)ptr[5] << 16) |
+                               ((uint64_t)ptr[6] << 8) | (uint64_t)ptr[7];
+        stream->word |= chunk >> stream->bitCount;
+        /* Account for whole bytes only: bitCount goes to 56..63, preserving bitCount % 8. Any
+         * bits of `chunk` beyond the new bitCount stay in `word` as a (consistent) preview. */
+        stream->byteStream.offset += (size_t)((63 - stream->bitCount) >> 3);
+        stream->bitCount |= 56;
+        return;
+    }
+
+    /* Consuming zero-padding past the end of a (corrupt) stream can leave bitCount negative:
+     * clamp so the shift below stays in range. */
+    if (stream->bitCount < 0) {
+        stream->bitCount = 0;
+    }
+    while (stream->bitCount <= 56 && stream->byteStream.offset < stream->byteStream.size) {
+        stream->word |= (uint64_t)stream->byteStream.data[stream->byteStream.offset]
+                        << (56 - stream->bitCount);
+        stream->byteStream.offset++;
+        stream->bitCount += 8;
+    }
+}
+
+/*! \brief Peek at the next 32 bits of the stream (valid after huffmanStreamRefill; bits beyond
+ *         the end of the stream read as zero). Does not consume anything. */
+static inline uint32_t huffmanStreamPeek32(const HuffmanStream* stream)
+{
+    return (uint32_t)(stream->word >> 32);
+}
+
+/*! \brief Peek at the next `numBits` (1..32) bits of the stream, right-aligned. */
+static inline uint32_t huffmanStreamPeekBits(const HuffmanStream* stream, uint8_t numBits)
+{
+    assert(numBits >= 1 && numBits <= 32);
+    return (uint32_t)(stream->word >> (64 - numBits));
+}
+
+/*! \brief Consume `numBits` (0..32) bits, previously seen via a peek. */
+static inline void huffmanStreamConsume(HuffmanStream* stream, uint8_t numBits)
+{
+    stream->word <<= numBits;
+    stream->bitCount -= numBits;
+}
+
+/*! \brief Read and immediately consume up to 32 bits, with bounds-checking. Convenient in less
+ *         performance-sensitive areas (e.g. initialisation); in a decode loop, prefer a single
+ *         refill followed by peeks and consumes.
+ *
+ *  \param stream   Huffman stream to read bits from.
+ *  \param numBits  The number of bits to read (1..32).
+ *  \param out      The resulting data.
+ *
+ *  \return 0 if read was within bounds, -1 otherwise. */
+static inline int32_t huffmanStreamReadBits(HuffmanStream* stream, uint8_t numBits, uint32_t* out)
+{
+    assert(stream && out);
+    huffmanStreamRefill(stream);
+    if (stream->bitCount < numBits) {
+        return -1;
+    }
+    *out = huffmanStreamPeekBits(stream, numBits);
+    huffmanStreamConsume(stream, numBits);
+    return 0;
+}
+
+/*! \brief Number of bits consumed from the stream so far. */
+static inline uint64_t huffmanStreamGetConsumedBits(const HuffmanStream* stream)
+{
+    return stream->byteStream.offset * 8 - (uint64_t)stream->bitCount;
+}
 
 /*------------------------------------------------------------------------------*/
 
@@ -103,17 +207,22 @@ typedef struct HuffmanTable
 
 /*------------------------------------------------------------------------------*/
 
-/* New huffman triple-table: lookup table contains a list of triples.
- * lsb is the least-significant bit of the coefficient (a coefficient being thing which gets
- *  transformed to make a residual).
+/* Huffman triple-table: lookup table contains a list of triples.
+ * lsbOrValue depends on the entry's completeness:
+ *  - For complete entries (contents & 0x04), it holds the final decoded coefficient value
+ *    (an int8_t: since a complete entry has no MSB, the value fits in [-32, 31]).
+ *  - For incomplete entries, it holds the raw LSB symbol (so the fallback decode can inspect
+ *    the "MSB follows"/"RL follows" bits), or is meaningless if the LSB itself overflowed.
  * rl is the run-length, derived from strictly 0 to 2 codes. Note: we could have made this handle
  *  any number of subsequent run-lengths (up to 4 are possible). However, such sequences (3 or 4
  *  run-lengths, with a total code length less than 12) are vanishingly rare. Meanwhile,
  *  accommodating them imposes costs.
  * contents works like this:
- * { uint5_t bitsTotal, [blank x 1], bool msbOverflowed, bool rlOverflowed}
+ * { uint5_t bitsTotal, bool complete, bool msbOverflowed, bool rlOverflowed}
  *  - bitsTotal is a number from 1 to 31 (or 0 for invalid) indicating the combined number of bits
- *    taken up (in the stream) by the codes for all parts of the HuffmanTriplet which are present
+ *    taken up (in the stream) by the codes for all parts of the HuffmanTriple which are present
+ *  - complete (0x04) means the entry fully resolves this decode: lsbOrValue is the final value
+ *    and rl is the final run-length. This is the hot-path test.
  *  - the overflows tell us which symbol (if any) was unable to fit on this triple. Note that we
  *    never store the msb in this table, so even a 1bit msb code is "overflow". Note also that we
  *    don't need an "lsbOverflowed" bit: this is indicated by having 0 bitsTotal.
@@ -121,7 +230,7 @@ typedef struct HuffmanTable
 typedef struct HuffmanTriple
 {
     uint8_t contents;
-    uint8_t lsb;
+    uint8_t lsbOrValue;
     uint16_t rl;
 } HuffmanTriple;
 
@@ -129,6 +238,14 @@ typedef struct HuffmanTripleTable
 {
     HuffmanTriple code[1 << VN_BIG_TABLE_MAX_SIZE];
 } HuffmanTripleTable;
+
+/* Utility functions for HuffmanTriple's contents memvar */
+static inline uint8_t huffmanTripleGetBits(uint8_t contents) { return contents >> 3; }
+static inline bool huffmanTripleIsComplete(uint8_t contents) { return contents & 0x04; }
+static inline bool huffmanTripleLsbOverflowed(uint8_t contents)
+{
+    return (huffmanTripleGetBits(contents) == 0);
+}
 
 /*! \brief Huffman "manual" decoder state. This is used when look-up tables are insufficient. */
 typedef struct HuffmanManualDecodeState
@@ -145,6 +262,9 @@ typedef struct HuffmanTripleDecodeState
     HuffmanTripleTable tripleTable;                   /**< TripleTable, for short triplets */
     HuffmanTable rlTable;                             /**< Fallback lookup-table for Run-lengths */
     HuffmanManualDecodeState manualStates[HuffCount]; /**< Individual decoders, as a double-fallback */
+    uint32_t lsbGuardBit; /**< ORed over the peeked bits before clz, so that the leading-zero
+                               count is capped at min(LSB maxCodeLength,
+                               VN_BIG_TABLE_MAX_NUM_LEADING_ZEROES) with no extra min ops. */
 } HuffmanTripleDecodeState;
 
 /*! \brief Initialize a triple huffman decoder
@@ -156,6 +276,13 @@ typedef struct HuffmanTripleDecodeState
 bool huffmanTripleInitialize(HuffmanTripleDecodeState* state, HuffmanStream* stream,
                              uint8_t bitstreamVersion);
 
+/*! \brief Fallback for huffmanTripleDecode, handling entries which the triple-table could not
+ *         fully resolve (long LSB codes, any MSB, and long or numerous run-length codes).
+ *
+ *  \return run-length, or -1 for error */
+int32_t huffmanTripleDecodeSlow(const HuffmanTripleDecodeState* state, HuffmanStream* stream,
+                                int16_t* valueOut, HuffmanTriple triplet);
+
 /*! \brief Decode the next several huffman symbols
  *
  *  \param state    Triple-decoder to decode with
@@ -163,130 +290,30 @@ bool huffmanTripleInitialize(HuffmanTripleDecodeState* state, HuffmanStream* str
  *  \param valueOut Output coefficient (lsb, possibly with msb)
  *
  *  \return run-length, or -1 for error */
-int32_t huffmanTripleDecode(const HuffmanTripleDecodeState* state, HuffmanStream* stream, int16_t* valueOut);
-
-/*------------------------------------------------------------------------------*/
-
-/*! \brief Initialize a HuffmanStream_t
- *
- *  \param stream  Huffman stream to initialize
- *  \param data    pointer to start of data, so that Huffman stream points there.
- *  \param size    size of data, in bytes.
- *
- *  \return True on success, otherwise false. */
-bool huffmanStreamInitialize(HuffmanStream* stream, const uint8_t* data, size_t size);
-
-/*! \brief Get number of remaining bits on the HuffmanStream_t */
-static inline size_t huffmanStreamGetRemainingBits(const HuffmanStream* stream)
+static inline int32_t huffmanTripleDecode(const HuffmanTripleDecodeState* state,
+                                          HuffmanStream* stream, int16_t* valueOut)
 {
-    const size_t wordBitsRemaining = 32 - stream->wordEndBit;
-    const size_t byteBitsRemaining = bytestreamRemaining(&stream->byteStream) * 8;
-    return wordBitsRemaining + byteBitsRemaining;
-}
+    huffmanStreamRefill(stream);
+    const uint32_t peek = huffmanStreamPeek32(stream);
 
-/*! \brief Extract bits from the middle of a number.
- *
- *  \param startBit The first bit that you want, inclusive
- *  \param endBit   The last bit that you want, exclusive
- *
- *  \return         The bits in the specified interval, right-aligned. For example,
- *                  extract(0xf0f1f2f3, 8, 20) returns 0x00000f1f
- */
-static inline uint32_t extractBits(uint32_t data, uint8_t startBit, uint8_t endBit)
-{
-    if (endBit > 32) {
-        endBit = 32;
+    /* The lutIdx is (number of leading zeros, capped) followed by the VN_BIG_TABLE_MAX_CODE_SIZE
+     * bits after those leading zeros. The guard bit caps the clz at
+     * min(maxLsbCodeLength, VN_BIG_TABLE_MAX_NUM_LEADING_ZEROES), and also keeps clz's input
+     * nonzero (clz32(0) is undefined behaviour on some compilers). */
+    const uint32_t lsbLeadingZeros = clz32(peek | state->lsbGuardBit);
+    const uint32_t lutIdx =
+        (lsbLeadingZeros << VN_BIG_TABLE_MAX_CODE_SIZE) |
+        ((peek >> (32 - VN_BIG_TABLE_MAX_CODE_SIZE - lsbLeadingZeros)) & VN_BIG_HUFFMAN_CODE_MASK);
+
+    const HuffmanTriple triplet = state->tripleTable.code[lutIdx];
+    huffmanStreamConsume(stream, huffmanTripleGetBits(triplet.contents));
+
+    if (huffmanTripleIsComplete(triplet.contents)) {
+        *valueOut = (int8_t)triplet.lsbOrValue;
+        return triplet.rl;
     }
-    if (startBit > endBit) {
-        startBit = endBit;
-    }
-    const uint8_t numBits = (uint8_t)(endBit - startBit); /* 0..32 */
-    if (numBits == 0) {
-        return 0;
-    }
-    /* numBits >= 1 here, so endBit >= 1 and (32 - endBit) is in [0, 31]. */
-    const uint32_t mask = (numBits >= 32) ? 0xFFFFFFFFu : ((1u << numBits) - 1u);
-    return (data >> (32 - endBit)) & mask;
-}
 
-/*! \brief Advance the Huffman stream BY a certain number of bits. Can be used directly, if you
- *         know you don't yet have enough bits between wordStartBit and wordEndBit, or indirectly
- * through huffmanStreamAdvanceToNthBit, if you're not sure whether or not you have enough bits.
- *
- *  \param stream  Huffman stream to advance.
- *  \param bits    The number of bits by which you want to advance the stream. That is, the number
- *                 of bits that you want to append into the [wordStartBit, wordEndBit) window, not
- * knowing whether they're already in word, or need to come off of byteStream. */
-static inline void huffmanStreamAdvanceByNBits(HuffmanStream* stream, uint8_t bits)
-{
-    /* Can only read, at most, 25 bits (if word is 32 bits). If we try to read more, we risk
-     * pushing wordStartBit below zero, because we read 8 bits at a time. */
-    assert(bits <= (8 * (sizeof(stream->word)) - 7));
-
-    stream->wordEndBit += bits;
-    stream->bitsRead += bits;
-
-    if (stream->wordEndBit > (8 * sizeof(stream->word))) {
-        /* If wordEndBit is past the end, then shuffle data in from the right to the left, 8 bits at
-         * a time, until wordStartBit is as far left as possible. This helps us access the
-         * byteStream as rarely as possible. */
-        while (stream->wordStartBit > 7) {
-            stream->word <<= 8;
-            if (stream->byteStream.offset < stream->byteStream.size) {
-                stream->word |= *(stream->byteStream.data + stream->byteStream.offset);
-                stream->byteStream.offset++;
-            }
-            stream->wordStartBit -= 8;
-            stream->wordEndBit -= 8;
-        }
-    }
-}
-
-/*! \brief Advance the Huffman stream UNTIL you have at least desiredNumBits between wordStartBit and
- *         wordEndBit. Good if you've already grabbed a bunch of bits, so you may or may not already
- *         have enough bits. Also good if you're not sure how many bits you need, since this won't
- *         push wordStartBit forwards.
- *
- *  \param stream          Huffman stream to advance.
- *  \param desiredNumBits  The minimum number of bits that you want to have.
- *
- *  \return desiredNumBits of data, from wordStartBit forwards. */
-static inline uint32_t huffmanStreamAdvanceToNthBit(HuffmanStream* stream, uint8_t desiredNumBits)
-{
-    const uint8_t usableBits = stream->wordEndBit - stream->wordStartBit;
-    /* Top up the number of bits and check the rlTable */
-    uint8_t endBit = stream->wordStartBit + desiredNumBits;
-    if (usableBits < desiredNumBits) {
-        huffmanStreamAdvanceByNBits(stream, desiredNumBits - usableBits);
-        endBit = stream->wordEndBit;
-    }
-    return extractBits(stream->word, stream->wordStartBit, endBit);
-}
-
-/*! \brief Read and immediately consume data via a HuffmanStream_t, with bounds-checking. This is
- *         not suitable for typical Huffman decoding. Rather, this is best when (1) you know the
- *         size of the data that you want to read, (2) you're not too concerned about performance
- *         (e.g. during initialisation), and (3) there's nothing in [wordStartBit, wordEndBit) to read.
- *
- *  \param stream   Huffman stream to read bits from.
- *  \param numBits  The minimum number of bits that you want to read.
- *  \param out      The resulting data.
- *
- *  \return 0 if read was within bounds, 0 otherwise. */
-
-/* A wrapper for when you want to read and immediately consume data. Note that you SHOULD NOT!!!
- * use this for huffman decoding. HuffmanStream is designed so that you read a lot of bits at
- * once, and then gradually use those bits. Nonetheless, this is convenient in less performance-
- * sensitive areas, e.g. initialisation. */
-static inline int32_t huffmanStreamReadBits(HuffmanStream* stream, uint8_t numBits, uint32_t* out)
-{
-    assert(stream && out && (stream->wordEndBit == stream->wordStartBit));
-    if (huffmanStreamGetRemainingBits(stream) < numBits) {
-        return -1;
-    }
-    *out = huffmanStreamAdvanceToNthBit(stream, numBits);
-    stream->wordStartBit += numBits;
-    return 0;
+    return huffmanTripleDecodeSlow(state, stream, valueOut, triplet);
 }
 
 /*------------------------------------------------------------------------------*/
@@ -312,12 +339,24 @@ bool huffmanManualInitializeWithLut(HuffmanManualDecodeState* state, HuffmanTabl
 
 /*! \brief Decode the next huffman symbol using a look-up table
  *
- *  \param rlTable   Lookup-table to look in for the code seen in the stream.
+ *  \param table     Lookup-table to look in for the code seen in the stream.
  *  \param stream    HuffmanStream to decode from
  *  \param symbolOut Decoded symbol
  *
  *  \return True on success, otherwise false. */
-bool huffmanLutDecode(const HuffmanTable* rlTable, HuffmanStream* stream, uint8_t* symbolOut);
+static inline bool huffmanLutDecode(const HuffmanTable* table, HuffmanStream* stream, uint8_t* symbolOut)
+{
+    huffmanStreamRefill(stream);
+    const uint32_t lutIdx = huffmanStreamPeekBits(stream, VN_SMALL_TABLE_MAX_SIZE);
+    const HuffmanEntry entry = table->code[lutIdx];
+    if (entry.bits != 0) {
+        huffmanStreamConsume(stream, entry.bits);
+        *symbolOut = entry.symbol;
+        return true;
+    }
+
+    return false;
+}
 
 /*! \brief Decode the next huffman symbol using a manual-decoder (i.e. a sorted list)
  *

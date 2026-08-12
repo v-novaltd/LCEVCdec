@@ -34,7 +34,6 @@
 #include <vulkan/vulkan_core.h>
 //
 #include <algorithm>
-#include <set>
 
 #if VN_OS(ANDROID)
 #include <android/hardware_buffer.h>
@@ -145,7 +144,7 @@ BufferVulkan* PipelineVulkan::allocateBuffer(uint32_t requiredSize, pipeline::Bu
     BufferVulkan* const buffer = m_buffersPool.make(m_backend, requiredSize, usage);
 
     if (!buffer) {
-        VNLogFatal("Could not allocate buffer");
+        VNLogError("Could not allocate buffer");
         return nullptr;
     }
     return buffer;
@@ -274,16 +273,20 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
     VNUnused(timestamp);
     VNUnused(delayUs);
 
+    if (outputPicture == nullptr || renderSendInformation == nullptr) {
+        return LdcReturnCodeInvalidParam;
+    }
+
     if (!backend().renderingEnabled() || !backend().getRenderer().windowReady()) {
         return LdcReturnCodeAgain;
     }
     if (delayUs > 0) {
-        VNLogWarning("renderSendPicture is not implemented yet, rendering with zero delay");
+        VNLogWarning("renderSendPicture delayUs is not implemented yet, rendering with zero delay");
     }
 
 #if defined(USE_GLFW)
     glfwPollEvents();
-    auto* window = backend().getRenderer().getWindow();
+    GLFWwindow* window = backend().getRenderer().getWindow();
     if (window == nullptr) {
         return LdcReturnCodeAgain;
     }
@@ -297,7 +300,12 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
 
     backend().getRenderer().setRotation(renderSendInformation->rotation);
 
-    auto* picture = fromPipeline(outputPicture);
+    PictureVulkan* picture = fromPipeline(outputPicture);
+
+    if (picture == nullptr) {
+        VNLogWarning("Null picture");
+        return LdcReturnCodeError;
+    }
 
     LdpPictureDesc desc{};
     picture->getDesc(desc);
@@ -310,7 +318,13 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
                        colorFormat == LdpColorFormatI444_8 || colorFormat == LdpColorFormatNV12_8 ||
                        colorFormat == LdpColorFormatNV21_8 || colorFormat == LdpColorFormatGRAY_8);
 
-    auto* frame = findFrame(timestamp, true);
+    FrameVulkan* frame = fromBase(findFrame(timestamp, true));
+
+    if (frame == nullptr) {
+        VNLogWarning("Null frame");
+        return LdcReturnCodeError;
+    }
+
     const LdppDitherFrame* frameDither = frame ? frame->dither() : nullptr;
     backend().getRenderer().setRenderFormat(bit8, nv12);
     backend().getRenderer().setLimitedRange(desc.colorRange == LdpColorRangeLimited);
@@ -332,10 +346,17 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
     vkGetImageSubresourceLayout(backend().getDevice(), backend().getRenderer().textureImage[2],
                                 &subresource, &layout2);
 
-    auto* buffer = fromPipeline(picture->buffer);
+    BufferVulkan* buffer = fromPipeline(picture->buffer);
+
+    if (buffer == nullptr) {
+        VNLogWarning("Null buffer");
+        return LdcReturnCodeError;
+    }
+
     LdpBufferMapping mapping{};
     if (!buffer->map(&mapping, 0, buffer->size(), LdpAccessRead)) {
         VNLogError("Mapping failed");
+        return LdcReturnCodeError;
     }
 
     const auto* db = mapping.ptr;

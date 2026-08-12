@@ -32,7 +32,7 @@
 #define __STDC_LIMIT_MACROS
 #endif /* __STDC_LIMIT_MACROS */
 
-#include <limits.h>
+#include <LCEVC/common/stdlib.h>
 
 #define VNUnused(x) (void)(x)
 
@@ -108,11 +108,4 @@ static inline uint64_t VNGetThreadId(void)
 #define VNGetProcessId() 0
 #endif
 
-// alloca
-//
-#if VN_OS(WINDOWS)
-#include <malloc.h>
-#else
-#include <alloca.h>
-#endif
 #endif // VN_LCEVC_COMMON_PLATFORM_H

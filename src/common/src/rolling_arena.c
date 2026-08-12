@@ -12,18 +12,16 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include <LCEVC/common/rolling_arena.h>
+//
 #include <LCEVC/common/check.h>
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/log.h>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/common/platform.h>
-#include <LCEVC/common/rolling_arena.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/common/threads.h>
-//
-#include <assert.h>
-#include <stdio.h>
-#include <string.h>
 
 // Minimum alignment of allocations in bytes
 #define VN_MIN_ALIGNMENT 64

@@ -17,9 +17,8 @@
 #include <LCEVC/common/check.h>
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/memory.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/common/threads.h>
-//
-#include <assert.h>
 
 void ldcRingBufferInitialize(LdcRingBuffer* ringBuffer, uint32_t capacity, uint32_t elementSize,
                              LdcMemoryAllocator* allocator)

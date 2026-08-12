@@ -14,8 +14,7 @@
 
 #include <LCEVC/build_config.h>
 #include <LCEVC/common/acceleration.h>
-//
-#include <assert.h>
+#include <LCEVC/common/stdlib.h>
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 static LdcAcceleration defaultAcceleration = {0};

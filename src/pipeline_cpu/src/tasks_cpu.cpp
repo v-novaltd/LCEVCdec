@@ -33,7 +33,8 @@ namespace {
         // Convenience values for readability
         const LdeFrameConfig& frameConfig{frame->config};
         const LdeGlobalConfig& globalConfig{*frame->globalConfig};
-        const uint8_t numImagePlanes{frame->numImagePlanes()};
+        const uint8_t numImagePlanes{
+            std::min(frame->numImagePlanes(), static_cast<uint8_t>(kLdpPictureMaxNumPlanes))};
         const uint8_t numEnhancedPlanes =
             std::min(globalConfig.numPlanes, static_cast<uint8_t>(RCMaxPlanes));
         const LdeScalingMode scalingModes[LOQEnhancedCount] = {globalConfig.scalingModes[LOQ0],

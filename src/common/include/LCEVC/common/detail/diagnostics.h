@@ -15,33 +15,12 @@
 #ifndef VN_LCEVC_COMMON_DETAIL_DIAGNOSTICS_H
 #define VN_LCEVC_COMMON_DETAIL_DIAGNOSTICS_H
 
+#include <LCEVC/common/atomic.h>
 #include <LCEVC/common/clock.h>
 #include <LCEVC/common/diagnostics_buffer.h>
 #include <LCEVC/common/platform.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/common/threads.h>
-//
-#include <stdarg.h>
-#include <stdio.h>
-#include <time.h>
-#ifdef __cplusplus
-#include <atomic>
-#else
-#include <stdatomic.h>
-#endif
-
-// do { ... } while(0) is used to make macros work with if/else correctly
-//
-// NOLINTBEGIN(cppcoreguidelines-avoid-do-while)
-
-#ifdef __cplusplus
-typedef std::atomic_uint LdcAtomicUint;
-static_assert(sizeof(LdcAtomicUint) == sizeof(unsigned int), "atomic uint size mismatch");
-static_assert(alignof(LdcAtomicUint) == alignof(unsigned int), "atomic uint alignment mismatch");
-typedef std::atomic_flag LdcAtomicFlag;
-#else
-typedef atomic_uint LdcAtomicUint;
-typedef atomic_flag LdcAtomicFlag;
-#endif
 
 // Functions used by the diagnostic macros
 //
@@ -263,7 +242,7 @@ struct LdcDiagArgumentTraits<unsigned long>
 #endif
 
 template <typename T>
-constexpr LdcDiagArg LdcDiagArgumentType(T t)
+constexpr LdcDiagArg LdcDiagArgumentType(T)
 {
     return static_cast<LdcDiagArg>(LdcDiagArgumentTraits<T>::Type);
 }
@@ -328,6 +307,10 @@ struct LdcDiagArgumentTraits<unsigned long>
 #define _VNDiagArgumentPairValue(n, a0, a1) a1
 #define _VNDiagArgumentPairType(n, a0, a1) _VNDiagArgumentType(n, a1)
 #define _VNDiagArgumentPairName(n, a0, a1) a0
+
+// do { ... } while(0) is used to make macros work with if/else correctly
+//
+// NOLINTBEGIN(cppcoreguidelines-avoid-do-while)
 
 // Common internal macro to generate the static Diag event site and call
 //
@@ -406,6 +389,20 @@ public:
 
     VNNoCopyNoMove(LdcTraceScoped);
 };
+
+class LdcDiagVaEndGuard
+{
+public:
+    explicit LdcDiagVaEndGuard(va_list* args)
+        : m_args(args)
+    {}
+    ~LdcDiagVaEndGuard() { va_end(*m_args); }
+
+    VNNoCopyNoMove(LdcDiagVaEndGuard);
+
+private:
+    va_list* m_args;
+};
 #endif
 
 // Metrics
@@ -477,8 +474,15 @@ static inline void ldcDiagEvent(const LdcDiagSite* site, size_t valuesSize, ...)
 
         va_list args;
         va_start(args, valuesSize);
+#ifdef __cplusplus
+        {
+            LdcDiagVaEndGuard argsGuard(&args);
+            ldcDiagnosticsCopyArguments(site, values, site->argumentCount, args);
+        }
+#else
         ldcDiagnosticsCopyArguments(site, values, site->argumentCount, args);
         va_end(args);
+#endif
 
         ldcDiagnosticsBufferPushEnd(&ldcDiagnosticsState->diagnosticsBuffer);
     }

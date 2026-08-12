@@ -83,7 +83,11 @@ typedef struct LdeGlobalConfig
     uint32_t numTiles[RCMaxPlanes][LOQEnhancedCount]; /**< Helper to track the total number of tiles on each LOQ and plane */
 
     LdeSharpenType sharpenType; /**< Sharpening type */
-    float sharpenStrength;      /**< Sharpening strength of the frame, if enabled */
+#if VN_SDK_FEATURE(LDE_FLOATS)
+    float sharpenStrength; /**< Sharpening strength of the frame, if enabled */
+#else
+    uint8_t signalledSharpenStrength; /**< Sharpening strength of the frame, as signalled, if enabled */
+#endif
 } LdeGlobalConfig;
 
 /*! \brief Parameters that relevant to an individual frame and may either inherit or change the to

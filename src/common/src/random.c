@@ -14,7 +14,6 @@
 
 #include <LCEVC/common/clock.h>
 #include <LCEVC/common/random.h>
-//
 
 /*------------------------------------------------------------------------------*/
 

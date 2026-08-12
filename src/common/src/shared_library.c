@@ -12,10 +12,10 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include <LCEVC/common/shared_library.h>
 //
 #include <LCEVC/common/platform.h>
-#include <LCEVC/common/shared_library.h>
-#include <stdio.h>
+#include <LCEVC/common/stdlib.h>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -37,11 +37,6 @@ LdcSharedLibrary ldcSharedLibraryFind(const char* libraryName)
     }
 
     return (LdcSharedLibrary)hModule;
-}
-
-void ldcSharedLibraryRelease(LdcSharedLibrary sharedLibrary)
-{
-    FreeLibrary((HMODULE)sharedLibrary);
 }
 
 void* ldcSharedLibrarySymbol(LdcSharedLibrary sharedLibrary, const char* symbolName)
@@ -74,8 +69,6 @@ LdcSharedLibrary ldcSharedLibraryFind(const char* libraryName)
 
     return (LdcSharedLibrary)handle;
 }
-
-void ldcSharedLibraryRelease(LdcSharedLibrary sharedLibrary) { dlclose((void*)sharedLibrary); }
 
 void* ldcSharedLibrarySymbol(LdcSharedLibrary sharedLibrary, const char* symbolName)
 {

@@ -22,14 +22,8 @@
 #include <LCEVC/common/log.h>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/common/platform.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/common/threads.h>
-//
-#include <assert.h>
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
 
 // Forward declarations
 static void scheduleTask(LdcTaskPool* pool, LdcTask* task, LdcTask** head);
@@ -319,6 +313,7 @@ static inline void runTask(LdcTaskPool* pool, LdcTaskPart* taskPart)
 //
 static inline void readyTask(LdcTaskPool* pool, LdcTask* task, bool grouped)
 {
+    VNUnused(grouped);
     VNLogVerbose("scheduleTask: %s %s ready: %p %s", pool->multiThreaded ? "Multi" : "Single",
                  grouped ? "Group" : "Standalone", (void*)task, task->name);
 
@@ -1091,7 +1086,8 @@ typedef struct TaskWrapperSlicedDefer
     bool (*function)(void* argument, uint32_t offset, uint32_t count);
     bool (*completion)(void* argument, uint32_t count);
 
-    uint8_t argument[1];
+    // zero-size array is a pointer to the first memory address past the end of the struct.
+    uint8_t argument[0];
 } TaskWrapperSlicedDefer;
 
 static void* taskWrapperSlicedDefer(LdcTask* task, const LdcTaskPart* part)
@@ -1138,10 +1134,16 @@ bool ldcTaskPoolAddSlicedDeferred(LdcTaskPool* pool, LdcTask* parent,
         parent->output = kTaskDependencyInvalid;
     }
 
-    /// Append 'slicedDefer' argument block onto the end of the task block
+    // The arguments to 'slicedDefer' are essentially a set of loose bytes dangling past the end of
+    // the TaskWrapperSlicedDefer struct. So, allocate it as an array, whose size is the size of
+    // the struct plus the bonus bytes.
     uint32_t dataSize = sizeof(TaskWrapperSlicedDefer) + argumentSize;
-    uint8_t* dataAllocation = alloca(dataSize);
-    TaskWrapperSlicedDefer* data = (TaskWrapperSlicedDefer*)dataAllocation;
+    LdcMemoryAllocation dataAllocation = {0};
+    VNAllocateArray(pool->shortTermAllocator, &dataAllocation, uint8_t, dataSize, "TaskPool_SlicedDefer");
+    if (dataAllocation.ptr == NULL) {
+        return false;
+    }
+    TaskWrapperSlicedDefer* data = (TaskWrapperSlicedDefer*)dataAllocation.ptr;
     data->function = function;
     data->completion = completion;
     memcpy(data->argument, argument, argumentSize);
@@ -1152,9 +1154,11 @@ bool ldcTaskPoolAddSlicedDeferred(LdcTaskPool* pool, LdcTask* parent,
 
     LdcTask* task = addTask(pool, group, inputs, inputsCount, output, taskWrapperSlicedDefer,
                             completion ? taskWrapperSlicedDeferComplete : NULL, totalSize,
-                            totalSize, dataSize, dataAllocation, "slicedDefer");
+                            totalSize, dataSize, dataAllocation.ptr, "slicedDefer");
 
     threadMutexUnlock(&pool->mutex);
+
+    VNFree(pool->shortTermAllocator, &dataAllocation);
 
     if (task == NULL) {
         return false;

@@ -12,12 +12,10 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include <assert.h>
 #include <LCEVC/common/bitutils.h>
 #include <LCEVC/common/diagnostics.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/cmdbuffer_gpu.h>
-#include <stdbool.h>
-#include <stdio.h>
 
 /*! \brief Constants used for the command buffer format and storage behavior. */
 enum CmdBufferGpuConstants
@@ -65,7 +63,8 @@ static bool cmdBufferResidualsResize(LdcMemoryAllocator* allocator, LdeCmdBuffer
             allocation = &cmdBufferBuilder->allocationClearAndSet;
             break;
         }
-        case CBGOSetZero: break;
+        case CBGOSetZero:
+        default: return false;
     }
 
     if (*residualBuffer) {
@@ -134,7 +133,7 @@ static bool cmdBufferCommandsResize(LdeCmdBufferGpu* cmdBuffer,
     return true;
 }
 
-void cmdBufferAppendResiduals(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cmdBufferBuilder,
+bool cmdBufferAppendResiduals(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* cmdBufferBuilder,
                               LdeCmdBufferGpuCmd* cmd, const int16_t* residuals,
                               int16_t* residualBuffer, uint32_t* residualCount,
                               const uint32_t* residualCapacity, uint32_t tuIndex, bool tuRasterOrder)
@@ -161,15 +160,17 @@ void cmdBufferAppendResiduals(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder
 
     if (residualBuffer) {
         if (*residualCount >= *residualCapacity - cmdBuffer->layerCount) {
-            cmdBufferResidualsResize(cmdBuffer->allocator, cmdBufferBuilder, cmd->operation,
-                                     *residualCapacity * CBGKStoreGrowFactor, cmdBuffer->diagId);
+            if (!cmdBufferResidualsResize(cmdBuffer->allocator, cmdBufferBuilder, cmd->operation,
+                                          *residualCapacity * CBGKStoreGrowFactor, cmdBuffer->diagId)) {
+                return false;
+            }
             switch (cmd->operation) {
                 case CBGOAdd: residualBuffer = cmdBufferBuilder->residualsAdd; break;
                 case CBGOSet: residualBuffer = cmdBufferBuilder->residualsSet; break;
                 case CBGOClearAndSet:
                     residualBuffer = cmdBufferBuilder->residualsClearAndSet;
                     break;
-                default: return;
+                default: return false;
             }
         }
 
@@ -197,6 +198,7 @@ void cmdBufferAppendResiduals(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder
 
         *residualCount += cmdBuffer->layerCount;
     }
+    return true;
 }
 
 /*------------------------------------------------------------------------------*/
@@ -238,8 +240,10 @@ bool ldeCmdBufferGpuAppend(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* c
                 residualCount = &cmdBufferBuilder->residualClearAndSetCount;
                 residualCapacity = &cmdBufferBuilder->residualClearAndSetCapacity;
 
-                cmdBufferAppendResiduals(cmdBuffer, cmdBufferBuilder, cmd, residuals, residualBuffer,
-                                         residualCount, residualCapacity, tuIndex, false);
+                if (!cmdBufferAppendResiduals(cmdBuffer, cmdBufferBuilder, cmd, residuals, residualBuffer,
+                                              residualCount, residualCapacity, tuIndex, false)) {
+                    return false;
+                }
 
                 return true;
             }
@@ -281,8 +285,10 @@ bool ldeCmdBufferGpuAppend(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* c
     if (cmd->blockIndex == blockIndex) {
         // modify existing cmd
         if (operation != CBGOClearAndSet) {
-            cmdBufferAppendResiduals(cmdBuffer, cmdBufferBuilder, cmd, residuals, residualBuffer,
-                                     residualCount, residualCapacity, tuIndex, tuRasterOrder);
+            if (!cmdBufferAppendResiduals(cmdBuffer, cmdBufferBuilder, cmd, residuals, residualBuffer,
+                                          residualCount, residualCapacity, tuIndex, tuRasterOrder)) {
+                return false;
+            }
         }
     } else {
         if (cmdBuffer->commandCount == cmdBufferBuilder->commandCapacity - 2) {
@@ -309,8 +315,10 @@ bool ldeCmdBufferGpuAppend(LdeCmdBufferGpu* cmdBuffer, LdeCmdBufferGpuBuilder* c
         cmd->bitCount = 0;
 
         if (operation != CBGOClearAndSet) {
-            cmdBufferAppendResiduals(cmdBuffer, cmdBufferBuilder, cmd, residuals, residualBuffer,
-                                     residualCount, residualCapacity, tuIndex, tuRasterOrder);
+            if (!cmdBufferAppendResiduals(cmdBuffer, cmdBufferBuilder, cmd, residuals, residualBuffer,
+                                          residualCount, residualCapacity, tuIndex, tuRasterOrder)) {
+                return false;
+            }
         }
 
         cmdBuffer->commandCount++;

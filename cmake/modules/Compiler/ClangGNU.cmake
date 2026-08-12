@@ -49,8 +49,6 @@ endif ()
 target_compile_options(
     lcevc_dec::compiler
     INTERFACE $<$<BOOL:${VN_SDK_WARNINGS_FAIL}>:-Werror>
-              $<$<BOOL:${VN_SDK_MINIMUM_LIB_SIZE}>:-fno-exceptions>
-              $<$<AND:$<BOOL:${VN_SDK_MINIMUM_LIB_SIZE}>,$<COMPILE_LANGUAGE:CXX>>:-fno-rtti>
               -Wall
               -Wshadow
               -Wstrict-prototypes

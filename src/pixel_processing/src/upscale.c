@@ -27,11 +27,20 @@
 /*------------------------------------------------------------------------------*/
 
 UpscaleFunction getUpscaleFunction(LdpFixedPoint srcFP, LdpFixedPoint dstFP, Interleaving interleaving,
-                                   bool is2d, bool pa, bool ditheringEnabled)
+                                   bool is2d, bool pa, bool ditheringEnabled, const uint16_t kernel[4])
 {
     if (!fixedPointIsValid(srcFP) || !fixedPointIsValid(dstFP)) {
         VNLogError("Invalid 2D function request - srcFp or dstFp is invalid");
         return NULL;
+    }
+
+    // If kernels exceed S16 (32767) the SIMD upscalers cannot be used, fallback to scalar
+    if (!upscaleKernelFitsS16(kernel)) {
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
+        return upscaleGetFunctionScalar(srcFP, dstFP, interleaving, is2d, pa, ditheringEnabled);
+#else
+        return NULL;
+#endif
     }
 
     UpscaleFunction res = NULL;
@@ -79,9 +88,7 @@ typedef struct UpscaleSlicedJobContext
     LdpPicturePlaneDesc srcPlane;
     LdpPicturePlaneDesc dstPlane;
     UpscaleFunction upscaleFunction;
-    bool applyPA;
-    bool is2D;
-    LdeKernel kernel;
+    LdppUpscaleParams upscaleParams;
     const LdppDitherFrame* frameDither;
 
 #if VN_SDK_FEATURE(TRACING)
@@ -99,10 +106,15 @@ typedef struct UpscaleSlicedJobContext
 static LdppUpscaleParams generateUpscaleParams(const LdeKernel* kernel, LdpFixedPoint dstFp)
 {
     LdppUpscaleParams params = {0};
-    params.kernel[0] = kernel->coeffs[0];
-    params.kernel[1] = kernel->coeffs[1];
-    params.kernel[2] = kernel->coeffs[2];
-    params.kernel[3] = kernel->coeffs[3];
+    params.kernelIsWide = !upscaleKernelFitsS16(kernel->coeffs);
+    if (params.kernelIsWide) {
+        memcpy(params.kernel, kernel->coeffs, sizeof(params.kernel));
+    } else {
+        params.kernel[0] = (uint16_t)ldeKernelGetCoefficient(kernel, 0);
+        params.kernel[1] = (uint16_t)ldeKernelGetCoefficient(kernel, 1);
+        params.kernel[2] = (uint16_t)ldeKernelGetCoefficient(kernel, 2);
+        params.kernel[3] = (uint16_t)ldeKernelGetCoefficient(kernel, 3);
+    }
 
     switch (dstFp) {
         // Unsigned planes (direct upscale)
@@ -165,9 +177,7 @@ static bool upscaleSlicedJob(void* argument, uint32_t yStart, uint32_t count)
         ldppDitherSliceInitialise(&sliceDither, context->frameDither, yStart, context->planeIndex);
     }
     LdppDitherSlice* dither = context->frameDither ? &sliceDither : NULL;
-    LdppUpscaleParams params =
-        generateUpscaleParams(&context->kernel, context->dstLayout->layoutInfo->fixedPoint);
-    params.applyPA = context->applyPA ? 1 : 0;
+    const LdppUpscaleParams params = context->upscaleParams;
 
     upscaleFunction(context->srcPlane.firstSample, context->dstPlane.firstSample,
                     context->srcPlane.rowByteStride, context->dstPlane.rowByteStride, width, height,
@@ -201,14 +211,12 @@ static bool upscaleExecute(LdcTaskPool* taskPool, LdcTask* parent, const LdppUps
     slicedJobContext.dstPlane = params->dstPlane;
     bool ditheringEnabled = params->frameDither != NULL;
     Interleaving interleaving = getInterleaving(srcLayoutInfo, params->planeIndex);
-    slicedJobContext.is2D = is2D;
-
     slicedJobContext.upscaleFunction =
         getUpscaleFunction(srcLayoutInfo->fixedPoint, dstLayoutInfo->fixedPoint, interleaving, is2D,
-                           params->applyPA, ditheringEnabled);
+                           params->applyPA, ditheringEnabled, params->kernel->coeffs);
 
-    slicedJobContext.kernel = *params->kernel;
-    slicedJobContext.applyPA = params->applyPA;
+    slicedJobContext.upscaleParams = generateUpscaleParams(params->kernel, dstLayoutInfo->fixedPoint);
+    slicedJobContext.upscaleParams.applyPA = params->applyPA;
     slicedJobContext.frameDither = params->frameDither;
 
     if (!slicedJobContext.upscaleFunction) {

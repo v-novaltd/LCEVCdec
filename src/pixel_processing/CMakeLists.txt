@@ -14,7 +14,8 @@
 
 include("Sources.cmake")
 
-add_library(lcevc_dec_pixel_processing ${VN_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
+add_library(lcevc_dec_pixel_processing ${VN_SDK_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS}
+                                       ${INTERFACES})
 lcevc_set_properties(lcevc_dec_pixel_processing)
 
 target_include_directories(

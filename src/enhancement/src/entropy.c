@@ -16,11 +16,8 @@
 
 #include "huffman.h"
 
-#include <assert.h>
 #include <LCEVC/common/check.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
+#include <LCEVC/common/stdlib.h>
 
 /*------------------------------------------------------------------------------*/
 
@@ -227,6 +224,11 @@ bool entropyInitialize(EntropyDecoder* state, const LdeChunk* chunk, const Entro
 
 VN_ENTROPY_DECODE_DEFINE(getNextSymbolRLEOnly)
 
+int32_t entropyDecodeRleCoefficient(EntropyDecoder* state, int16_t* coeffOut)
+{
+    return entropyDecode_getNextSymbolRLEOnly(state, coeffOut);
+}
+
 #define VN_ENTROPY_DECODE_TEMPORAL_DEFINE(symbolGetterFn)                                             \
     static int32_t entropyDecodeTemporal_##symbolGetterFn(EntropyDecoder* state, TemporalSignal* out) \
     {                                                                                                 \
@@ -266,22 +268,6 @@ VN_ENTROPY_DECODE_DEFINE(getNextSymbolRLEOnly)
 
 VN_ENTROPY_DECODE_TEMPORAL_DEFINE(getNextSymbolTemporalAndRLEOnly)
 VN_ENTROPY_DECODE_TEMPORAL_DEFINE(getNextSymbolTemporalAndHuffman)
-
-int32_t entropyDecode(EntropyDecoder* state, int16_t* out)
-{
-    assert(state->type == EDTDefault);
-
-    if (!state->entropyEnabled) {
-        *out = 0;
-        return EntropyNoData;
-    }
-
-    if (state->rleOnly) {
-        return entropyDecode_getNextSymbolRLEOnly(state, out);
-    }
-
-    return huffmanTripleDecode(&state->comboHuffman, &state->hstream, out);
-}
 
 int32_t entropyDecodeTemporal(EntropyDecoder* state, TemporalSignal* out)
 {
@@ -341,8 +327,7 @@ bool entropyDecodeSize(EntropyDecoder* state, int16_t* size)
 
 uint32_t entropyGetConsumedBytes(const EntropyDecoder* state)
 {
-    const uint8_t numUsableBits = state->hstream.wordEndBit - state->hstream.wordStartBit;
-    return (uint32_t)((state->hstream.bitsRead + 7 - numUsableBits) >> 3);
+    return (uint32_t)((huffmanStreamGetConsumedBits(&state->hstream) + 7) >> 3);
 }
 
 /*------------------------------------------------------------------------------*/

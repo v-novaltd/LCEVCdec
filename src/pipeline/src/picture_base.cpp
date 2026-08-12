@@ -284,7 +284,7 @@ void PictureBase::getPlaneDescInternal(uint32_t plane, LdpPicturePlaneDesc& desc
     assert(plane < kLdpPictureMaxNumPlanes);
 
     if (!m_hasExternalPlanes) {
-        VNLogFatal("Cannot get PlaneDesc.");
+        VNLogError("Cannot get PlaneDesc");
         assert(0);
     } else {
         desc = m_externalPlaneDescs[plane];
@@ -381,31 +381,50 @@ bool PictureBase::unbindBuffer()
 namespace {
     bool setDesc(LdpPicture* picture, const LdpPictureDesc* desc)
     {
+        if (!picture || !desc) {
+            return false;
+        }
         return static_cast<PictureBase*>(picture)->setDesc(*desc);
     }
     void getDesc(const LdpPicture* picture, LdpPictureDesc* desc)
     {
+        if (!picture || !desc) {
+            return;
+        }
         static_cast<const PictureBase*>(picture)->getDesc(*desc);
     }
 
     bool getBufferDesc(const LdpPicture* picture, LdpPictureBufferDesc* desc)
     {
+        if (!picture || !desc) {
+            return false;
+        }
         return static_cast<const PictureBase*>(picture)->getBufferDesc(*desc);
     }
 
     bool setFlag(LdpPicture* picture, uint8_t flag, bool value)
     {
+        if (!picture) {
+            return false;
+        }
         static_cast<PictureBase*>(picture)->setPublicFlag(flag, value);
         return true;
     }
 
     bool getFlag(const LdpPicture* picture, uint8_t flag)
     {
+        if (!picture) {
+            return false;
+        }
         return static_cast<const PictureBase*>(picture)->getPublicFlag(flag);
     }
 
     bool lock(LdpPicture* picture, LdpAccess access, LdpPictureLock** pictureLock)
     {
+        if (!picture || !pictureLock) {
+            return false;
+        }
+
         LdpPictureLock* ptr = nullptr;
 
         if (!static_cast<PictureBase*>(picture)->lock(access, ptr)) {
@@ -418,12 +437,18 @@ namespace {
 
     void unlock(LdpPicture* picture, LdpPictureLock* pictureLock)
     {
+        if (!picture || !pictureLock) {
+            return;
+        }
         const PictureLockBase* const ptr = static_cast<PictureLockBase*>(pictureLock);
         static_cast<PictureBase*>(picture)->unlock(ptr);
     }
 
     LdpPictureLock* getLock(const LdpPicture* picture)
     {
+        if (!picture) {
+            return nullptr;
+        }
         return static_cast<const PictureBase*>(picture)->getLock();
     }
 

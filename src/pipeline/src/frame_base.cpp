@@ -130,6 +130,10 @@ void FrameBase::unblockForFlush()
 
 uint8_t* FrameBase::setEnhancementData(const uint8_t* data, uint32_t byteSize)
 {
+    if (data == nullptr || byteSize == 0) {
+        return nullptr;
+    }
+
     VNAllocateIdArray(m_enhancementAllocator, &m_enhancementData, uint8_t, byteSize,
                       "FrameBase_EnhancementData", timestamp);
     uint8_t* const enhancement{VNAllocationPtr(m_enhancementData, uint8_t)};
@@ -583,8 +587,7 @@ LdpPictureDesc FrameBase::getOutputPictureDesc(PassthroughMode passthroughMode) 
     }
 
     if (!globalConfig->initialized) {
-        VNLogWarning(
-            "No global configuration, which is required to get post-enhancement description.");
+        VNLogWarning("No global configuration, returning base picture desc");
         return desc;
     }
 

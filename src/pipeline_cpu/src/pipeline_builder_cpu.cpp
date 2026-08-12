@@ -32,7 +32,9 @@ PipelineBuilderCPU::PipelineBuilderCPU(LdcMemoryAllocator* allocator)
     : pipeline::PipelineBuilderBase(allocator, m_configuration)
     , m_allocator(allocator)
     , m_configurableMembersCPU(kConfigMemberMap, m_configuration)
-{}
+{
+    setDefaultThreadCount(m_configuration);
+}
 
 PipelineBuilderCPU::~PipelineBuilderCPU() {}
 

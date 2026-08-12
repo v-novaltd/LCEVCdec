@@ -26,6 +26,7 @@ layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
 // Specialized build time configuration
 layout (constant_id = SPECID_8_BIT) const bool bit8 = false;
 layout (constant_id = SPECID_NV12) const bool nv12 = false;
+layout (constant_id = SPECID_ADD_TEMPORAL) const bool addTemporal = false;
 
 layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
     uint samples[];
@@ -34,6 +35,10 @@ layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
 layout(std430, set = 0, binding = 1) buffer restrict writeonly DstImageBuffer {
     uint samples[];
 } dst;
+
+layout(std430, set = 0, binding = 2) buffer restrict readonly TemporalBuffer {
+    uint samples[];
+} temporal;
 
 layout(push_constant) uniform consts {
     int width;
@@ -47,23 +52,44 @@ layout(push_constant) uniform consts {
     int shift;     // 5 for 10bit, 3 for 12bit, and 1 for 14bit
     int sharpenStrength; // 0 disables sharpening, otherwise U16 strength
     int nv21Swap; // non-zero -> swap U/V in 8-bit semi-planar chroma write
+    int containerStrideTemporal0;
+    int containerOffsetTemporal0;
+    int containerStrideTemporal1;
+    int containerOffsetTemporal1;
+    int containerStrideTemporal2;
+    int containerOffsetTemporal2;
 };
 
 #include "common.glsl"
 
-ivec2 readSrc(uint x, uint y) {
-    return  unpack16bitInternals(src.samples[containerOffsetIn + y * containerStrideIn + x]);
+// Saturated add of the co-located temporal sample-pair to an upsampled pair
+// (non 0 stride signals presence of temporal)
+ivec2 addTemporalPair(ivec2 pred, int ex, int ey, int tStride, int tOffset)
+{
+    if (addTemporal && tStride != 0) {
+        const ivec2 t = unpack16bitInternals(temporal.samples[uint(tOffset + ey * tStride + ex)]);
+        return saturateS16(pred + t);
+    }
+    return pred;
 }
 
-void writeDst(uint x, uint y, ivec2 pels)
+// Read an "In"-plane prediction pair at uint32-element coords (ex,ey)
+ivec2 readSrcIn(int ex, int ey)
 {
-    dst.samples[containerOffsetOut + y * containerStrideOut + x]  = pack16bitInternals(pels);
+    const ivec2 pred = unpack16bitInternals(src.samples[uint(containerOffsetIn + ey * containerStrideIn + ex)]);
+    return addTemporalPair(pred, ex, ey, containerStrideTemporal0, containerOffsetTemporal0);
+}
+
+// Read a "V"-plane prediction pair (nv12 chroma) at uint32-element coords.
+ivec2 readSrcV(int ex, int ey)
+{
+    const ivec2 pred = unpack16bitInternals(src.samples[uint(containerOffsetV + ey * containerStrideV + ex)]);
+    return addTemporalPair(pred, ex, ey, containerStrideTemporal2, containerOffsetTemporal2);
 }
 
 int loadInternalValue(int px, int py)
 {
-    const uint packed = src.samples[uint(containerOffsetIn + (px >> 1) + py * containerStrideIn)];
-    const ivec2 vals = unpack16bitInternals(packed);
+    const ivec2 vals = readSrcIn(px >> 1, py);
     return ((px & 1) == 0) ? vals.x : vals.y;
 }
 
@@ -110,8 +136,8 @@ void main()
     if (bit8) {
         if (nv12 && containerStrideV != 0) {
             if (4 * x < width) {
-                const ivec2 pixels1 = unpack16bitInternals(src.samples[containerOffsetIn + x + y * containerStrideIn]);
-                const ivec2 pixels2 = unpack16bitInternals(src.samples[containerOffsetV + x + y * containerStrideV]);
+                const ivec2 pixels1 = readSrcIn(int(x), int(y));
+                const ivec2 pixels2 = readSrcV(int(x), int(y));
                 const uvec4 uv = fromInternalTo8bit(ivec4(pixels1.x, pixels2.x, pixels1.y, pixels2.y));
                 dst.samples[containerOffsetOut + x + y * containerStrideOut] =
                     (nv21Swap != 0) ? pack8bit(uvec4(uv.y, uv.x, uv.w, uv.z)) : pack8bit(uv);
@@ -129,10 +155,8 @@ void main()
                 dst.samples[containerOffsetOut + x + y * containerStrideOut] =
                     pack8bit(uvec4(out0, out1, out2, out3));
             } else {
-                const ivec2 pixels1 =
-                    unpack16bitInternals(src.samples[containerOffsetIn + 2 * x + y * containerStrideIn]);
-                const ivec2 pixels2 =
-                    unpack16bitInternals(src.samples[containerOffsetIn + 2 * x + 1 + y * containerStrideIn]);
+                const ivec2 pixels1 = readSrcIn(int(2 * x), int(y));
+                const ivec2 pixels2 = readSrcIn(int(2 * x + 1), int(y));
                 dst.samples[containerOffsetOut + x + y * containerStrideOut] =
                     pack8bit(fromInternalTo8bit(ivec4(pixels1.x, pixels1.y, pixels2.x, pixels2.y)));
             }
@@ -140,8 +164,8 @@ void main()
     } else {
         if (nv12 && containerStrideV != 0) {
             if (2 * x < width) {
-                const ivec2 pixelsU = unpack16bitInternals(src.samples[containerOffsetIn + (x >> 1) + y * containerStrideIn]);
-                const ivec2 pixelsV = unpack16bitInternals(src.samples[containerOffsetV + (x >> 1) + y * containerStrideV]);
+                const ivec2 pixelsU = readSrcIn(int(x >> 1), int(y));
+                const ivec2 pixelsV = readSrcV(int(x >> 1), int(y));
                 const int u = ((x & 1) == 0) ? pixelsU.x : pixelsU.y;
                 const int v = ((x & 1) == 0) ? pixelsV.x : pixelsV.y;
                 dst.samples[containerOffsetOut + x + y * containerStrideOut] =
@@ -158,8 +182,7 @@ void main()
             }
             dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bit(outVals);
         } else {
-            const ivec2 pixels =
-                unpack16bitInternals(src.samples[containerOffsetIn + x + y * containerStrideIn]);
+            const ivec2 pixels = readSrcIn(int(x), int(y));
             uvec2 outVals = fromInternalTo16bit(pixels, shift);
             if (nv12) {
                 outVals <<= 6;
@@ -167,5 +190,5 @@ void main()
             dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bit(outVals);
         }
     }
-    
+
 }

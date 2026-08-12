@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -223,6 +223,59 @@ TEST(Extract, ExtractH264_Remove_SEI)
         EXPECT_EQ(outputSize, 7);
         EXPECT_EQ(memcmp(output.data(), "payload", 7), 0);
     }
+}
+
+TEST(Extract, ExtractH264_Remove_OnlyLcevc)
+{
+    std::array<uint8_t, 100> output = {0};
+    uint32_t outputSize = 0;
+    uint32_t strippedOffset = 0;
+    uint32_t strippedSize = 0;
+
+    // Non-LCEVC SEI (unregistered user data), CC-style T.35 SEI with a foreign provider code,
+    // and a base IDR slice must all survive removal; only the LCEVC NAL unit is stripped.
+    const std::vector<uint8_t> foreignSei = {0x00, 0x00, 0x00, 0x01, 0x06, 0x05,
+                                             0x04, 'i',  'n',  'f',  'o',  0x80};
+    const std::vector<uint8_t> ccSei = {0x00, 0x00, 0x01, 0x06, 0x04, 0x06, 0xb5,
+                                        0x00, 0x31, 'G',  'A',  '9',  0x80};
+    const std::vector<uint8_t> idrSlice = {0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x10};
+    const std::vector<uint8_t> lcevcNal = {0x00, 0x00, 0x00, 0x01, 0x79, 'p',
+                                           'a',  'y',  'l',  'o',  'a',  'd'};
+
+    std::vector<uint8_t> nalu;
+    nalu.insert(nalu.end(), foreignSei.begin(), foreignSei.end());
+    nalu.insert(nalu.end(), ccSei.begin(), ccSei.end());
+    nalu.insert(nalu.end(), idrSlice.begin(), idrSlice.end());
+    nalu.insert(nalu.end(), lcevcNal.begin(), lcevcNal.end());
+
+    EXPECT_EQ(LCEVC_extractAndRemoveEnhancementFromNAL(
+                  nalu.data(), static_cast<uint32_t>(nalu.size()), LCEVC_NALFormat_AnnexB,
+                  LCEVC_CodecType_H264, output.data(), static_cast<uint32_t>(output.size()),
+                  &outputSize, &strippedOffset, &strippedSize),
+              1);
+    EXPECT_EQ(outputSize, lcevcNal.size());
+    EXPECT_EQ(memcmp(output.data(), lcevcNal.data(), lcevcNal.size()), 0);
+    EXPECT_EQ(strippedOffset, 0u);
+    EXPECT_EQ(strippedSize, nalu.size() - lcevcNal.size());
+    EXPECT_EQ(memcmp(nalu.data(), foreignSei.data(), foreignSei.size()), 0);
+    EXPECT_EQ(memcmp(nalu.data() + foreignSei.size(), ccSei.data(), ccSei.size()), 0);
+    EXPECT_EQ(memcmp(nalu.data() + foreignSei.size() + ccSei.size(), idrSlice.data(), idrSlice.size()), 0);
+
+    // An AU with no LCEVC at all must come back untouched in remove mode.
+    std::vector<uint8_t> baseOnly;
+    baseOnly.insert(baseOnly.end(), foreignSei.begin(), foreignSei.end());
+    baseOnly.insert(baseOnly.end(), idrSlice.begin(), idrSlice.end());
+    const std::vector<uint8_t> baseOnlyCopy = baseOnly;
+
+    EXPECT_EQ(LCEVC_extractAndRemoveEnhancementFromNAL(
+                  baseOnly.data(), static_cast<uint32_t>(baseOnly.size()), LCEVC_NALFormat_AnnexB,
+                  LCEVC_CodecType_H264, output.data(), static_cast<uint32_t>(output.size()),
+                  &outputSize, &strippedOffset, &strippedSize),
+              0);
+    EXPECT_EQ(outputSize, 0u);
+    EXPECT_EQ(strippedOffset, 0u);
+    EXPECT_EQ(strippedSize, baseOnly.size());
+    EXPECT_EQ(baseOnly, baseOnlyCopy);
 }
 
 TEST(Extract, ExtractH264_InterleavedNAL)

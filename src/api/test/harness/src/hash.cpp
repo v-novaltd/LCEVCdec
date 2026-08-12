@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -166,6 +166,9 @@ void Hashes::updateOpl(LCEVC_DecoderHandle decoder, LCEVC_PictureHandle decodedP
         fmt::print(*m_oplFileOut, "{},{},{}", frameCount, width, height);
         for (uint32_t plane = 0; plane < planeCount; ++plane) {
             auto hash = createHash(m_hashType);
+            if (!hash) {
+                break;
+            }
             hash->updatePlane(decoder, decodedPicture, plane);
             fmt::print(*m_oplFileOut, ",{}", hash->hexDigest());
         }

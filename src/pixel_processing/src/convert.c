@@ -26,12 +26,9 @@
 
 /*------------------------------------------------------------------------------*/
 
-#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
 PlaneConvertFunction planeConvertGetFunctionScalar(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
                                                    uint32_t planeIndex, bool isNV12);
-#endif
-PlaneConvertFunction planeConvertGetFunctionSSE(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
-                                                uint32_t planeIndex, bool isNV12);
+PlaneConvertFunction planeConvertGetFunctionSSE(LdpFixedPoint srcFP, LdpFixedPoint dstFP, bool isNV12);
 PlaneConvertFunction planeConvertGetFunctionNEON(LdpFixedPoint srcFP, LdpFixedPoint dstFP, bool isNV12);
 
 PlaneConvertFunction planeConvertGetFunction(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
@@ -42,19 +39,16 @@ PlaneConvertFunction planeConvertGetFunction(LdpFixedPoint srcFP, LdpFixedPoint 
 
     /* Find a SIMD function */
     if (acceleration->hasSSE) {
-        res = planeConvertGetFunctionSSE(srcFP, dstFP, planeIndex, isNV12);
+        res = planeConvertGetFunctionSSE(srcFP, dstFP, isNV12);
     }
     if (acceleration->hasNeon) {
         assert(res == NULL);
         res = planeConvertGetFunctionNEON(srcFP, dstFP, isNV12);
     }
 
-    /* Fallback to a non-SIMD function */
-#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
     if (!res) {
         res = planeConvertGetFunctionScalar(srcFP, dstFP, planeIndex, isNV12);
     }
-#endif
 
     return res;
 }

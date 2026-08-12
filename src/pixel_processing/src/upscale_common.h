@@ -37,11 +37,12 @@ typedef enum Interleaving
 
 typedef struct LdppUpscaleParams
 {
-    uint16_t kernel[4]; /** The upscale kernel **/
-    bool applyPA;       /** Runtime PA flag for scalar upscale paths **/
-    uint16_t shift;     /** Shift when converting from baseFP to S16 format and back **/
-    uint16_t offset;    /** Offset when converting from S16 to baseFP format **/
-    uint16_t midpoint;  /** Midpoint when converting from S16 to baseFP format **/
+    uint16_t kernel[4]; /** Signed S16 kernel bit patterns for SIMD, or magnitudes for wide scalar kernels **/
+    bool kernelIsWide; /** Kernel contains magnitudes which cannot be represented as S16 **/
+    bool applyPA;      /** Runtime PA flag for scalar upscale paths **/
+    uint16_t shift;    /** Shift when converting from baseFP to S16 format and back **/
+    uint16_t offset;   /** Offset when converting from S16 to baseFP format **/
+    uint16_t midpoint; /** Midpoint when converting from S16 to baseFP format **/
 } LdppUpscaleParams;
 
 #define VN_UPSCALE_ARGS                                                                    \
@@ -50,6 +51,9 @@ typedef struct LdppUpscaleParams
         LdppDitherSlice *dither
 
 typedef void (*UpscaleFunction)(VN_UPSCALE_ARGS);
+
+UpscaleFunction getUpscaleFunction(LdpFixedPoint srcFP, LdpFixedPoint dstFP, Interleaving interleaving,
+                                   bool is2d, bool pa, bool ditheringEnabled, const uint16_t kernel[4]);
 
 UpscaleFunction upscaleGetFunctionSSE(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
                                       Interleaving interleaving, bool is2d, bool pa, bool dithering);
@@ -61,6 +65,32 @@ UpscaleFunction upscaleGetFunctionNEON(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
 UpscaleFunction upscaleGetFunctionScalar(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
                                          Interleaving interleaving, bool is2d, bool pa, bool dithering);
 #endif
+
+/*! \brief Kernel coefficients are stored in the bitstream and the LdeKernel as uint16_t;
+ *         however, the MPEG-5 Part 2 LCEVC standard specifies that the 0th and 3rd elements
+ *         are negated when read. This helper should be used at read time to enforce this.
+ */
+static inline int32_t upscaleKernelGetCoefficient(const uint16_t kernel[4], uint32_t index)
+{
+    const int32_t magnitude = kernel[index];
+    return (index == 0 || index == 3) ? -magnitude : magnitude;
+}
+
+static inline int32_t upscaleKernelGetPreparedCoefficient(const LdppUpscaleParams* params, uint32_t index)
+{
+    return params->kernelIsWide ? upscaleKernelGetCoefficient(params->kernel, index)
+                                : (int16_t)params->kernel[index];
+}
+
+/*! \brief Most kernels (including all defaults from the encoder) fit into S16 types, this makes
+ *         writing performant upscalers easier. For conformance, kernels can be larger than this,
+ *         which is detected by this helper; slower but fully conformant scalar paths are then used.
+ */
+static inline bool upscaleKernelFitsS16(const uint16_t kernel[4])
+{
+    return kernel[0] <= INT16_MAX && kernel[1] <= INT16_MAX && kernel[2] <= INT16_MAX &&
+           kernel[3] <= INT16_MAX;
+}
 
 /*------------------------------------------------------------------------------*/
 

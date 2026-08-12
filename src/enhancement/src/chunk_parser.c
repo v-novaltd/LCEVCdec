@@ -20,13 +20,11 @@
 #include "dequant.h"
 #include "log_utilities.h"
 
-#include <assert.h>
 #include <LCEVC/common/check.h>
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/log.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/config_parser.h>
-#include <stdbool.h>
-#include <stdint.h>
 
 /*------------------------------------------------------------------------------*/
 
@@ -426,8 +424,8 @@ bool parseChunk(ByteStream* stream, LdeChunk* chunk, bool* loqEntropyEnabled, Ti
             uint64_t chunkSizeMulti = 0;
             VNCheckB(bytestreamReadMultiByte(stream, &chunkSizeMulti));
 
-            if (chunkSizeMulti > INT_MAX) {
-                VNLogError("Chunk data size is larger than INT_MAX");
+            if (chunkSizeMulti > INT32_MAX) {
+                VNLogError("Chunk data size is larger than INT32_MAX");
                 return false;
             }
 

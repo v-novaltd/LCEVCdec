@@ -22,6 +22,14 @@ import subprocess
 import zlib
 
 
+def tool_runs(path):
+    try:
+        r = subprocess.run([path, '--version'])
+        return r.returncode == 0
+    except FileNotFoundError:
+        return False
+
+
 def get_tool_path(build_dir, package_name, tool_name):
     conanbuildinfo_path = f"{build_dir}/conanbuildinfo.txt"
     try:
@@ -49,8 +57,7 @@ def get_glslang_validator_path(build_dir):
         print("Found glslangValidator path from conan:", path)
         return path
     path = 'glslangValidator'
-    r = subprocess.run([path, '--version'])
-    if r.returncode == 0:
+    if tool_runs(path):
         print("Could not find glslangValidator path from conan, defaulting to PATH")
         return path
     else:
@@ -58,20 +65,19 @@ def get_glslang_validator_path(build_dir):
         exit(1)
 
 
-def get_spirv_opt_path(build_dir):
+def get_spirv_opt_path(build_dir, android_ndk=None):
     path = get_tool_path(build_dir, 'glslang', 'spirv-opt')
     if path:
         print("Found spirv-opt path from conan:", path)
         return path
-    matches = glob.glob(os.path.join(os.environ.get(
-        'ANDROID_NDK'), 'shader-tools', '*', 'spirv-opt'))
+    ndk_path = android_ndk or os.environ.get('ANDROID_NDK', '')
+    matches = glob.glob(os.path.join(ndk_path, 'shader-tools', '*', 'spirv-opt'))
     android_path = matches[0] if matches else None
     if android_path:
-        print("Using spirv-opt from Android NDK:", path)
+        print("Using spirv-opt from Android NDK:", android_path)
         return android_path
     path = 'spirv-opt'
-    r = subprocess.run([path, '--version'])
-    if r.returncode == 0:
+    if tool_runs(path):
         print("Could not find spirv-opt path from conan or Android NDK, defaulting to PATH")
         return path
     else:
@@ -176,6 +182,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compile GLSL shaders")
     parser.add_argument('--cmakebuildinfodir', type=str, required=True,
                         help="The directory containing cmakebuildinfo.txt")
+    parser.add_argument('--android-ndk', type=str,
+                        help="Android NDK root, used to find shader-tools/*/spirv-opt")
     parser.add_argument('--optimize', action='store_true',
                         help="Run spirv-opt -Os after compilation to reduce SPIR-V binary size")
     args = parser.parse_args()
@@ -185,7 +193,7 @@ if __name__ == "__main__":
 
     spirvopt_path = None
     if args.optimize:
-        spirvopt_path = get_spirv_opt_path(args.cmakebuildinfodir)
+        spirvopt_path = get_spirv_opt_path(args.cmakebuildinfodir, args.android_ndk)
 
     shaders = [
         "src/upscale_vertical.comp",

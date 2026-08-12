@@ -69,11 +69,19 @@ extern "C" bool LCEVC_DiagHandlerOStream(void* user, const LdcDiagSite* site, co
         case LdcDiagTypeTraceAsyncBegin:
         case LdcDiagTypeTraceAsyncEnd:
         case LdcDiagTypeTraceAsyncInstant:
+#if VN_SDK_FEATURE(TRACING)
             ldcDiagnosticFormatJson(buffer, sizeof(buffer), site, &fixedRecord, 1, values, valuesCount);
+#else
+            buffer[0] = '\0';
+#endif
             fmt::print(*ostream, "Trace: {}\n", buffer);
             break;
         case LdcDiagTypeMetric:
+#if VN_SDK_FEATURE(TRACING)
             ldcDiagnosticFormatJson(buffer, sizeof(buffer), site, &fixedRecord, 1, values, valuesCount);
+#else
+            buffer[0] = '\0';
+#endif
             fmt::print(*ostream, "Metric: {}\n", buffer);
             break;
 

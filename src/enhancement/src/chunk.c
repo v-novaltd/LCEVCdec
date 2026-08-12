@@ -14,8 +14,7 @@
 
 #include "chunk.h"
 
-#include <assert.h>
-#include <stdbool.h>
+#include <LCEVC/common/stdlib.h>
 
 bool temporalChunkEnabled(const LdeFrameConfig* frameConfig, const LdeGlobalConfig* globalConfig)
 {

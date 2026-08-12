@@ -12,23 +12,20 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include <assert.h>
 #include <LCEVC/common/log.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/approximate_pa.h>
 #include <LCEVC/enhancement/bitstream_types.h>
 
-static const int16_t kUnity = 1 << 14;
+static const uint16_t kUnity = 1 << 14;
 
 static bool approximatePA4Tap(LdeKernel* kernel)
 {
     assert(kernel->length == 4);
 
-    const int16_t d0 = kernel->coeffs[0];
-    const int16_t b0 = kernel->coeffs[2];
+    const uint16_t halfBDDiff = (uint16_t)(((uint32_t)kernel->coeffs[0] + kernel->coeffs[2]) / 2);
 
-    const int16_t halfBDDiff = (int16_t)((b0 - d0) / 2);
-
-    kernel->coeffs[0] = (int16_t)-halfBDDiff;
+    kernel->coeffs[0] = halfBDDiff;
     kernel->coeffs[1] = kUnity;
     kernel->coeffs[2] = halfBDDiff;
     kernel->coeffs[3] = 0;

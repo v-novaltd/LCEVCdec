@@ -18,9 +18,7 @@
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/memory.h>
-//
-#include <assert.h>
-#include <stdio.h>
+#include <LCEVC/common/stdlib.h>
 
 void ldcDequeInitialize(LdcDeque* deque, uint32_t reserved, uint32_t elementSize, LdcMemoryAllocator* allocator)
 {

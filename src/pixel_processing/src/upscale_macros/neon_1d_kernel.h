@@ -137,9 +137,10 @@
     row_even = vmlal_s16(row_even, vget_low_s16(v0_s3), k2);
     row_even = vmlal_s16(row_even, vget_low_s16(v0_s4), k3);
 
-    // === Pack and interleave results ===
-    const int16x4_t r0_odd_16 = vrshrn_n_s32(row_odd, 14);
-    const int16x4_t r0_even_16 = vrshrn_n_s32(row_even, 14);
+    // === Saturating pack and interleave results ===
+    // Cubic filter overshoot can exceed S16, so saturate before the subsequent S15 clamp.
+    const int16x4_t r0_odd_16 = vqrshrn_n_s32(row_odd, 14);
+    const int16x4_t r0_even_16 = vqrshrn_n_s32(row_even, 14);
 
     const int16x4x2_t row_zip = vzip_s16(r0_odd_16, r0_even_16);
     int16x8_t row_16 = vcombine_s16(row_zip.val[0], row_zip.val[1]);
@@ -150,13 +151,14 @@
     // === Apply PA ===
 #if APPLY_PA == 1
     const int32x4_t sum = vpaddlq_s16(row_16);
-    const int16x4_t mean = vrshrn_n_s32(sum, 1);
-    const int16x4_t avg4 = vsub_s16(base, mean);
+    const int32x4_t mean = vrshrq_n_s32(sum, 1);
+    const int32x4_t adjust = vsubq_s32(vmovl_s16(base), mean);
 
-    const int16x8_t avg8 = vcombine_s16(avg4, avg4);
-    const int16x8x2_t broadcast = vzipq_s16(avg8, avg8);
+    const int32x4x2_t broadcast = vzipq_s32(adjust, adjust);
+    const int32x4_t rowLo = vaddq_s32(vmovl_s16(vget_low_s16(row_16)), broadcast.val[0]);
+    const int32x4_t rowHi = vaddq_s32(vmovl_s16(vget_high_s16(row_16)), broadcast.val[1]);
 
-    row_16 = vqaddq_s16(row_16, broadcast.val[0]);
+    row_16 = vcombine_s16(vqmovn_s32(rowLo), vqmovn_s32(rowHi));
 #endif
 
     // === Apply dithering ===

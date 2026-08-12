@@ -365,7 +365,7 @@ static int32_t extractEnhancementFromNAL(uint8_t* data, uint32_t dataSize, LCEVC
         codecType, nalFormat, kNalTypes[codecType], kNalTypesSEI[codecType], data, dataSize,
         0,         0,         kNumNalTypes};
 
-    NalUnitSpan nalSpan = {NULL, 0};
+    NalUnitSpan nalSpan = {0};
 
     while (findNextNalUnit(&state, &nalSpan)) {
         if (nalSpan.type == 0) {
@@ -383,8 +383,10 @@ static int32_t extractEnhancementFromNAL(uint8_t* data, uint32_t dataSize, LCEVC
 
             isLcevc = isLcevc && (nalSpan.payload[0] == kSeiPayloadTypeUserDataRegisteredItuTt35);
 
-            // Remove SEI even if not lcevc
-            if (!isLcevc && !remove) {
+            /* Any SEI that does not carry LCEVC registered user data (e.g. closed captions,
+             * HDR metadata, encoder info) is left untouched, including in remove mode.
+             */
+            if (!isLcevc) {
                 continue;
             }
 
@@ -401,7 +403,7 @@ static int32_t extractEnhancementFromNAL(uint8_t* data, uint32_t dataSize, LCEVC
             isLcevc = isLcevc && (memcmp(kITU, nalSpan.payload + payloadOffset, sizeof(kITU)) == 0);
             /* Check SEI UUID type and move payload into vector
              */
-            if (!isLcevc && !remove) {
+            if (!isLcevc) {
                 continue;
             }
 

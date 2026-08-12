@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -13,6 +13,7 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include <fmt/core.h>
+#include <LCEVC/build_config.h>
 #include <LCEVC/lcevc_dec.h>
 #include <LCEVC/utility/configure.h>
 #include <nlohmann/json.hpp>
@@ -169,18 +170,26 @@ LCEVC_ReturnCode configureDecoderFromJson(LCEVC_DecoderHandle decoderHandle, std
             return LCEVC_Error;
         }
         std::string str{std::istreambuf_iterator<char>(jsonFile), std::istreambuf_iterator<char>()};
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
         try {
+#endif
             configuration = json::parse(str.c_str());
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
         } catch (const json::parse_error&) {
             return LCEVC_Error;
         }
+#endif
     } else {
         // Raw json
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
         try {
+#endif
             configuration = json::parse(jsonStr);
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
         } catch (const json::parse_error&) {
             return LCEVC_Error;
         }
+#endif
     }
 
     // Expecting a valid json object

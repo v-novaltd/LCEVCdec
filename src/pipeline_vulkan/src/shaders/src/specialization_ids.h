@@ -21,10 +21,11 @@
 // Conversion
 #define SPECID_8_BIT 3
 #define SPECID_NV12 4
+#define SPECID_ADD_TEMPORAL 5
 
 // Apply
-#define SPECID_DDS 5
-#define SPECID_RASTER_ORDER 6
+#define SPECID_DDS 6
+#define SPECID_RASTER_ORDER 7
 
 // UpscaleH
-#define SPECID_PA 7
+#define SPECID_PA 8

@@ -14,7 +14,6 @@
 
 #include "picture_vulkan.h"
 
-#include "buffer_vulkan.h"
 #include "from_base.h"
 #include "picture_lock_vulkan.h"
 #include "pipeline_vulkan.h"
@@ -104,7 +103,7 @@ void PictureVulkan::getPlaneDescInternal(uint32_t plane, LdpPicturePlaneDesc& de
     if (!m_hasExternalPlanes) {
         assert(buffer);
         const BufferVulkanVma* bufferVulkan = fromPipeline(buffer);
-        if (!isLocked() || !bufferVulkan->m_mapped) {
+        if (!isLocked() || !bufferVulkan || !bufferVulkan->m_mapped) {
             VNLogError("Can't get PlaneDesc for unlocked picture.");
             assert(0);
             return;

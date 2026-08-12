@@ -12,6 +12,7 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include <LCEVC/common/recycling_allocator.h>
 //
 #include <LCEVC/common/check.h>
 #include <LCEVC/common/diagnostics.h>
@@ -19,13 +20,9 @@
 #include <LCEVC/common/log.h>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/common/platform.h>
-#include <LCEVC/common/recycling_allocator.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/common/threads.h>
 #include <LCEVC/common/vector.h>
-//
-#include <assert.h>
-#include <stdio.h>
-#include <string.h>
 
 static const LdcMemoryAllocatorFunctions kRecyclingAllocatorFunctions;
 
@@ -109,11 +106,17 @@ static void recyclingFree(LdcMemoryAllocator* allocator, LdcMemoryAllocation* al
     ldcMemoryRecyclingAllocator* const ralloc = (ldcMemoryRecyclingAllocator*)allocator;
     threadMutexLock(&ralloc->mutex);
 
+    if (ralloc->size == 0) {
+        ralloc->parentAllocator->functions->free(ralloc->parentAllocator, allocation, site);
+        threadMutexUnlock(&ralloc->mutex);
+        return;
+    }
+
     // Cache is full - free oldest
     if (ldcVectorSize(&ralloc->allocations) >= ralloc->size) {
         LdcMemoryAllocation* alloc = ldcVectorAt(&ralloc->allocations, 0);
         ralloc->parentAllocator->functions->free(ralloc->parentAllocator, alloc, site);
-        ldcVectorRemove(&ralloc->allocations, alloc);
+        ldcVectorRemoveIdx(&ralloc->allocations, 0);
     }
 
     // Add block to cache
@@ -131,15 +134,15 @@ static void recyclingReallocate(LdcMemoryAllocator* allocator, LdcMemoryAllocati
         recyclingAllocate(allocator, &newAllocation, size, allocation->alignment, site);
     }
 
+    if (allocation->ptr && newAllocation.ptr) {
+        memcpy(newAllocation.ptr, allocation->ptr, minU64(allocation->size, newAllocation.size));
+    }
+
     if (allocation->size) {
         // Release old buffer
         recyclingFree(allocator, allocation, site);
     }
 
-    //
-    if (allocation->ptr && newAllocation.ptr) {
-        memcpy(newAllocation.ptr, allocation->ptr, minU64(allocation->size, newAllocation.size));
-    }
     *allocation = newAllocation;
 }
 

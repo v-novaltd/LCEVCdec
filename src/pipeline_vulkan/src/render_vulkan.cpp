@@ -31,12 +31,7 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cstdint>
-#include <memory>
-#include <set>
-#include <sstream>
-#include <type_traits>
 
 namespace lcevc_dec::pipeline_vulkan {
 
@@ -181,7 +176,7 @@ bool RenderVulkan::init()
     return true;
 }
 
-std::vector<const char*> RenderVulkan::getRenderingExtensions()
+std::vector<const char*> RenderVulkan::getRenderingInstanceExtensions() const
 {
     std::vector<const char*> extensions;
 #if defined(USE_GLFW)
@@ -194,6 +189,13 @@ std::vector<const char*> RenderVulkan::getRenderingExtensions()
     extensions.push_back("VK_KHR_android_surface");
 #endif
 
+    return extensions;
+}
+
+std::vector<const char*> RenderVulkan::getRenderingDeviceExtensions() const
+{
+    std::vector<const char*> extensions;
+    extensions.push_back("VK_KHR_swapchain");
     return extensions;
 }
 
@@ -1730,8 +1732,15 @@ void RenderVulkan::drawFrame()
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         recreateSwapChain();
         return;
+    } else if (result == VK_ERROR_SURFACE_LOST_KHR) {
+        VNLogWarning("vkAcquireNextImageKHR: surface lost, releasing surface and swap chain");
+        releaseSurfaceAndSwapChain();
+        return;
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-        VNLogError("failed to acquire swap chain image!");
+        // imageIndex is not valid on failure - rendering with it would read past the
+        // framebuffer array.
+        VNLogError("failed to acquire swap chain image! (%d)", static_cast<int>(result));
+        return;
     }
 
     vkResetFences(m_backend.getDevice(), 1, &m_inFlightFences[currentFrame]);
@@ -1757,10 +1766,17 @@ void RenderVulkan::drawFrame()
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    result = vkQueueSubmit(m_backend.getGraphicsQueue(), 1, &submitInfo, m_inFlightFences[currentFrame]);
+    {
+        common::ScopedLock lock(m_backend.compute().submitMutex());
+        result = vkQueueSubmit(m_backend.getGraphicsQueue(), 1, &submitInfo,
+                               m_inFlightFences[currentFrame]);
 
-    if (result != VK_SUCCESS) {
-        VNLogError("failed to submit draw command buffer!");
+        if (result != VK_SUCCESS) {
+            // Presenting after a failed submit would wait on a semaphore that will never
+            // signal.
+            VNLogError("failed to submit draw command buffer! (%d)", static_cast<int>(result));
+            return;
+        }
     }
 
     VkPresentInfoKHR presentInfo{};
@@ -1778,8 +1794,11 @@ void RenderVulkan::drawFrame()
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
         framebufferResized = false;
         recreateSwapChain();
+    } else if (result == VK_ERROR_SURFACE_LOST_KHR) {
+        VNLogWarning("vkQueuePresentKHR: surface lost, releasing surface and swap chain");
+        releaseSurfaceAndSwapChain();
     } else if (result != VK_SUCCESS) {
-        VNLogError("failed to present swap chain image!");
+        VNLogError("failed to present swap chain image! (%d)", static_cast<int>(result));
     }
 
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;

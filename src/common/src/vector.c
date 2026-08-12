@@ -17,8 +17,7 @@
 #include <LCEVC/common/check.h>
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/memory.h>
-//
-#include <assert.h>
+#include <LCEVC/common/stdlib.h>
 
 void ldcVectorInitialize(LdcVector* vector, uint32_t elementSize, uint32_t reserved,
                          LdcMemoryAllocator* allocator)

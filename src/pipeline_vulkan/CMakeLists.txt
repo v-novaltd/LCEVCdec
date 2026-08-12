@@ -25,38 +25,12 @@ find_package(Python3 REQUIRED)
 set(SHADER_SCRIPT_PATH ${CMAKE_CURRENT_LIST_DIR}/src/shaders/compile_shaders.py)
 set(SHADER_SCRIPT_DIR ${CMAKE_CURRENT_LIST_DIR}/src/shaders)
 
-set(SHADER_INPUT_FILES
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/apply.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/add.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/common.glsl
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_common.glsl
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_in.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_p010.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_nv12.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_rgba8.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_rgba10.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/render_fragment.frag
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/render_vertex.vert
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_constants.glsl
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_horizontal.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_vertical.comp)
-
-set(SHADER_OUTPUT_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/apply.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/add.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_in.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_p010.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_nv12.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba8.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba10.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/render_fragment.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/render_vertex.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_horizontal.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_vertical.h)
-
 set(SHADER_COMPILE_ARGS --cmakebuildinfodir ${CMAKE_CURRENT_BINARY_DIR}/../..)
+if (ANDROID_NDK)
+    list(APPEND SHADER_COMPILE_ARGS --android-ndk ${ANDROID_NDK})
+elseif (CMAKE_ANDROID_NDK)
+    list(APPEND SHADER_COMPILE_ARGS --android-ndk ${CMAKE_ANDROID_NDK})
+endif ()
 if (VN_SDK_MINIMUM_LIB_SIZE)
     list(APPEND SHADER_COMPILE_ARGS --optimize)
 endif ()
@@ -106,8 +80,10 @@ if (VN_SDK_UNIT_TESTS)
         lcevc_dec_pipeline_vulkan_static
         PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
         PUBLIC "${CMAKE_CURRENT_LIST_DIR}/src"
-        PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/src/hpp"
-        PUBLIC "${CMAKE_CURRENT_LIST_DIR}/src/vma")
+        PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/src/hpp")
+    # Include VMA as SYSTEM so any -fanalyze warnings are suppressed
+    target_include_directories(lcevc_dec_pipeline_vulkan_static SYSTEM
+                               PUBLIC "${CMAKE_CURRENT_LIST_DIR}/src/vma")
 
     target_link_libraries(lcevc_dec_pipeline_vulkan_static PUBLIC ${LINK_LIBRARIES})
 
@@ -132,8 +108,10 @@ target_include_directories(
     lcevc_dec_pipeline_vulkan
     PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
     PUBLIC "${CMAKE_CURRENT_LIST_DIR}/src"
-    PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/src/hpp"
-    PUBLIC "${CMAKE_CURRENT_LIST_DIR}/src/vma")
+    PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/src/hpp")
+# Include VMA as SYSTEM so any -fanalyze warnings are suppressed
+target_include_directories(lcevc_dec_pipeline_vulkan SYSTEM
+                           PUBLIC "${CMAKE_CURRENT_LIST_DIR}/src/vma")
 
 target_link_libraries(lcevc_dec_pipeline_vulkan PUBLIC ${LINK_LIBRARIES})
 

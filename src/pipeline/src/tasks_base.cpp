@@ -301,10 +301,28 @@ static void* taskUpscaleDirect(LdcTask* task, const LdcTaskPart* /*part*/)
     upscaleArgs.frameDither = NULL; // No dithering on un-enhanced planes
     upscaleArgs.mode = data.scalingMode;
 
+    const uint32_t srcWidth = ldpPictureLayoutPlaneWidth(upscaleArgs.srcLayout, data.plane) *
+                              upscaleArgs.srcLayout->layoutInfo->interleave[data.plane];
+    const uint32_t srcHeight = ldpPictureLayoutPlaneHeight(upscaleArgs.srcLayout, data.plane);
+    const uint32_t dstWidth = ldpPictureLayoutPlaneWidth(upscaleArgs.dstLayout, data.plane) *
+                              upscaleArgs.dstLayout->layoutInfo->interleave[data.plane];
+    const uint32_t dstHeight = ldpPictureLayoutPlaneHeight(upscaleArgs.dstLayout, data.plane);
+
     VNLogDebug("taskUpscaleDirect timestamp:%" PRIx64 " loq:%d plane:%d", frame->timestamp,
                (uint32_t)data.fromLoq, data.plane);
 
     VNDiagInfo(diagInfo, task->name, frame->timestamp, data.fromLoq, data.plane);
+
+    const uint32_t expectedDstWidth = srcWidth << 1;
+    const uint32_t expectedDstHeight = (data.scalingMode == Scale2D) ? (srcHeight << 1) : srcHeight;
+    if (dstWidth != expectedDstWidth || dstHeight != expectedDstHeight) {
+        VNLogError("UpscaleDirect invalid dimensions timestamp:%" PRIx64 " plane:%d mode:%d "
+                   "src:%ux%u dst:%ux%u expected:%ux%u",
+                   frame->timestamp, data.plane, static_cast<int>(data.scalingMode), srcWidth,
+                   srcHeight, dstWidth, dstHeight, expectedDstWidth, expectedDstHeight);
+        return nullptr;
+    }
+
     if (!ldppUpscale(pipeline->taskPool(), task, &upscaleArgs, VNDiagInfoPtr(diagInfo))) {
         VNLogError("UpscaleDirect failed");
     }

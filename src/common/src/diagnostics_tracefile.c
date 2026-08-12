@@ -18,11 +18,7 @@
 #include <LCEVC/common/log.h>
 #include <LCEVC/common/platform.h>
 #include <LCEVC/common/printf_macros.h>
-//
-#include <assert.h>
-#include <stdarg.h>
-#include <stdbool.h>
-#include <stdio.h>
+#include <LCEVC/common/stdlib.h>
 
 // Append a formatted string to a character span - updating span start and size
 //
@@ -79,17 +75,19 @@ static void argumentsFormat(CharSpan* dst, uint32_t count, const LdcDiagArg* typ
                 appendFormat(dst, "\"%s\": %u", names[arg], values[arg].valueUInt32);
                 break;
             case LdcDiagArgInt64:
-                appendFormat(dst, "\"%s\": %" PRIi64, names[arg], values[arg].valueInt64);
+                appendFormat(dst, "\"%s\": %" PRId64, names[arg], values[arg].valueInt64);
                 break;
             case LdcDiagArgUInt64:
                 appendFormat(dst, "\"%s\": %" PRIu64, names[arg], values[arg].valueUInt64);
                 break;
+#if VN_SDK_FEATURE(LDE_FLOATS)
             case LdcDiagArgFloat32:
                 appendFormat(dst, "\"%s\": %g", names[arg], values[arg].valueFloat32);
                 break;
             case LdcDiagArgFloat64:
                 appendFormat(dst, "\"%s\": %g", names[arg], values[arg].valueFloat64);
                 break;
+#endif
             case LdcDiagArgId:
                 appendFormat(dst, "\"%s\": %" PRIu64, names[arg], values[arg].id);
                 break;
@@ -124,6 +122,7 @@ int ldcDiagnosticFormatJson(char* dstStart, uint32_t dstSize, const LdcDiagSite*
                             const LdcDiagRecord* record, uint32_t processId,
                             const LdcDiagValue* values, uint32_t valuesCount)
 {
+    VNUnused(valuesCount);
     static const char* valueName[] = {"value"};
     static const char* memoryNames[] = {"size", "address", "prevAdress"};
 
@@ -253,10 +252,16 @@ int ldcDiagnosticFormatJson(char* dstStart, uint32_t dstSize, const LdcDiagSite*
     // Accumulate string in this span
     CharSpan dst = {dstStart, dstSize};
 
-    // Common part of record
+// Common part of record
+#if VN_SDK_FEATURE(LDE_FLOATS)
     double microSeconds = ((double)record->timestamp) / 1000.0;
     appendFormat(&dst, "{\"ph\":\"%s\", \"ts\":%.3f, \"pid\":%u, \"tid\":%u", phase, microSeconds,
                  processId, record->threadId);
+#else
+    uint64_t microSeconds = record->timestamp / 1000;
+    appendFormat(&dst, "{\"ph\":\"%s\", \"ts\":" PRIu64 ", \"pid\":%u, \"tid\":%u", phase,
+                 microSeconds, processId, record->threadId);
+#endif
 
     // Optional parts
     if (name) {
@@ -281,6 +286,8 @@ int ldcDiagnosticFormatJson(char* dstStart, uint32_t dstSize, const LdcDiagSite*
     return 0;
 }
 
+#if VN_SDK_FEATURE(STD_FILE)
+
 static bool diagnosticHandlerTraceFile(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
                                        const LdcDiagValue* values, uint32_t valuesCount)
 {
@@ -302,12 +309,12 @@ static bool diagnosticHandlerTraceFile(void* user, const LdcDiagSite* site, cons
 bool ldcDiagTraceFileInitialize(const char* filename)
 {
     FILE* output = fopen(filename, "wb");
-    fputs("[\n", output);
-
     if (!output) {
         VNLogError("Cannot open trace file");
         return false;
     }
+
+    fputs("[\n", output);
 
     ldcDiagnosticsHandlerPush(diagnosticHandlerTraceFile, output);
 
@@ -334,3 +341,14 @@ bool ldcDiagTraceFileRelease(void)
 
     return true;
 }
+
+#else
+
+bool ldcDiagTraceFileInitialize(const char* filename)
+{
+    VNUnused(filename);
+    return true;
+}
+bool ldcDiagTraceFileRelease(void) { return true; }
+
+#endif // VN_SDK_FEATURE(FILE)

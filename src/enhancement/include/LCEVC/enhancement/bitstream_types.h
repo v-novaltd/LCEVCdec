@@ -15,18 +15,24 @@
 #ifndef VN_LCEVC_ENHANCEMENT_BITSTREAM_TYPES_H
 #define VN_LCEVC_ENHANCEMENT_BITSTREAM_TYPES_H
 
-#include <stdbool.h>
-#include <stdint.h>
+#include <LCEVC/common/stdlib.h>
 
 /*------------------------------------------------------------------------------*/
 
 /*! \brief upscale kernel */
 typedef struct LdeKernel
 {
-    int16_t coeffs[4]; /**< Upscale kernel, 2 tap kernels will be padded with zeros in elements 0 and 3 */
-    uint8_t length; /**< Length (taps) of upscale kernels */
+    uint16_t coeffs[4]; /**< Upscale kernel magnitudes. Elements 0 and 3 are implicitly negative;
+                           2 tap kernels are padded with zeros in those elements. */
+    uint8_t length;     /**< Length (taps) of upscale kernels */
     bool approximatedPA; /**< True if predicted-average computation has been pre-baked into this kernel */
 } LdeKernel;
+
+static inline int32_t ldeKernelGetCoefficient(const LdeKernel* kernel, uint32_t index)
+{
+    const int32_t magnitude = kernel->coeffs[index];
+    return (index == 0 || index == 3) ? -magnitude : magnitude;
+}
 
 typedef struct LdeCrop
 {

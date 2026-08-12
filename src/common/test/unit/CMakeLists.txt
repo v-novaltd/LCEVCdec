@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -21,10 +21,15 @@ find_package(fmt REQUIRED)
 add_library(lcevc_dec_common_gtest_main STATIC ${SOURCES_MAIN})
 add_library(lcevc_dec::gtest_main ALIAS lcevc_dec_common_gtest_main)
 lcevc_set_properties(lcevc_dec_common_gtest_main)
+
+# GCC's -fanalyzer cannot cope with the gtest/range-v3/heavy-STL templates pulled into test
+# translation units: it emits false positives inside libstdc++.
+target_compile_options(
+    lcevc_dec_common_gtest_main
+    INTERFACE $<$<AND:$<BOOL:${VN_SDK_GCC_ANALYZER}>,$<COMPILE_LANGUAGE:CXX>>:-fno-analyzer>)
 target_link_libraries(lcevc_dec_common_gtest_main PRIVATE lcevc_dec::compiler lcevc_dec::platform
                                                           lcevc_dec::common GTest::gtest)
 
-#
 add_executable(lcevc_dec_common_test_unit)
 add_executable(lcevc_dec::test_common_unit ALIAS lcevc_dec_common_test_unit)
 target_sources(lcevc_dec_common_test_unit PRIVATE ${SOURCES} ${HEADERS})

@@ -13,7 +13,7 @@ asset_hash,cpu_concatenation,cpu_concatenation_SCM-1,MR,SKIP,SKIP,SKIP,SKIP,SKIP
 asset_hash,cpu_concatenation,cpu_concatenation_SCM-2,MR,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,SKIP,MR,,concatenations/SCM-2.ts,234702aabb129751,output-hash,lcevc_dec_test_harness,
 asset_hash,cpu_concatenation,cpu_concatenation_BITD-1,BROKEN,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,BROKEN,SKIP,BROKEN,DEC-532,concatenations/BITD-1.ts,dfdc942020168ecb,output-hash,lcevc_dec_test_harness,
 asset_hash,cpu_concatenation,cpu_concatenation_BITD-2,BROKEN,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,BROKEN,SKIP,BROKEN,DEC-532,concatenations/BITD-2.ts,,output-hash,lcevc_dec_test_harness,
-asset_hash,cpu_discontinuity,cpu_discontinuity_DISCO-1,MR,MR,MR,MR,MR,MR,MR,BROKEN,MR,SKIP,MR,SKIP,MR,,discontinuity/DISCO-1.ts,accdee8fc26e45ad,output-hash,lcevc_dec_test_harness,
+asset_hash,cpu_discontinuity,cpu_discontinuity_DISCO-1,MR,MR,MR,MR,MR,MR,MR,BROKEN,MR,SKIP,MR,SKIP,MR,,discontinuity/DISCO-1.ts,2303ee95a2d1ff44,output-hash,lcevc_dec_test_harness,
 asset_hash,vulkan_concatenation,vulkan_concatenation_RES-1,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,MR,SKIP,,concatenations/RES-1.ts,c4301b9864a45134,output-hash,lcevc_dec_test_harness,vulkan
 asset_hash,vulkan_concatenation,vulkan_concatenation_RES-2,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,MR,SKIP,,concatenations/RES-2.ts,3d7eff87ddba6d2a,output-hash,lcevc_dec_test_harness,vulkan
 asset_hash,vulkan_concatenation,vulkan_concatenation_RES-3,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,Harness doesn't support AV1 webm,concatenations/RES-3.webm,,output-hash,lcevc_dec_test_harness,vulkan
@@ -28,4 +28,4 @@ asset_hash,vulkan_concatenation,vulkan_concatenation_SCM-1,SKIP,SKIP,SKIP,SKIP,S
 asset_hash,vulkan_concatenation,vulkan_concatenation_SCM-2,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,MR,SKIP,,concatenations/SCM-2.ts,234702aabb129751,output-hash,lcevc_dec_test_harness,vulkan
 asset_hash,vulkan_concatenation,vulkan_concatenation_BITD-1,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,BROKEN,BROKEN,SKIP,DEC-919,concatenations/BITD-1.ts,dfdc942020168ecb,output-hash,lcevc_dec_test_harness,vulkan
 asset_hash,vulkan_concatenation,vulkan_concatenation_BITD-2,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,BROKEN,BROKEN,SKIP,DEC-919,concatenations/BITD-2.ts,,output-hash,lcevc_dec_test_harness,vulkan
-asset_hash,vulkan_discontinuity,vulkan_discontinuity_DISCO-1,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,MR,SKIP,,discontinuity/DISCO-1.ts,accdee8fc26e45ad,output-hash,lcevc_dec_test_harness,vulkan
+asset_hash,vulkan_discontinuity,vulkan_discontinuity_DISCO-1,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,SKIP,MR,MR,SKIP,,discontinuity/DISCO-1.ts,2303ee95a2d1ff44,output-hash,lcevc_dec_test_harness,vulkan

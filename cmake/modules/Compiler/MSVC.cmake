@@ -31,13 +31,5 @@ target_compile_options(
               /wd5105)
 
 if (VN_SDK_MINIMUM_LIB_SIZE)
-    string(REPLACE "/EHsc" "/EHs- /EHc-" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
-    string(REPLACE "/EHsc" "/EHs- /EHc-" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-    # CMake injects /GR by default; replace it in-place to avoid D9025 "overriding /GR with /GR-"
-    # when /GR- is also added via target_compile_options. Pad with spaces for safe word matching.
-    string(REPLACE " /GR " " /GR- " CMAKE_CXX_FLAGS " ${CMAKE_CXX_FLAGS} ")
-    string(STRIP "${CMAKE_CXX_FLAGS}" CMAKE_CXX_FLAGS)
-    target_compile_options(
-        lcevc_dec::compiler INTERFACE /Gy /Gw /wd4530) # C++ exception handler used with /EHs-;
-                                                       # expected with STL headers
+    target_compile_options(lcevc_dec::compiler INTERFACE /Gy /Gw)
 endif ()

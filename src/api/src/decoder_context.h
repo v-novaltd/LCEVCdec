@@ -23,6 +23,9 @@
 #include <LCEVC/common/class_utils.hpp>
 #include <LCEVC/common/configure.hpp>
 #include <LCEVC/common/log.h>
+#if !VN_SDK_STATIC
+#include <LCEVC/common/shared_library.h>
+#endif
 #include <LCEVC/lcevc_dec.h>
 #include <LCEVC/pipeline/picture.h>
 #include <LCEVC/pipeline/pipeline.h>
@@ -116,7 +119,7 @@ private:
 
 #if !VN_SDK_STATIC
     // Shared library handle
-    LdcSharedLibrary m_pipelineLibrary;
+    LdcSharedLibrary m_pipelineLibrary{0};
 #endif
 
     // The application-wide (logging/simd etc.) managed by 'common'

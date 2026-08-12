@@ -46,6 +46,23 @@
         vqaddq_s16(vmaxq_s16(vshrq_n_s16(vqaddq_s16(v, kOffset), 7), kS8Min), kMidpoint), kU8Max)))
 #define S16ToU16(v) vaddq_s16(vshlq_s16(vaddq_s16(v, kOffset), kRightShift), kMidpoint)
 
+static inline void neonApplyPA(int16x8_t* row0, int16x8_t* row1, const int16x4_t base)
+{
+    const int32x4_t sum0 = vpaddlq_s16(*row0);
+    const int32x4_t sum1 = vpaddlq_s16(*row1);
+    const int32x4_t mean = vrshrq_n_s32(vaddq_s32(sum0, sum1), 2);
+    const int32x4_t adjust = vsubq_s32(vmovl_s16(base), mean);
+    const int32x4x2_t broadcast = vzipq_s32(adjust, adjust);
+
+    const int32x4_t row0Lo = vaddq_s32(vmovl_s16(vget_low_s16(*row0)), broadcast.val[0]);
+    const int32x4_t row0Hi = vaddq_s32(vmovl_s16(vget_high_s16(*row0)), broadcast.val[1]);
+    const int32x4_t row1Lo = vaddq_s32(vmovl_s16(vget_low_s16(*row1)), broadcast.val[0]);
+    const int32x4_t row1Hi = vaddq_s32(vmovl_s16(vget_high_s16(*row1)), broadcast.val[1]);
+
+    *row0 = vcombine_s16(vqmovn_s32(row0Lo), vqmovn_s32(row0Hi));
+    *row1 = vcombine_s16(vqmovn_s32(row1Lo), vqmovn_s32(row1Hi));
+}
+
 #if defined(__aarch64__)
 #define VTBL1Q_U8_COMPAT(src, idx) vqtbl1q_u8((src), (idx))
 #else

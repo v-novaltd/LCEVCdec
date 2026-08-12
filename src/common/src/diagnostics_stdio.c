@@ -20,10 +20,7 @@
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/platform.h>
 #include <LCEVC/common/printf_macros.h>
-//
-#include <assert.h>
-#include <stdbool.h>
-#include <stdio.h>
+#include <LCEVC/common/stdlib.h>
 
 static const char* getLogMessage(char* buffer, size_t bufferSize, const LdcDiagSite* site,
                                  const LdcDiagRecord* record, const LdcDiagValue* values,
@@ -56,6 +53,8 @@ int ldcDiagnosticFormatLog(char* dst, uint32_t dstSize, const LdcDiagSite* site,
     return 0;
 }
 
+#if VN_SDK_FEATURE(STD_FILE)
+
 bool ldcDiagHandlerStdio(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
                          const LdcDiagValue* values, uint32_t valuesCount)
 {
@@ -87,3 +86,32 @@ bool ldcDiagHandlerStdio(void* user, const LdcDiagSite* site, const LdcDiagRecor
 
     return true;
 }
+
+#else
+
+bool ldcDiagHandlerStdio(void* user, const LdcDiagSite* site, const LdcDiagRecord* record,
+                         const LdcDiagValue* values, uint32_t valuesCount)
+{
+    VNUnused(user);
+    char buffer[4096];
+    const char* message = getLogMessage(buffer, sizeof(buffer), site, record, values, valuesCount);
+    if (!message) {
+        return false;
+    }
+
+    switch (site->level) {
+        case LdcLogLevelFatal: printf("%s:%d Fatal: %s\n", site->file, site->line, message); break;
+        case LdcLogLevelError: printf("%s:%d Error: %s\n", site->file, site->line, message); break;
+        case LdcLogLevelWarning: printf("Warning: %s\n", message); break;
+        case LdcLogLevelInfo: printf("Info: %s\n", message); break;
+        case LdcLogLevelDebug: printf("%s:%d Debug: %s\n", site->file, site->line, message); break;
+        case LdcLogLevelVerbose:
+            printf("%s:%d Verbose: %s\n", site->file, site->line, message);
+            break;
+        default: assert(0); break;
+    }
+
+    return true;
+}
+
+#endif

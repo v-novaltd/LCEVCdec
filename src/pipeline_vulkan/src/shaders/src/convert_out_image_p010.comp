@@ -36,7 +36,7 @@ void main()
         return;
     }
 
-    const float yf = internalToUnorm(loadInternalValue(x, y, containerStrideY, containerOffsetY), 5, 1023);
+    const float yf = internalToUnorm(loadInternalValue(x, y, containerStrideY, containerOffsetY, containerStrideTemporalY, containerOffsetTemporalY), 5, 1023);
     imageStore(dstY, ivec2(x, y), vec4(yf, 0.0, 0.0, 1.0));
 
     const int chromaMaskX = (1 << chromaWidthShift) - 1;
@@ -44,8 +44,8 @@ void main()
     if ((x & chromaMaskX) == 0 && (y & chromaMaskY) == 0) {
         const int cx = x >> chromaWidthShift;
         const int cy = y >> chromaHeightShift;
-        const float u = internalToUnorm(loadInternalValue(cx, cy, containerStrideU, containerOffsetU), 5, 1023);
-        const float v = internalToUnorm(loadInternalValue(cx, cy, containerStrideV, containerOffsetV), 5, 1023);
+        const float u = internalToUnorm(loadInternalValue(cx, cy, containerStrideU, containerOffsetU, containerStrideTemporalU, containerOffsetTemporalU), 5, 1023);
+        const float v = internalToUnorm(loadInternalValue(cx, cy, containerStrideV, containerOffsetV, containerStrideTemporalV, containerOffsetTemporalV), 5, 1023);
         imageStore(dstUV, ivec2(cx, cy), vec4(u, v, 0.0, 1.0));
     }
 }

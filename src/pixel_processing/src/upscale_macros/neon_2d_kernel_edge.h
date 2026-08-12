@@ -245,11 +245,11 @@
     row1_even = vmlal_s16(row1_even, vget_low_s16(v1_s3), k2);
     row1_even = vmlal_s16(row1_even, vget_low_s16(v1_s4), k3);
 
-    // === Pack and interleave results ===
-    const int16x4_t r0_odd_16 = vrshrn_n_s32(row0_odd, 14);
-    const int16x4_t r0_even_16 = vrshrn_n_s32(row0_even, 14);
-    const int16x4_t r1_odd_16 = vrshrn_n_s32(row1_odd, 14);
-    const int16x4_t r1_even_16 = vrshrn_n_s32(row1_even, 14);
+    // === Saturating pack and interleave results ===
+    const int16x4_t r0_odd_16 = vqrshrn_n_s32(row0_odd, 14);
+    const int16x4_t r0_even_16 = vqrshrn_n_s32(row0_even, 14);
+    const int16x4_t r1_odd_16 = vqrshrn_n_s32(row1_odd, 14);
+    const int16x4_t r1_even_16 = vqrshrn_n_s32(row1_even, 14);
 
     const int16x4x2_t row0_zip = vzip_s16(r0_odd_16, r0_even_16);
     int16x8_t row0_16 = vcombine_s16(row0_zip.val[0], row0_zip.val[1]);
@@ -263,19 +263,7 @@
 
     // === Apply PA ===
 #if APPLY_PA == 1
-    const int32x4_t tmp0 = vpaddlq_s16(row0_16);
-    const int32x4_t tmp1 = vpaddlq_s16(row1_16);
-    const int32x4_t sum = vaddq_s32(tmp0, tmp1);
-
-    const int16x4_t mean4 = vrshrn_n_s32(sum, 2);
-    const int16x4_t avg4 = vsub_s16(base, mean4);
-
-    const int16x8_t avg8 = vcombine_s16(avg4, avg4);
-    const int16x8x2_t bzip = vzipq_s16(avg8, avg8);
-    const int16x8_t bcast = bzip.val[0];
-
-    row0_16 = vqaddq_s16(row0_16, bcast);
-    row1_16 = vqaddq_s16(row1_16, bcast);
+    neonApplyPA(&row0_16, &row1_16, base);
 #endif
 
     // === Apply dithering ===

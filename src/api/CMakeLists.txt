@@ -51,7 +51,7 @@ target_link_libraries(lcevc_dec_api PRIVATE "${PRIVATE_LIBRARIES}")
 if (VN_SDK_UNIT_TESTS)
     add_library(lcevc_dec_api_static STATIC ${SOURCES} ${HEADERS} ${INTERFACES})
     add_library(lcevc_dec::api_static ALIAS lcevc_dec_api_static)
-    lcevc_set_properties(lcevc_dec_api_static)
+    lcevc_set_properties(lcevc_dec_api_static PRIVATE)
 
     target_include_directories(lcevc_dec_api_static PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
                                                            "${CMAKE_CURRENT_LIST_DIR}/src")

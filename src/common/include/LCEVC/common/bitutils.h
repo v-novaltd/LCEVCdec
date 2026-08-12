@@ -15,7 +15,7 @@
 #ifndef VN_LCEVC_COMMON_BITUTILS_H
 #define VN_LCEVC_COMMON_BITUTILS_H
 
-#include <stdint.h>
+#include <LCEVC/common/stdlib.h>
 
 // Saturating shifts - result is 0 if count >= total_bits
 static inline uint16_t shl16(uint16_t value, unsigned shift)
@@ -158,5 +158,10 @@ static inline uint32_t bswap32(uint32_t value) { return _byteswap_ulong(value); 
 static inline uint64_t bswap64(uint64_t value) { return _byteswap_uint64(value); }
 
 #endif
+
+// floor(log2(value)). These will wrap around to UINT8_MAX if value is 0, which is a valid way to
+// signal undefined behaviour for log2(0).
+static inline uint8_t log2_32(uint32_t value) { return 31 - clz32(value); }
+static inline uint8_t log2_64(uint64_t value) { return 63 - clz64(value); }
 
 #endif // VN_LCEVC_COMMON_BITUTILS_H

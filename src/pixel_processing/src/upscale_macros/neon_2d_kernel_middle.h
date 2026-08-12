@@ -180,16 +180,16 @@
     row1b_even = vmlal_s16(row1b_even, v1b_s3, k2);
     row1b_even = vmlal_s16(row1b_even, v1b_s4, k3);
 
-    // === Pack and interleave results ===
-    const int16x4_t row0a_odd_16 = vrshrn_n_s32(row0a_odd, 14);
-    const int16x4_t row0a_even_16 = vrshrn_n_s32(row0a_even, 14);
-    const int16x4_t row0b_odd_16 = vrshrn_n_s32(row0b_odd, 14);
-    const int16x4_t row0b_even_16 = vrshrn_n_s32(row0b_even, 14);
+    // === Saturating pack and interleave results ===
+    const int16x4_t row0a_odd_16 = vqrshrn_n_s32(row0a_odd, 14);
+    const int16x4_t row0a_even_16 = vqrshrn_n_s32(row0a_even, 14);
+    const int16x4_t row0b_odd_16 = vqrshrn_n_s32(row0b_odd, 14);
+    const int16x4_t row0b_even_16 = vqrshrn_n_s32(row0b_even, 14);
 
-    const int16x4_t row1a_odd_16 = vrshrn_n_s32(row1a_odd, 14);
-    const int16x4_t row1a_even_16 = vrshrn_n_s32(row1a_even, 14);
-    const int16x4_t row1b_odd_16 = vrshrn_n_s32(row1b_odd, 14);
-    const int16x4_t row1b_even_16 = vrshrn_n_s32(row1b_even, 14);
+    const int16x4_t row1a_odd_16 = vqrshrn_n_s32(row1a_odd, 14);
+    const int16x4_t row1a_even_16 = vqrshrn_n_s32(row1a_even, 14);
+    const int16x4_t row1b_odd_16 = vqrshrn_n_s32(row1b_odd, 14);
+    const int16x4_t row1b_even_16 = vqrshrn_n_s32(row1b_even, 14);
 
     const int16x4x2_t row0a_zip = vzip_s16(row0a_odd_16, row0a_even_16);
     int16x8_t row0a_16 = vcombine_s16(row0a_zip.val[0], row0a_zip.val[1]);
@@ -220,22 +220,8 @@
     const int16x8_t base = vld1q_s16(srcRow2 + srcX);
 #endif
 
-    /* avg = base - ((row0_pel_even + row0_pel_odd + row1_pel_even + row1_pel_odd + 2) >> 2) */
-    const int32x4_t tmp0 = vpaddlq_s16(row0a_16);
-    const int32x4_t tmp1 = vpaddlq_s16(row0b_16);
-    const int32x4_t tmp2 = vpaddlq_s16(row1a_16);
-    const int32x4_t tmp3 = vpaddlq_s16(row1b_16);
-    const int32x4_t sum0 = vaddq_s32(tmp0, tmp2);
-    const int32x4_t sum1 = vaddq_s32(tmp1, tmp3);
-    const int16x8_t sum = vcombine_s16(vrshrn_n_s32(sum0, 2), vrshrn_n_s32(sum1, 2));
-    const int16x8_t avg = vsubq_s16(base, sum);
-
-    /* Repeat each avg to apply to values. */
-    const int16x8x2_t broadcast = vzipq_s16(avg, avg);
-    row0a_16 = vqaddq_s16(row0a_16, broadcast.val[0]);
-    row0b_16 = vqaddq_s16(row0b_16, broadcast.val[1]);
-    row1a_16 = vqaddq_s16(row1a_16, broadcast.val[0]);
-    row1b_16 = vqaddq_s16(row1b_16, broadcast.val[1]);
+    neonApplyPA(&row0a_16, &row1a_16, vget_low_s16(base));
+    neonApplyPA(&row0b_16, &row1b_16, vget_high_s16(base));
 #endif
 
     // === Apply dithering ===

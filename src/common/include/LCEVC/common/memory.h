@@ -16,10 +16,7 @@
 #define VN_LCEVC_COMMON_MEMORY_H
 
 #include <LCEVC/common/platform.h>
-//
-#include <stdbool.h>
-#include <stdint.h>
-#include <string.h>
+#include <LCEVC/common/stdlib.h>
 
 // NOLINTBEGIN(modernize-use-using)
 // NOLINTBEGIN(cppcoreguidelines-avoid-do-while)

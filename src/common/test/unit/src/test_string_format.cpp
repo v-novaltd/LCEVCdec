@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2025-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -449,6 +449,58 @@ TEST(LdcFormatTest, FormatWithPrecisionStar)
     size_t written = ldcFormat(buffer, sizeof(buffer), format, types, values, 3);
     EXPECT_EQ(written, 13);
     EXPECT_EQ(std::string(buffer), "value: 1.2346");
+}
+
+TEST(LdcFormatTest, FormatWithIntegerWidthStar)
+{
+    // Covers the non-float branches of case 2 (single '*' argument) in ldcFormat.
+    char buffer[128];
+    const char* format = "%*d %*x";
+
+    LdcDiagArg types[4] = {
+        LdcDiagArgInt32,  // width
+        LdcDiagArgInt32,  // signed value
+        LdcDiagArgInt32,  // width
+        LdcDiagArgUInt32, // unsigned value
+    };
+
+    LdcDiagValue values[4];
+    values[0].valueInt32 = 5;
+    values[1].valueInt32 = -3;
+    values[2].valueInt32 = 4;
+    values[3].valueUInt32 = 0xAB;
+
+    size_t written = ldcFormat(buffer, sizeof(buffer), format, types, values, 4);
+    EXPECT_EQ(written, 10);
+    EXPECT_EQ(std::string(buffer), "   -3   ab");
+}
+
+TEST(LdcFormatTest, FormatWithIntegerWidthAndPrecisionStar)
+{
+    // Covers the non-float branches of case 3 (two '*' arguments) in ldcFormat.
+    char buffer[128];
+    const char* format = "%*.*d %*.*x";
+
+    LdcDiagArg types[6] = {
+        LdcDiagArgInt32,  // width
+        LdcDiagArgInt32,  // precision
+        LdcDiagArgInt32,  // signed value
+        LdcDiagArgInt32,  // width
+        LdcDiagArgInt32,  // precision
+        LdcDiagArgUInt32, // unsigned value
+    };
+
+    LdcDiagValue values[6];
+    values[0].valueInt32 = 6;
+    values[1].valueInt32 = 4;
+    values[2].valueInt32 = 42;
+    values[3].valueInt32 = 6;
+    values[4].valueInt32 = 4;
+    values[5].valueUInt32 = 0xAB;
+
+    size_t written = ldcFormat(buffer, sizeof(buffer), format, types, values, 6);
+    EXPECT_EQ(written, 13);
+    EXPECT_EQ(std::string(buffer), "  0042   00ab");
 }
 
 TEST(LdcFormatTest, FormatTruncatedOutput)

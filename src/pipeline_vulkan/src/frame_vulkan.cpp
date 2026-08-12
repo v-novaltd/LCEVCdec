@@ -21,8 +21,6 @@
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/platform.h>
 
-#include <cstddef>
-
 namespace lcevc_dec::pipeline_vulkan {
 
 FrameVulkan::FrameVulkan(LdcMemoryAllocator* enhancementAllocator,
@@ -116,7 +114,7 @@ void FrameVulkan::computeTaskFinish(PipelineVulkan* pipeline)
     // Copy output to external CPU planes if present.
     PictureVulkan* op = fromPipeline(outputPicture);
     LdpPictureBufferDesc exDesc{};
-    if (!op->isExternalBuffer() && op->getBufferDesc(exDesc) && exDesc.data != nullptr &&
+    if (op && !op->isExternalBuffer() && op->getBufferDesc(exDesc) && exDesc.data != nullptr &&
         exDesc.byteSize != 0) {
         BufferVulkan* managedBuffer = fromPipeline(op->buffer);
         managedBuffer->copyOut(exDesc.data, 0, exDesc.byteSize);

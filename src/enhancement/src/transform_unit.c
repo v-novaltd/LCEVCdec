@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,7 +12,7 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include <assert.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/bitstream_types.h>
 #include <LCEVC/enhancement/transform_unit.h>
 
@@ -174,7 +174,8 @@ uint32_t ldeTuIndexBlockAlignedIndex(const TUState* state, uint32_t tuIndex)
         res += (state->block.tuPerBlock -
                 (state->block.tuPerBlockRowRightEdge * state->block.tuPerBlockDims)) *
                blockRowIndex;
-        if ((tuIndex % state->block.tuPerRow) > (state->block.wholeBlocksPerRow * state->block.tuPerBlock)) {
+        if (blockRowIndex < state->block.wholeBlocksPerCol &&
+            (tuIndex % state->block.tuPerRow) > (state->block.wholeBlocksPerRow * state->block.tuPerBlock)) {
             res += (((tuIndex % state->block.tuPerRow) % state->block.tuPerBlock) /
                     state->block.tuPerBlockRowRightEdge) *
                    (state->block.tuPerBlockDims - state->block.tuPerBlockRowRightEdge);
@@ -197,14 +198,6 @@ uint32_t ldeTuIndexBlockAlignedIndex(const TUState* state, uint32_t tuIndex)
     }
 
     assert(res <= state->blockAligned.tuPerRow * (state->block.wholeBlocksPerCol + 1));
-
-    return res;
-}
-
-uint32_t ldeTuCoordsSurfaceIndex(const TUState* state, uint32_t x, uint32_t y)
-{
-    uint32_t res = (y >> state->tuWidthShift) * state->numAcross;
-    res += x >> state->tuWidthShift;
 
     return res;
 }

@@ -19,16 +19,27 @@
 
 #include "common.glsl"
 
+// Spcialization for adding temporal.
+layout (constant_id = SPECID_ADD_TEMPORAL) const bool addTemporal = false;
+
 // Source: internal 16-bit signed samples, packed two-per-uint via
 // pack16bitInternals (see common.glsl).
 layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
     uint samples[];
 } src;
 
+// Ttemporal residuals: same internal s16 packed format as src.
+// Bound to src when addTemporal is false (read is spec-constant-eliminated).
+layout(std430, set = 0, binding = 3) buffer restrict readonly TemporalBuffer {
+    uint samples[];
+} temporal;
+
 // Push constants are shared by every image-output shader.  The image variants
 // reuse the slots `shift` and `sharpenStrength` (used by convert_out.comp) as
 // chromaWidthShift / chromaHeightShift, so the host can use a single
-// PushConstantsConversion struct across all conversion pipelines.
+// PushConstantsConversion struct across all conversion pipelines.  `nv21Swap`
+// is declared only to keep the temporal fields at the same byte offsets as the
+// buffer shader / host struct; it is not read here.
 layout(push_constant) uniform consts {
     int width;
     int height;
@@ -40,14 +51,26 @@ layout(push_constant) uniform consts {
     int containerOffsetV;
     int chromaWidthShift;
     int chromaHeightShift;
+    int nv21Swap; // unused here; present for struct parity with convert_out.comp
+    int containerStrideTemporalY;
+    int containerOffsetTemporalY;
+    int containerStrideTemporalU;
+    int containerOffsetTemporalU;
+    int containerStrideTemporalV;
+    int containerOffsetTemporalV;
 };
 
 // Read one signed internal sample from the source SSBO at (px,py) inside the
-// plane described by (stride,offset).
-int loadInternalValue(int px, int py, int stride, int offset)
+// plane described by (stride,offset), folding in the co-located temporal
+// residual (saturating, exactly as add.comp) when enabled for this plane.
+int loadInternalValue(int px, int py, int stride, int offset, int tStride, int tOffset)
 {
-    const uint packed = src.samples[uint(offset + (px >> 1) + py * stride)];
-    const ivec2 vals = unpack16bitInternals(packed);
+    const uint index = uint(offset + (px >> 1) + py * stride);
+    ivec2 vals = unpack16bitInternals(src.samples[index]);
+    if (addTemporal && tStride != 0) {
+        const uint tIndex = uint(tOffset + (px >> 1) + py * tStride);
+        vals = saturateS16(vals + unpack16bitInternals(temporal.samples[tIndex]));
+    }
     return ((px & 1) == 0) ? vals.x : vals.y;
 }
 

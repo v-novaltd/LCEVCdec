@@ -423,9 +423,9 @@ NATIVE_FUNC(jlong, lcevcCreateDecoder)
     context->nativeWindow = nullptr;
 
     LCEVC_ReturnCode ret = LCEVC_CreateDecoder(&context->decoder, LCEVC_AccelContextHandle{});
-    LCEVC_ConfigureDecoderInt(context->decoder, "threads", 2);
-    LCEVC_ConfigureDecoderInt(context->decoder, "passthrough_mode", 2);
     LCEVC_ConfigureDecoderString(context->decoder, "pipeline", "vulkan");
+    LCEVC_ConfigureDecoderInt(context->decoder, "threads", 2);
+    LCEVC_ConfigureDecoderInt(context->decoder, "passthrough_mode", 0);
     LCEVC_ConfigureDecoderBool(context->decoder, "will_render", true);
 
     // logcat logging via event callback
@@ -638,18 +638,29 @@ NATIVE_FUNC(jint, lcevcSendDecoderEnhancementData, jlong instance, jlong timesta
     jmethodID methodId = env->GetMethodID(cls, "position", "()I");
     uint32_t dataOffset = env->CallIntMethod(inputData, methodId);
     uint8_t* data = reinterpret_cast<uint8_t*>(env->GetDirectBufferAddress(inputData));
+    if (data == nullptr) {
+        LOGE("lcevcSendDecoderEnhancementData: input buffer is not a direct buffer");
+        return LCEVC_InvalidParam;
+    }
     data += dataOffset;
     // Method id for inputData get limit
     methodId = env->GetMethodID(cls, "limit", "()I");
     uint32_t dataLimit = env->CallIntMethod(inputData, methodId);
+    if (dataLimit < dataOffset) {
+        LOGE("lcevcSendDecoderEnhancementData: buffer limit %u < position %u", dataLimit, dataOffset);
+        return LCEVC_InvalidParam;
+    }
     uint32_t dataSize = dataLimit - dataOffset;
 
     std::vector<uint8_t> enhancementData(dataSize);
     if (stripLcevc) {
         uint32_t actualSize = 0;
-        int32_t const r = LCEVC_extractEnhancementFromNAL(
+        uint32_t strippedOffset = 0;
+        uint32_t strippedSize = 0;
+        int32_t const r = LCEVC_extractAndRemoveEnhancementFromNAL(
             data, dataSize, LCEVC_NALFormat_AnnexB, static_cast<LCEVC_CodecType>(syntaxType),
-            enhancementData.data(), static_cast<uint32_t>(enhancementData.size()), &actualSize);
+            enhancementData.data(), static_cast<uint32_t>(enhancementData.size()), &actualSize,
+            &strippedOffset, &strippedSize);
         enhancementData.resize(actualSize);
         if (r < 0) {
             LOGW("lcevcSendDecoderEnhancementData: Couldn't find LCEVC data in input data (%d "
@@ -657,12 +668,32 @@ NATIVE_FUNC(jint, lcevcSendDecoderEnhancementData, jlong instance, jlong timesta
                  dataSize);
             return r;
         }
-        LOGD("lcevcSendDecoderEnhancementData: Extracted %d LCEVC bytes from NALU (%d bytes)",
-             actualSize, dataSize);
+        methodId = env->GetMethodID(cls, "position", "(I)Ljava/nio/Buffer;");
+        env->CallObjectMethod(inputData, methodId, static_cast<jint>(dataOffset + strippedOffset));
+        methodId = env->GetMethodID(cls, "limit", "(I)Ljava/nio/Buffer;");
+        env->CallObjectMethod(inputData, methodId,
+                              static_cast<jint>(dataOffset + strippedOffset + strippedSize));
+        LOGD("lcevcSendDecoderEnhancementData: Extracted %d LCEVC bytes from NALU (%d bytes), "
+             "stripped to %d bytes",
+             actualSize, dataSize, strippedSize);
+    }
+
+    if (enhancementData.empty()) {
+        LOGD("lcevcSendDecoderEnhancementData: no LCEVC data for ts:%" PRId64
+             ", skipping send (base will pass through)",
+             timestamp);
+        return LCEVC_Success;
     }
 
     LCEVC_ReturnCode const ret = LCEVC_SendDecoderEnhancementData(
         context->decoder, timestamp, enhancementData.data(), enhancementData.size());
+    if (ret == LCEVC_Again) {
+        LOGW("lcevcSendDecoderEnhancementData: LCEVC_Again for ts:%" PRId64
+             " - decoder likely full (max_latency reached). Receive decoded pictures before "
+             "retrying.",
+             timestamp);
+        return ret;
+    }
     if (ret != LCEVC_Success) {
         LOGE("lcevcSendDecoderEnhancementData: LCEVC_SendDecoderEnhancementData returned %d", ret);
         return ret;

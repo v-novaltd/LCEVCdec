@@ -14,13 +14,12 @@
 
 #include "dequant.h"
 
-#include <assert.h>
 #include <LCEVC/build_config.h>
+#include <LCEVC/common/bitutils.h>
 #include <LCEVC/common/limit.h>
+#include <LCEVC/common/ln_fp_scaled.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/config_parser.h>
-#include <math.h>
-#include <memory.h>
-#include <stdint.h>
 
 /*- Constants -----------------------------------------------------------------------------------*/
 
@@ -54,9 +53,6 @@ static const int32_t kSWDivisor = 32768; /* Like a right-shift of 15, but unambi
 static const int64_t kSWDivisorNoDQOffset =
     2147483648; /* Like a right-shift of 31, but unambiguous on signed ints */
 static const int32_t kQMScaleMax = 196608; /* 3 << 16 */
-static const int32_t kDeadZoneSWLimit =
-    12249; /* Largest stepwidth that does not overflow deadzone calculation */
-
 /* 1/255, expressed as a U0_16 fixed point. floor((1.0f / 255.0f) * (1 << 16));*/
 static const uint16_t kFPOneOver255 = 257;
 
@@ -88,19 +84,7 @@ void quantMatrixDuplicateLOQs(LdeQuantMatrix* matrix)
 
 /*- Dequant (private functions) -----------------------------------------------------------------*/
 
-double calculateFixedPointU12_4Ln(int32_t stepWidth)
-{
-    /* Calculate the natural log (ln) of stepWidth, with U12_4 fixed-point precision. */
-    const uint8_t integerLogSw = (uint8_t)(floor(log(stepWidth)));
-    /* The maximum value of stepWidth is 32768, and ln(32768) = 10.3972. Therefore, integerLogSw
-     * should really never exceed 10, but all that really matters is that it remains within 4
-     * bits, i.e. less than 16. */
-    assert(integerLogSw < 16);
-    const double fractionalLogSw = floor((log(stepWidth) - integerLogSw) * 4096) / 4096;
-    return integerLogSw + fractionalLogSw;
-}
-
-uint16_t calculateFixedPointTemporalSW(uint32_t temporalSWModifier, int16_t temporalSWUnmodified)
+static uint16_t calculateFixedPointTemporalSW(uint32_t temporalSWModifier, int16_t temporalSWUnmodified)
 {
     /* Calculate the modified temporal step width, treating floats as U16s with no whole-number
      * part, i.e. 0.0 to 1.0 is mapped to 0 to 65536 (1<<16) */
@@ -116,13 +100,13 @@ uint16_t calculateFixedPointTemporalSW(uint32_t temporalSWModifier, int16_t temp
 static int32_t calculateDequantOffsetActual(int32_t layerSW, int32_t masterSW,
                                             int32_t dequantOffset, LdeDequantOffsetMode mode)
 {
-    int64_t dequantOffsetActual = 0;
-    const int32_t logLayerSW = (int32_t)(-kC * calculateFixedPointU12_4Ln(layerSW));
-    const int32_t logMasterSW = (int32_t)(kC * calculateFixedPointU12_4Ln(masterSW));
-
     if (dequantOffset == -1 || dequantOffset == 0) {
         return 0;
     }
+
+    int64_t dequantOffsetActual = 0;
+    const int32_t logLayerSW = lnFpScaled(layerSW, -kC, true);
+    const int32_t logMasterSW = lnFpScaled(masterSW, kC, true);
 
     if (mode == DQMDefault) {
         dequantOffsetActual = (int64_t)dequantOffset << 11;
@@ -141,7 +125,7 @@ static int32_t calculateStepWidthModifier(int32_t layerSW, int32_t dequantOffset
     /* See 8.5.3 of the standard. Note that the standard doesn't have any formatting, so it says
      * "qm[x...][y]2" to indicated "layerSW squared".*/
     if (offset == -1) {
-        const int64_t logByLayerSW = (int64_t)(kD - kC * calculateFixedPointU12_4Ln(layerSW));
+        const int64_t logByLayerSW = (int64_t)(kD + lnFpScaled(layerSW, -kC, false));
         const int64_t logByLayerSWPow = (logByLayerSW * layerSW * layerSW);
         const int64_t intLogByLayerSWDiv = (logByLayerSWPow / kSWDivisorNoDQOffset);
 
@@ -163,19 +147,15 @@ static int32_t calculateDeadzoneWidth(int32_t masterSW, int32_t layerSW)
         return (masterSW >> 1);
     }
 
-    if (layerSW > kDeadZoneSWLimit) {
-        return INT32_MAX;
-    }
-
-    const int32_t scaled = (1 << 16) - (((kA * layerSW) + kB) >> 1);
-    return (int32_t)(((int64_t)scaled * layerSW) >> 16);
+    const int64_t scaled = (1 << 16) - ((((int64_t)kA * layerSW) + kB) >> 1);
+    return (int32_t)((scaled * layerSW) >> 16);
 }
 
 static int16_t calculateAppliedDequantOffset(int32_t dequantOffsetActual, int32_t deadzoneWidth,
                                              int32_t offset, LdeDequantOffsetMode mode)
 {
     if (offset == -1 || mode == DQMDefault) {
-        return (int16_t)-deadzoneWidth;
+        return (int16_t)clampS64(-(int64_t)deadzoneWidth, INT16_MIN, INT16_MAX);
     }
 
     if (mode == DQMConstOffset) {
@@ -205,7 +185,10 @@ bool calculateDequant(Dequant* dequant, const LdeGlobalConfig* globalConfig,
                       const LdeFrameConfig* frameConfig, uint32_t planeIdx, LdeLOQIndex loqIdx)
 {
     const uint8_t* quantMatrix = quantMatrixGetValuesConst(&frameConfig->quantMatrix, loqIdx);
-    assert(quantMatrix != NULL);
+    if (!quantMatrix || globalConfig->numLayers > RCLayerCountDDS) {
+        return false;
+    }
+
     const int32_t loqSW = calculateLOQStepWidth(globalConfig, frameConfig, planeIdx, loqIdx);
 
     /* Calculate individual layer step-widths for each temporal type. */
@@ -250,6 +233,7 @@ bool calculateDequant(Dequant* dequant, const LdeGlobalConfig* globalConfig,
                                               frameConfig->dequantOffset, frameConfig->dequantOffsetMode);
         }
 
+        /* Scalar dequant path doesn't need to pack the step-widths and offsets into SIMD vectors. */
 #if VN_SDK_FEATURE(SSE)
         dequant->stepWidthVector[temporalIdx][0] =
             _mm_load_si128((const __m128i*)&dequant->stepWidth[temporalIdx][0]);

@@ -183,8 +183,23 @@ function (
 
 endfunction ()
 
+function (lcevc_disable_cpp_exceptions TARGET)
+    if (TARGET_COMPILER STREQUAL "MSVC" OR TARGET_COMPILER STREQUAL "ClangMSVC")
+        target_compile_options(${TARGET} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/EHs- /EHc- /GR-
+                                                 /wd4530>)
+    else ()
+        target_compile_options(${TARGET} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions
+                                                 -fno-rtti>)
+    endif ()
+endfunction ()
+
 function (lcevc_set_properties TARGET)
     get_target_property(TARGET_TYPE ${TARGET} TYPE)
+    if (TARGET_TYPE STREQUAL INTERFACE_LIBRARY)
+        set(LINKAGE "INTERFACE")
+    else ()
+        set(LINKAGE "PRIVATE")
+    endif ()
 
     if (TARGET_TYPE STREQUAL EXECUTABLE)
         set_target_properties(${TARGET} PROPERTIES FOLDER "Executables")
@@ -193,7 +208,7 @@ function (lcevc_set_properties TARGET)
             # Set up ld.so RPATH on out test executables so that they can can find libav shared
             # libraries transitively - DT_RPATH vs. DT_RUNPATH
             set_target_properties(${TARGET} PROPERTIES BUILD_RPATH_USE_ORIGIN true)
-            target_link_options(${TARGET} PRIVATE -Wl,--disable-new-dtags)
+            target_link_options(${TARGET} ${LINKAGE} -Wl,--disable-new-dtags)
         endif ()
 
     else ()
@@ -207,20 +222,26 @@ function (lcevc_set_properties TARGET)
             AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/exports.txt"
             AND ((TARGET_PLATFORM STREQUAL "Android") OR (TARGET_PLATFORM STREQUAL "Linux")))
             # Restrict symbols exported by shared library
-            target_link_options(${TARGET} PRIVATE
+            target_link_options(${TARGET} ${LINKAGE}
                                 -Wl,--version-script,${CMAKE_CURRENT_LIST_DIR}/exports.txt)
             if (VN_SDK_MINIMUM_LIB_SIZE)
-                target_link_options(${TARGET} PRIVATE -Wl,--strip-all -Wl,--gc-sections
-                                    -Wl,--no-eh-frame-hdr -Wl,-Map=${TARGET}.map)
+                target_sources(${TARGET}
+                               PRIVATE ${LCEVC_ROOT_DIR}/cmake/sources/minimal_runtime_stubs.cpp)
+                target_link_options(${TARGET} ${LINKAGE} PRIVATE -Wl,--strip-all -Wl,--gc-sections
+                                    -Wl,--no-eh-frame-hdr)
                 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-                    target_link_options(${TARGET} PRIVATE -Wl,--lto-O3 -Wl,--icf=all)
+                    target_link_options(${TARGET} ${LINKAGE} PRIVATE -Wl,--icf=all)
                 endif ()
                 if (TARGET_PLATFORM STREQUAL "Android")
-                    target_link_options(${TARGET} PRIVATE -Wl,--pack-dyn-relocs=android)
+                    target_link_options(${TARGET} ${LINKAGE} -Wl,--pack-dyn-relocs=android)
                 endif ()
             endif ()
         endif ()
 
+    endif ()
+
+    if (VN_SDK_MINIMUM_LIB_SIZE AND NOT "${TARGET_TYPE}" STREQUAL "EXECUTABLE")
+        lcevc_disable_cpp_exceptions(${TARGET})
     endif ()
 
     if (VN_STRIP_RELEASE
@@ -230,11 +251,11 @@ function (lcevc_set_properties TARGET)
         # if you DID want to handle this, you couldn't use "CMAKE_BUILD_TYPE", since MSVC doesn't
         # use that to determine Release vs Debug builds. Instead it uses `--config` at build time
         # (and it defaults to `--config Debug`)
-        target_link_options(${TARGET} PRIVATE -s)
+        target_link_options(${TARGET} ${LINKAGE} -s)
     endif ()
 
-    target_compile_features(${TARGET} PRIVATE cxx_std_17)
-    target_compile_features(${TARGET} PRIVATE c_std_11)
+    target_compile_features(${TARGET} ${LINKAGE} cxx_std_17)
+    target_compile_features(${TARGET} ${LINKAGE} c_std_11)
 
     set_target_properties(
         ${TARGET}

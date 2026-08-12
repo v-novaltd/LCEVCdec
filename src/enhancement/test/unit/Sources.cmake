@@ -19,6 +19,7 @@ set(SOURCES
     "src/test_cmdbuffer_gpu.cpp"
     "src/test_config_pool.cpp"
     "src/test_decode.cpp"
+    "src/test_dequant.cpp"
     "src/test_config_parser.cpp"
     "src/test_parser_malformed.cpp"
     "src/test_transform.cpp"

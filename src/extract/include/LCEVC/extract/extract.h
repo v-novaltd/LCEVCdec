@@ -66,6 +66,10 @@ int32_t LCEVC_extractEnhancementFromNAL(const uint8_t* nalData, uint32_t nalSize
 /*!
  * \brief Extract LCEVC enhancement data from a buffer containing NAL Units, and remove extracted data from input buffer.
  *
+ * Only LCEVC data is removed: LCEVC NAL unit types and SEI messages carrying LCEVC registered
+ * user data. All other NAL units, including non-LCEVC SEI (e.g. closed captions, HDR metadata),
+ * are left intact.
+ *
  * @param[in]       nalData              Pointer to buffer containing NAL units.
  * @param[in]       nalSize              Size in bytes of input NAL data
  * @param[in]       nalFormat            How the NAL units are formatted
@@ -104,6 +108,10 @@ int32_t LCEVC_extractEnhancementFromNALIfKeyframe(const uint8_t* nalData, uint32
 /*!
  * \brief Search the provided data buffer for base NAL units containing key frame identifiers (IDR, CRA, etc.). Only perform
  * the extraction of LCEVC data if this packet contains a base keyframe. Strip the LCEVC from the input buffer.
+ *
+ * Only LCEVC data is removed: LCEVC NAL unit types and SEI messages carrying LCEVC registered
+ * user data. All other NAL units, including non-LCEVC SEI (e.g. closed captions, HDR metadata),
+ * are left intact.
  *
  * @param[in]       nalData             Pointer to the buffer containing NAL units.
  * @param[in]       nalSize             Size in bytes of the input NAL data

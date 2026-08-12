@@ -17,9 +17,7 @@
 
 #include <LCEVC/common/memory.h>
 #include <LCEVC/common/platform.h>
-//
-#include <stdbool.h>
-#include <stdint.h>
+#include <LCEVC/common/stdlib.h>
 
 #ifdef __cplusplus
 extern "C"

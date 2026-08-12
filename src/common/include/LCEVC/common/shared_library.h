@@ -15,7 +15,7 @@
 #ifndef VN_LCEVC_COMMON_SHARED_LIBRARY_H
 #define VN_LCEVC_COMMON_SHARED_LIBRARY_H
 
-#include <stdint.h>
+#include <LCEVC/common/stdlib.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -26,8 +26,6 @@ extern "C"
 typedef uintptr_t LdcSharedLibrary;
 
 LdcSharedLibrary ldcSharedLibraryFind(const char* libraryName);
-
-void ldcSharedLibraryRelease(LdcSharedLibrary sharedLibrary);
 
 void* ldcSharedLibrarySymbol(LdcSharedLibrary sharedLibrary, const char* symbolName);
 

@@ -24,7 +24,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace lcevc_dec::common {
@@ -72,11 +72,9 @@ struct ConfigBinding : public ConfigBindingBase<C>
 };
 
 template <typename C, typename T>
-const ConfigBindingBase<C>* makeBinding(T C::*ptr)
+std::shared_ptr<const ConfigBindingBase<C>> makeBinding(T C::*ptr)
 {
-    // This uses to make initializer_lists - so will be const - can't move ownership out
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-    return new ConfigBinding<C, T>(ptr);
+    return std::make_shared<ConfigBinding<C, T>>(ptr);
 }
 
 // Templated binding for entries of array config members
@@ -98,11 +96,10 @@ struct ConfigBindingArrElement : public ConfigBindingBase<C>
 };
 
 template <size_t Offset, size_t ArrLen, typename C, typename ElementType>
-const ConfigBindingBase<C>* makeBindingArrElement(std::array<ElementType, ArrLen> C::*ptr)
+std::shared_ptr<const ConfigBindingBase<C>> makeBindingArrElement(
+    std::array<ElementType, ArrLen> C::*ptr)
 {
-    // This uses to make initializer_lists - so will be const - can't move ownership out
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-    return new ConfigBindingArrElement<Offset, ArrLen, C, ElementType>(ptr);
+    return std::make_shared<ConfigBindingArrElement<Offset, ArrLen, C, ElementType>>(ptr);
 }
 
 // Templated binding for array config members (settable by iterating over a vector).
@@ -127,11 +124,9 @@ struct ConfigBindingArr : public ConfigBindingBase<C>
 };
 
 template <typename C, typename T, size_t N>
-const ConfigBindingBase<C>* makeBindingArray(std::array<T, N> C::*ptr)
+std::shared_ptr<const ConfigBindingBase<C>> makeBindingArray(std::array<T, N> C::*ptr)
 {
-    // This uses to make initializer_lists - so will be const - can't move ownership out
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-    return new ConfigBindingArr<C, T, N>(ptr);
+    return std::make_shared<ConfigBindingArr<C, T, N>>(ptr);
 }
 
 // Special cases for unsigned integers
@@ -157,11 +152,9 @@ struct ConfigBindingUnsigned : public ConfigBindingBase<C>
 };
 
 template <typename C>
-const ConfigBindingBase<C>* makeBinding(uint32_t C::*ptr)
+std::shared_ptr<const ConfigBindingBase<C>> makeBinding(uint32_t C::*ptr)
 {
-    // This is used to make initializer_lists - so will be const - can't move ownership out
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-    return new ConfigBindingUnsigned<C>(ptr);
+    return std::make_shared<ConfigBindingUnsigned<C>>(ptr);
 }
 
 // Bind configuration member 'set()' methods
@@ -179,46 +172,48 @@ struct ConfigBindingMethod : public ConfigBindingBase<C>
 };
 
 template <typename C, typename T>
-const ConfigBindingBase<C>* makeBinding(bool (C::*methodPtr)(const T& val))
+std::shared_ptr<const ConfigBindingBase<C>> makeBinding(bool (C::*methodPtr)(const T& val))
 {
-    // This is used to make initializer_lists - so will be const - can't move ownership out
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-    return new ConfigBindingMethod<C, T>(methodPtr);
+    return std::make_shared<ConfigBindingMethod<C, T>>(methodPtr);
 }
 
 // The type for an initializer_list for ConfigurableMembers
 //
 template <typename C>
-using ConfigMemberMapInitializer = std::pair<const char*, const ConfigBindingBase<C>*>;
+using ConfigMemberMapInitializer = std::pair<const char*, std::shared_ptr<const ConfigBindingBase<C>>>;
 
 template <typename C>
 class ConfigMemberMap
 {
 public:
-    ConfigMemberMap(std::initializer_list<ConfigMemberMapInitializer<C>> list)
+    ConfigMemberMap(std::initializer_list<ConfigMemberMapInitializer<C>> list) noexcept
     {
-        for (const auto& val : list) {
-            m_memberMap.emplace(std::string(val.first),
-                                std::unique_ptr<const ConfigBindingBase<C>>(val.second));
-            ;
+        const ConfigMemberMapInitializer<C>* const data = list.begin();
+        m_memberMap.reserve(list.size());
+        for (size_t i = 0; i < list.size(); ++i) {
+            const auto& val = data[i];
+            if (!val.first) {
+                continue;
+            }
+            m_memberMap.emplace_back(std::string(val.first), val.second);
         }
     }
 
-    const std::unique_ptr<const ConfigBindingBase<C>>& getConfig(std::string_view nameView) const
+    const std::shared_ptr<const ConfigBindingBase<C>>& getConfig(std::string_view nameView) const
     {
-        std::string name(nameView);
         // Default base that always returns false
-        static const std::unique_ptr<const ConfigBindingBase<C>> defaultBase =
-            std::make_unique<ConfigBindingBase<C>>();
-        if (m_memberMap.count(name) == 0) {
-            return defaultBase;
+        static const std::shared_ptr<const ConfigBindingBase<C>> defaultBase =
+            std::make_shared<ConfigBindingBase<C>>();
+        for (const auto& entry : m_memberMap) {
+            if (entry.first == nameView) {
+                return entry.second;
+            }
         }
-
-        return m_memberMap.at(name);
+        return defaultBase;
     }
 
 private:
-    std::unordered_map<std::string, std::unique_ptr<const ConfigBindingBase<C>>> m_memberMap;
+    std::vector<std::pair<std::string, std::shared_ptr<const ConfigBindingBase<C>>>> m_memberMap;
 };
 
 // Implementation of `Configurable` that takes a map of configurable members.

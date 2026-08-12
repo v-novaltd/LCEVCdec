@@ -18,6 +18,7 @@
 #include "config_parser_types.h"
 
 #include <LCEVC/build_config.h>
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/bitstream_types.h>
 #include <LCEVC/enhancement/config_types.h>
 
@@ -26,9 +27,6 @@
 #elif VN_SDK_FEATURE(NEON)
 #include <LCEVC/common/neon.h>
 #endif
-
-#include <stddef.h>
-#include <stdint.h>
 
 /*------------------------------------------------------------------------------*/
 

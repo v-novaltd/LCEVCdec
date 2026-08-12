@@ -14,15 +14,14 @@
 
 include("Sources.cmake")
 
-add_library(lcevc_dec_common ${VN_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
+add_library(lcevc_dec_common ${VN_SDK_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_common)
 
 target_include_directories(
-    lcevc_dec_common
-    PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include"
-    PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
+    lcevc_dec_common ${VN_PUBLIC_LINKAGE} "${CMAKE_CURRENT_LIST_DIR}/include" ${VN_PRIVATE_LINKAGE}
+    "${CMAKE_CURRENT_LIST_DIR}/src")
 
-target_link_libraries(lcevc_dec_common PUBLIC lcevc_dec::platform lcevc_dec::compiler)
+target_link_libraries(lcevc_dec_common ${VN_PUBLIC_LINKAGE} lcevc_dec::platform lcevc_dec::compiler)
 
 add_library(lcevc_dec::common ALIAS lcevc_dec_common)
 

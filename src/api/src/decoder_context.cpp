@@ -29,7 +29,7 @@
 #endif
 #else
 #include <LCEVC/common/shared_library.h>
-#endif
+#endif // VN_SDK_STATIC
 
 #include <algorithm>
 #include <memory>
@@ -168,10 +168,18 @@ pipeline::PipelineBuilder* DecoderContext::pipelineBuilder()
 
         CreatePipelineBuilderFn builderFn = (CreatePipelineBuilderFn)ldcSharedLibrarySymbol(
             m_pipelineLibrary, "createPipelineBuilder");
+        if (!builderFn) {
+            VNLogErrorF("Cannot find createPipelineBuilder in %s pipeline shared library",
+                        m_pipelineName.c_str());
+            return nullptr;
+        }
 
         pb = builderFn(ldcDiagnosticsStateGet(), (void*)ldcAccelerationGet());
 #endif
-        assert(pb);
+        if (pb == nullptr) {
+            VNLogErrorF("Pipeline '%s' is not available", m_pipelineName.c_str());
+            return nullptr;
+        }
 
         m_pipelineBuilder = std::unique_ptr<pipeline::PipelineBuilder>(pb);
     }
@@ -183,7 +191,9 @@ pipeline::PipelineBuilder* DecoderContext::pipelineBuilder()
 bool DecoderContext::initializeDecoder()
 {
     pipeline::PipelineBuilder* builder = pipelineBuilder();
-    assert(builder);
+    if (!builder) {
+        return false;
+    }
 
     assert(!m_pipeline);
 
@@ -218,7 +228,7 @@ bool DecoderContext::configure(std::string_view name, const std::string& val)
             VNLogWarning("Changing pipeline: configuration may be lost.");
             m_pipelineBuilder.reset();
         }
-        return true;
+        return pipelineBuilder() != nullptr;
     }
 
     return pipelineBuilder()->configure(name, val);

@@ -46,6 +46,9 @@ public:
 
     VNNoCopyNoMove(PipelineBuilderBase);
 
+protected:
+    static void setDefaultThreadCount(PipelineConfigBase& configuration);
+
 private:
     friend std::unique_ptr<PipelineBuilder> createPipelineBuilder();
 

@@ -34,7 +34,7 @@ enum class PassthroughMode : int32_t
 
 // The common configurable values that get passed from the builder to the initialized pipeline
 //
-// Pipeline implemetnaiton may derive an extended configuration.
+// Pipeline implementation may derive an extended configuration.
 //
 struct PipelineConfigBase
 {

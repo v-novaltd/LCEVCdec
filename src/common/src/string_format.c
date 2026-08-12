@@ -16,11 +16,7 @@
 
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/limit.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
+#include <LCEVC/common/stdlib.h>
 
 // Classification of chars
 //
@@ -271,7 +267,9 @@ static inline uint64_t argumentAsUnsignedLongLongInt(size_t idx, const LdcDiagAr
                                                      const LdcDiagValue* values);
 static inline const char* argumentAsString(size_t idx, const LdcDiagArg* types, const LdcDiagValue* values);
 static inline const void* argumentAsPointer(size_t idx, const LdcDiagArg* types, const LdcDiagValue* values);
+#if VN_SDK_FEATURE(LDE_FLOATS)
 static inline double argumentAsDouble(size_t idx, const LdcDiagArg* types, const LdcDiagValue* values);
+#endif
 
 // Use the parser to format a string using platform printf for each element
 //
@@ -366,11 +364,13 @@ size_t ldcFormat(char* dst, uint32_t dstSize, const char* format, const LdcDiagA
                                         argumentAsPointer(element.argumentIndex, types, values));
                         break;
 
+#if VN_SDK_FEATURE(LDE_FLOATS)
                     case LdcDiagArgFloat32:
                     case LdcDiagArgFloat64:
                         size = snprintf(ptr, remaining, specifier,
                                         argumentAsDouble(element.argumentIndex, types, values));
                         break;
+#endif
 
                     default: break;
                 }
@@ -422,12 +422,14 @@ size_t ldcFormat(char* dst, uint32_t dstSize, const char* format, const LdcDiagA
                                         argumentAsPointer(element.argumentIndex + 1, types, values));
                         break;
 
+#if VN_SDK_FEATURE(LDE_FLOATS)
                     case LdcDiagArgFloat32:
                     case LdcDiagArgFloat64:
                         size = snprintf(ptr, remaining, specifier,
                                         argumentAsInt(element.argumentIndex, types, values),
                                         argumentAsDouble(element.argumentIndex + 1, types, values));
                         break;
+#endif
 
                     default: break;
                 }
@@ -485,6 +487,7 @@ size_t ldcFormat(char* dst, uint32_t dstSize, const char* format, const LdcDiagA
                                         argumentAsPointer(element.argumentIndex + 2, types, values));
                         break;
 
+#if VN_SDK_FEATURE(LDE_FLOATS)
                     case LdcDiagArgFloat32:
                     case LdcDiagArgFloat64:
                         size = snprintf(ptr, remaining, specifier,
@@ -492,6 +495,7 @@ size_t ldcFormat(char* dst, uint32_t dstSize, const char* format, const LdcDiagA
                                         argumentAsInt(element.argumentIndex + 1, types, values),
                                         argumentAsDouble(element.argumentIndex + 2, types, values));
                         break;
+#endif
 
                     default: break;
                 }
@@ -596,6 +600,7 @@ static inline const void* argumentAsPointer(size_t idx, const LdcDiagArg* types,
     }
 }
 
+#if VN_SDK_FEATURE(LDE_FLOATS)
 static inline double argumentAsDouble(size_t idx, const LdcDiagArg* types, const LdcDiagValue* values)
 {
     switch (types[idx]) {
@@ -604,6 +609,7 @@ static inline double argumentAsDouble(size_t idx, const LdcDiagArg* types, const
         default: return 0.0;
     }
 }
+#endif
 
 // Char classification down here to keep it out of the way
 static const enum CharClass kCharClasses[256] = {

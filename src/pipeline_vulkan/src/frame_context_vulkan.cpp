@@ -119,7 +119,7 @@ bool VulkanFrameContext::allocateDescriptorSets(const DescriptorSetLayouts& layo
 
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[0].descriptorCount = 21; // Existing 20 buffers + RGBA image conversion input
+    poolSizes[0].descriptorCount = 24;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     poolSizes[1].descriptorCount = 2;
 

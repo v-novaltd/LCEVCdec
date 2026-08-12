@@ -22,7 +22,7 @@ if (VN_SDK_BASE_DECODER)
     find_package(ffmpeg-libs REQUIRED)
 endif ()
 
-add_library(lcevc_dec_utility ${VN_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
+add_library(lcevc_dec_utility ${VN_SDK_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_utility)
 
 target_include_directories(lcevc_dec_utility PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")

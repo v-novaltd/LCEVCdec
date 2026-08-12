@@ -22,7 +22,6 @@
 #include <vulkan/vulkan.h>
 //
 #include <cstdint>
-#include <memory>
 
 namespace lcevc_dec::pipeline_vulkan {
 

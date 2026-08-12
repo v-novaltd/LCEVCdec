@@ -39,6 +39,9 @@ struct VulkanConvertOutArgs
     uint8_t bitDepth; /**< Bit depth of the destination picture */
     LdeChroma chroma;
     float sharpenStrength{0.0f}; /**< Sharpen strength for output conversion (plane 0 only) */
+    PictureVulkan* temporal{};   /**< Optional temporal residuals to add before conversion */
+    bool addTemporal{false};
+    uint8_t numEnhancedPlanes{0};
     VulkanFrameContext* context{};
 };
 

@@ -14,13 +14,14 @@
 
 include("Sources.cmake")
 
-add_library(lcevc_dec_enhancement ${VN_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
+add_library(lcevc_dec_enhancement ${VN_SDK_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_enhancement)
 
-target_include_directories(lcevc_dec_enhancement PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+target_include_directories(lcevc_dec_enhancement ${VN_PUBLIC_LINKAGE}
+                           "${CMAKE_CURRENT_LIST_DIR}/include")
 
-target_link_libraries(lcevc_dec_enhancement PUBLIC lcevc_dec::platform lcevc_dec::compiler
-                                                   lcevc_dec::common)
+target_link_libraries(lcevc_dec_enhancement ${VN_PUBLIC_LINKAGE} lcevc_dec::platform
+                      lcevc_dec::compiler lcevc_dec::common)
 
 # Configurable Huffman decode parameters:
 
@@ -28,20 +29,21 @@ if (NOT DEFINED VN_BIG_TABLE_LEADING_ZEROES_BITS)
     set(VN_BIG_TABLE_LEADING_ZEROES_BITS 4)
 endif ()
 target_compile_definitions(
-    lcevc_dec_enhancement
-    PRIVATE VN_BIG_TABLE_LEADING_ZEROES_BITS=${VN_BIG_TABLE_LEADING_ZEROES_BITS})
+    lcevc_dec_enhancement ${VN_PRIVATE_LINKAGE}
+                          VN_BIG_TABLE_LEADING_ZEROES_BITS=${VN_BIG_TABLE_LEADING_ZEROES_BITS})
 
 if (NOT DEFINED VN_BIG_TABLE_MAX_CODE_SIZE)
     set(VN_BIG_TABLE_MAX_CODE_SIZE 8)
 endif ()
-target_compile_definitions(lcevc_dec_enhancement
-                           PRIVATE VN_BIG_TABLE_MAX_CODE_SIZE=${VN_BIG_TABLE_MAX_CODE_SIZE})
+target_compile_definitions(
+    lcevc_dec_enhancement ${VN_PRIVATE_LINKAGE}
+                          VN_BIG_TABLE_MAX_CODE_SIZE=${VN_BIG_TABLE_MAX_CODE_SIZE})
 
 if (NOT DEFINED VN_SMALL_TABLE_MAX_SIZE)
     set(VN_SMALL_TABLE_MAX_SIZE 10)
 endif ()
-target_compile_definitions(lcevc_dec_enhancement
-                           PRIVATE VN_SMALL_TABLE_MAX_SIZE=${VN_SMALL_TABLE_MAX_SIZE})
+target_compile_definitions(lcevc_dec_enhancement ${VN_PRIVATE_LINKAGE}
+                                                 VN_SMALL_TABLE_MAX_SIZE=${VN_SMALL_TABLE_MAX_SIZE})
 
 add_library(lcevc_dec::enhancement ALIAS lcevc_dec_enhancement)
 

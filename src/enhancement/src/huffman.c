@@ -16,32 +16,30 @@
 
 #include "chunk_parser.h"
 
-#include <assert.h>
 #include <LCEVC/common/check.h>
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/log.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
+#include <LCEVC/common/stdlib.h>
 
 /*- General utility functions -------------------------------------------------------------------*/
 
-static inline uint8_t clz(uint32_t streamData, uint8_t numBits)
+/* Count the leading zeroes of a code, where the code is `numBits` wide. Unlike plain clz, a code
+ * of 0 has numBits leading zeroes (rather than being undefined behaviour). */
+static inline uint8_t clzCode(uint32_t code, uint8_t numBits)
 {
 #if VN_COMPILER(MSVC)
-    return (uint8_t)(_lzcnt_u32(streamData) + numBits - 32);
+    return (uint8_t)(_lzcnt_u32(code) + numBits - 32);
 #elif VN_COMPILER(GCC) && (__GNUC__ >= 14)
     /* Annoyingly, it's undefined behaviour if you provide 0 to __builtin_clz. To match the Windows
-     * behaviour (where 0 is just another leading zero), we need clzg, with sizeof(streamData) as
+     * behaviour (where 0 is just another leading zero), we need clzg, with sizeof(code) as
      * the default arg. */
-    return (uint8_t)(__builtin_clzg(streamData, (int)(sizeof(streamData) * 8)) + numBits - 32);
+    return (uint8_t)(__builtin_clzg(code, (int)(sizeof(code) * 8)) + numBits - 32);
 #else
     /* clzg is only available in GCC version 14 or later. Outside that, we just do it manually. */
-    if (streamData == 0) {
+    if (code == 0) {
         return numBits;
     }
-    return (uint8_t)(__builtin_clz(streamData) + numBits - 32);
+    return (uint8_t)(__builtin_clz(code) + numBits - 32);
 #endif
 }
 
@@ -120,13 +118,13 @@ static void generateCodes(HuffmanListEntry entriesInOut[VN_MAX_NUM_SYMBOLS], int
  * for the run-length huffman stream, but in principle it could be used for the temporal layer too
  * (although attempts at this have sometimes worsened performance: it seems that the existing
  * tableAssign may actually be faster, but would be awkward to change its interface). */
-static uint8_t generateCodesAndLut(HuffmanListEntry entriesIn[VN_MAX_NUM_SYMBOLS],
-                                   HuffmanTable* tableOut, uint8_t maxIdx, uint8_t maxCodeLength)
+static uint16_t generateCodesAndLut(HuffmanListEntry entriesIn[VN_MAX_NUM_SYMBOLS],
+                                    HuffmanTable* tableOut, uint16_t maxIdx, uint8_t maxCodeLength)
 {
     memset(tableOut->code, 0, sizeof(tableOut->code));
     uint8_t currLength = maxCodeLength;
     uint8_t currCode = 0;
-    uint8_t minOversizedCodeIdx = maxIdx;
+    uint16_t minOversizedCodeIdx = maxIdx;
 
     /* This list is sorted from large to small, so start by assigning list entries for codes which
      * are too long for the look-up table */
@@ -141,7 +139,7 @@ static uint8_t generateCodesAndLut(HuffmanListEntry entriesIn[VN_MAX_NUM_SYMBOLS
 
         if (entry->bits > VN_SMALL_TABLE_MAX_SIZE) {
             entry->code = currCode;
-            minOversizedCodeIdx = (uint8_t)idx;
+            minOversizedCodeIdx = (uint16_t)idx;
         } else {
             uint16_t tableIdx = (uint16_t)(currCode << (VN_SMALL_TABLE_MAX_SIZE - entry->bits));
             const uint16_t tableIdxEnd =
@@ -160,7 +158,7 @@ static uint8_t generateCodesAndLut(HuffmanListEntry entriesIn[VN_MAX_NUM_SYMBOLS
 static void determineIdxOfEachBitSize(HuffmanList* listInOut)
 {
     uint8_t bitSize = listInOut->list[0].bits;
-    for (uint8_t idx = 0; idx < (uint8_t)listInOut->size; idx++) {
+    for (uint16_t idx = 0; idx < listInOut->size; idx++) {
         if (listInOut->list[idx].bits > bitSize) {
             listInOut->idxOfEachBitSize[bitSize] = idx;
             bitSize = listInOut->list[idx].bits;
@@ -217,12 +215,11 @@ static bool validateCodeLengths(const uint16_t codeLengthCounts[VN_MAX_CODE_LENG
     return true;
 }
 
-/* Utility functions for HuffmanTriple's contents memvar */
-static inline uint8_t getBits(uint8_t contents) { return contents >> 3; }
-static inline bool lsbOverflowed(uint8_t contents) { return (getBits(contents) == 0); }
-static inline bool isIncomplete(uint8_t contents)
+/* The final decoded value of a coefficient which has an LSB symbol but no MSB symbol. Complete
+ * triple-table entries store this precomputed, so the decode fast path is a plain load. */
+static inline uint8_t lsbOnlyValue(uint8_t lsbSymbol)
 {
-    return lsbOverflowed(contents) || (contents & 0B00000011);
+    return (uint8_t)(int8_t)((int16_t)((lsbSymbol & 0x7E) - 0x40) >> 1);
 }
 
 /*- Initialisation functions --------------------------------------------------------------------*/
@@ -262,13 +259,6 @@ static int16_t huffmanManualInitializeCommon(HuffmanManualDecodeState* state, Hu
         VNCheckI(huffmanStreamReadBits(stream, 8, &bits));
         state->singleSymbol = (uint8_t)bits;
         return 0;
-    }
-
-    const uint8_t maxDecodableCodeLength = (uint8_t)(8 * sizeof(stream->word) - 7);
-    if (state->maxCodeLength > maxDecodableCodeLength) {
-        VNLogError("huffman: max code length [%u] exceeds the decodable maximum [%u]",
-                   state->maxCodeLength, maxDecodableCodeLength);
-        return -1;
     }
 
     const int8_t lengthBits = bitWidth(state->maxCodeLength - state->minCodeLength, bitstreamVersion);
@@ -311,10 +301,6 @@ static int16_t huffmanManualInitializeCommon(HuffmanManualDecodeState* state, Hu
     } else { /* Read symbol-count */
         uint32_t symbolCount = 0;
         VNCheckI(huffmanStreamReadBits(stream, 5, &symbolCount));
-
-        if (symbolCount <= 0) {
-            return -1;
-        }
 
         for (uint32_t i = 0; i < symbolCount; ++i) {
             uint32_t symbol = 0;
@@ -381,11 +367,11 @@ static uint16_t huffmanIterateRlsLoopBody(HuffmanTripleTable* huffmanTableOut,
         return minU16(lowestValidIdxYet, out);
     }
 
-    /* non-recursive case: */
+    /* non-recursive case: the triple is fully resolved, so store the precomputed value. */
     for (uint16_t idx = startIdxRl1; idx < endIdxRl1; idx++) {
-        huffmanTableOut->code[idx].lsb = lsbSymbol;
+        huffmanTableOut->code[idx].lsbOrValue = lsbOnlyValue(lsbSymbol);
         huffmanTableOut->code[idx].rl = (uint16_t)((rlSymbol << 7) | (newRlSymbol & 0x7f));
-        huffmanTableOut->code[idx].contents = (uint8_t)(codeSizeInStream << 3);
+        huffmanTableOut->code[idx].contents = (uint8_t)((codeSizeInStream << 3) | 0x04);
     }
     return minU16(lowestValidIdxYet, startIdxRl1);
 }
@@ -419,8 +405,8 @@ static uint16_t huffmanIterateRls(HuffmanTripleTable* huffmanTableOut, const Huf
             uint16_t rlCode = rlIdx >> (VN_SMALL_TABLE_MAX_SIZE - rlBits);
 
             lowestValidlySetIdx = huffmanIterateRlsLoopBody(
-                huffmanTableOut, rlTable, rlList, parentStartIdx, parentEndIdx, lsbSymbol, rlSymbol,
-                codeSizeInStream, rlCode, nextRlEntry->symbol, rlBits, recursionLevel);
+                huffmanTableOut, rlTable, rlList, parentStartIdx, lowestValidlySetIdx, lsbSymbol,
+                rlSymbol, codeSizeInStream, rlCode, nextRlEntry->symbol, rlBits, recursionLevel);
         }
 
         /* Now, IF there's space for big RLs, we can include them (this might seem niche, but
@@ -434,8 +420,9 @@ static uint16_t huffmanIterateRls(HuffmanTripleTable* huffmanTableOut, const Huf
                     break;
                 }
                 lowestValidlySetIdx = huffmanIterateRlsLoopBody(
-                    huffmanTableOut, rlTable, rlList, parentStartIdx, parentEndIdx, lsbSymbol, rlSymbol,
-                    codeSizeInStream, nextRlEntry->code, nextRlEntry->symbol, rlBits, recursionLevel);
+                    huffmanTableOut, rlTable, rlList, parentStartIdx, lowestValidlySetIdx,
+                    lsbSymbol, rlSymbol, codeSizeInStream, nextRlEntry->code, nextRlEntry->symbol,
+                    rlBits, recursionLevel);
             }
         }
     }
@@ -444,7 +431,7 @@ static uint16_t huffmanIterateRls(HuffmanTripleTable* huffmanTableOut, const Huf
      * All entries in this gap are incomplete due to RL overflow: we're only here because the
      * current symbol definitely IS followed by an RL, but these are the indices where none fit. */
     for (uint16_t idx = parentStartIdx; idx < lowestValidlySetIdx; idx++) {
-        huffmanTableOut->code[idx].lsb = lsbSymbol;
+        huffmanTableOut->code[idx].lsbOrValue = lsbSymbol;
         huffmanTableOut->code[idx].rl = rlSymbol;
         huffmanTableOut->code[idx].contents = (uint8_t)((codeSizeInStream << 3) | 0x01);
     }
@@ -460,10 +447,10 @@ static void huffmanTripleTableAssign(HuffmanTripleTable* huffmanTableOut,
                                      const HuffmanTable* rlTable, const HuffmanList* rlList)
 {
     HuffmanList* overflowLsbListOut = &huffmanState->manualStates[HuffLSB].list;
-    uint8_t lsbIdx = 0;
+    uint16_t lsbIdx = 0;
     for (; lsbIdx < fullLsbListIn->size; lsbIdx++) {
         const HuffmanListEntry* lsbEntry = &fullLsbListIn->list[lsbIdx];
-        uint8_t leadingZeroes = clz(lsbEntry->code, lsbEntry->bits);
+        uint8_t leadingZeroes = clzCode(lsbEntry->code, lsbEntry->bits);
         leadingZeroes = minU8(leadingZeroes, VN_BIG_TABLE_MAX_NUM_LEADING_ZEROES);
         int8_t bitsLeftByLsb = VN_BIG_TABLE_MAX_CODE_SIZE - (lsbEntry->bits - leadingZeroes);
         if (bitsLeftByLsb < 0) {
@@ -475,7 +462,7 @@ static void huffmanTripleTableAssign(HuffmanTripleTable* huffmanTableOut,
         const uint16_t endIdx = startIdx + (uint16_t)(1 << bitsLeftByLsb);
         if (nextSymbolIsMSB(lsbEntry->symbol)) {
             for (uint16_t outIdx = startIdx; outIdx < endIdx; outIdx++) {
-                huffmanTableOut->code[outIdx].lsb = lsbEntry->symbol;
+                huffmanTableOut->code[outIdx].lsbOrValue = lsbEntry->symbol;
                 huffmanTableOut->code[outIdx].contents = (uint8_t)((lsbEntry->bits << 3) | 0x02);
             }
             continue;
@@ -483,8 +470,8 @@ static void huffmanTripleTableAssign(HuffmanTripleTable* huffmanTableOut,
 
         if (!nextSymbolIsRL(lsbEntry->symbol)) {
             for (uint16_t outIdx = startIdx; outIdx < endIdx; outIdx++) {
-                huffmanTableOut->code[outIdx].lsb = lsbEntry->symbol;
-                huffmanTableOut->code[outIdx].contents = (uint8_t)(lsbEntry->bits << 3);
+                huffmanTableOut->code[outIdx].lsbOrValue = lsbOnlyValue(lsbEntry->symbol);
+                huffmanTableOut->code[outIdx].contents = (uint8_t)((lsbEntry->bits << 3) | 0x04);
             }
             continue;
         }
@@ -496,7 +483,7 @@ static void huffmanTripleTableAssign(HuffmanTripleTable* huffmanTableOut,
     /* These are all the entries where the LSB is too long to fit in a LUT entry. Some may be
      * shorter than expected, if the max num of leading zeroes is low enough. */
     if (fullLsbListIn->size > lsbIdx) {
-        const uint8_t additionalEntries = (uint8_t)(fullLsbListIn->size - lsbIdx);
+        const uint16_t additionalEntries = fullLsbListIn->size - lsbIdx;
         const uint16_t curSize = overflowLsbListOut->size;
         memcpy(overflowLsbListOut->list + curSize, (fullLsbListIn->list + lsbIdx),
                additionalEntries * sizeof(HuffmanListEntry));
@@ -552,6 +539,13 @@ bool huffmanTripleInitialize(HuffmanTripleDecodeState* state, HuffmanStream* str
     huffmanTripleTableAssign(&state->tripleTable, state, &lsbList, &state->rlTable,
                              &state->manualStates[HuffRL].list);
 
+    /* Cap the decode-time leading-zero count at min(maxLsbCodeLength, max leading zeroes): a run
+     * of stream-zeros longer than the longest LSB code must still land on the longest (all-zeros)
+     * code's table bucket. */
+    const uint8_t maxLsbCodeLength = lsbList.size > 0 ? lsbList.list[lsbList.size - 1].bits : 0;
+    const uint8_t leadingZeroCap = minU8(maxLsbCodeLength, VN_BIG_TABLE_MAX_NUM_LEADING_ZEROES);
+    state->lsbGuardBit = 0x80000000u >> leadingZeroCap;
+
     return true;
 }
 
@@ -563,10 +557,8 @@ bool huffmanStreamInitialize(HuffmanStream* stream, const uint8_t* data, size_t 
         return false;
     }
 
-    stream->wordEndBit = 32;
-    stream->wordStartBit = 32;
-    stream->bitsRead = 0;
     stream->word = 0;
+    stream->bitCount = 0;
 
     return true;
 }
@@ -589,8 +581,8 @@ bool huffmanManualInitializeWithLut(HuffmanManualDecodeState* state, HuffmanTabl
         return true;
     }
 
-    const uint8_t minIdxOfOversizedCodes =
-        generateCodesAndLut(codes, table, (uint8_t)size, state->maxCodeLength);
+    const uint16_t minIdxOfOversizedCodes =
+        generateCodesAndLut(codes, table, (uint16_t)size, state->maxCodeLength);
 
     state->list.size = size - minIdxOfOversizedCodes;
     if (state->list.size > 0) {
@@ -611,22 +603,23 @@ bool huffmanManualDecode(const HuffmanManualDecodeState* state, HuffmanStream* s
         return false;
     }
 
-    uint8_t bitsUnderConsideration = list->list[0].bits;
-    uint32_t code = huffmanStreamAdvanceToNthBit(stream, bitsUnderConsideration);
+    /* One refill guarantees at least min(56, remaining) bits: enough for any code (max 31 bits),
+     * so the whole search can peek straight from the buffered word. Bits past the end of the
+     * stream read as zeros, which end up rejected as an unknown code. */
+    huffmanStreamRefill(stream);
 
     /* list->list is sorted by code length (increasing), then by code itself (decreasing) */
-    for (uint16_t idx = 0; idx < list->size; idx = list->idxOfEachBitSize[bitsUnderConsideration]) {
+    uint16_t idx = 0;
+    while (idx < list->size) {
         const HuffmanListEntry* entry = &list->list[idx];
-        while (bitsUnderConsideration < entry->bits) {
-            bitsUnderConsideration++;
-            code = huffmanStreamAdvanceToNthBit(stream, bitsUnderConsideration);
-        }
+        const uint8_t bits = entry->bits;
+        const uint32_t code = huffmanStreamPeekBits(stream, bits);
 
         /* Binary search the equal-length group [idx, idxOfEachBitSize[bits]). Codes are sorted
          * descending, so a larger code sits at a lower index. Half-open bounds that strictly shrink
          * each step guarantee termination even when the code matches no entry. */
         uint16_t lowerLimit = idx;
-        uint16_t upperLimit = list->idxOfEachBitSize[bitsUnderConsideration];
+        uint16_t upperLimit = list->idxOfEachBitSize[bits];
         while (lowerLimit < upperLimit) {
             const uint16_t testIdx = lowerLimit + (upperLimit - lowerLimit) / 2;
             entry = &list->list[testIdx];
@@ -635,13 +628,13 @@ bool huffmanManualDecode(const HuffmanManualDecodeState* state, HuffmanStream* s
             } else if (code < entry->code) {
                 lowerLimit = testIdx + 1;
             } else {
-                /* Found it! Now advance wordStartBit, so we're no longer looking at those bits. */
-                stream->wordStartBit += entry->bits;
-                assert(stream->wordStartBit <= 32);
+                /* Found it! Consume the bits we just matched. */
+                huffmanStreamConsume(stream, bits);
                 *symbolOut = entry->symbol;
                 return true;
             }
         }
+        idx = list->idxOfEachBitSize[bits];
     }
 
     /* Unknown huffman code */
@@ -670,63 +663,11 @@ bool huffmanGetSingleSymbol(const HuffmanManualDecodeState* state, uint8_t* symb
     return false;
 }
 
-/*- HuffmanTable --------------------------------------------------------------------------------*/
-
-bool huffmanLutDecode(const HuffmanTable* rlTable, HuffmanStream* stream, uint8_t* symbolOut)
-{
-    uint16_t lutIdx = (uint16_t)huffmanStreamAdvanceToNthBit(stream, VN_SMALL_TABLE_MAX_SIZE);
-    uint8_t bits = rlTable->code[lutIdx].bits;
-    stream->wordStartBit += bits;
-    if (bits != 0) {
-        assert(stream->wordStartBit <= 32);
-        *symbolOut = rlTable->code[lutIdx].symbol;
-        return true;
-    }
-
-    return false;
-}
-
 /*- HuffmanTripleDecodeState --------------------------------------------------------------------*/
 
-int32_t huffmanTripleDecode(const HuffmanTripleDecodeState* state, HuffmanStream* stream, int16_t* valueOut)
+int32_t huffmanTripleDecodeSlow(const HuffmanTripleDecodeState* state, HuffmanStream* stream,
+                                int16_t* valueOut, HuffmanTriple triplet)
 {
-    assert(state && stream && (stream->wordStartBit <= stream->wordEndBit) &&
-           (stream->wordStartBit + VN_BIG_TABLE_CODE_SIZE_TO_READ >= stream->wordEndBit));
-
-    /* Top up our HuffmanStream_t until we have VN_BIG_TABLE_CODE_SIZE_TO_READ bits of data,
-     * and then grab those bits of data. Later, we'll find out how much of it, if any, is useful.*/
-    huffmanStreamAdvanceByNBits(stream, VN_BIG_TABLE_CODE_SIZE_TO_READ -
-                                            (stream->wordEndBit - stream->wordStartBit));
-    const uint32_t code = extractBits(stream->word, stream->wordStartBit, stream->wordEndBit);
-
-    /* We now have a number, of size VN_BIG_TABLE_CODE_SIZE_TO_READ. Count the number of leading
-     * zeroes in this number. This count will form the first few bits of our lutIdx. We have to
-     * take the min because 0 is a valid code (always the longest one), and because there's a limit
-     * to the number of bits we can fit at the front of lutIdx.*/
-    uint8_t lsbLeadingZeros = clz((int32_t)code, VN_BIG_TABLE_CODE_SIZE_TO_READ);
-    lsbLeadingZeros = minU8(lsbLeadingZeros, state->manualStates[HuffLSB].maxCodeLength);
-    lsbLeadingZeros = minU8(lsbLeadingZeros, VN_BIG_TABLE_MAX_NUM_LEADING_ZEROES);
-
-    /* Now assemble the lutIdx by replacing the leading zeroes in `code` with the actual count of
-     * leading zeros (lsbLzs).*/
-    const uint8_t plausiblyUsefulBits = (VN_BIG_TABLE_MAX_CODE_SIZE + lsbLeadingZeros);
-    uint16_t lutIdx = (uint16_t)(code >> (VN_BIG_TABLE_CODE_SIZE_TO_READ - plausiblyUsefulBits));
-    assert(lutIdx <= VN_BIG_HUFFMAN_CODE_MASK);
-    lutIdx |= (lsbLeadingZeros << VN_BIG_TABLE_MAX_CODE_SIZE);
-
-    /* Seek symbols in huffman table.*/
-    const HuffmanTripleTable* table = &state->tripleTable;
-    HuffmanTriple triplet = table->code[lutIdx];
-    uint8_t bits = getBits(triplet.contents);
-    stream->wordStartBit += bits;
-    assert(stream->wordStartBit <= 32);
-
-    /* Quickly dismiss the fast case: */
-    if (!isIncomplete(triplet.contents)) {
-        *valueOut = ((int16_t)(triplet.lsb & 0x7e) - 0x40) >> 1;
-        return triplet.rl;
-    }
-
     /* Seek run lengths if:
      * (1) the lsb overflowed, and either
      *      (a) is followed by an RL, or
@@ -734,37 +675,35 @@ int32_t huffmanTripleDecode(const HuffmanTripleDecodeState* state, HuffmanStream
      * or
      * (2) the msb overflowed, and it's followed by an RL,
      * or
-     * (3) the rl itself overflowed (which is always true if the other true aren't, since this
-     *     block of code is only reachable when SOME part overflowed).
+     * (3) the rl itself overflowed (which is always true if the others aren't, since this
+     *     function is only reachable when SOME part overflowed).
      */
     bool seekRunLengths = true;
+    uint8_t lsb = triplet.lsbOrValue;
 
     /* LSB */
-    if (lsbOverflowed(triplet.contents)) {
-        if (!huffmanManualDecodeMaybeSingleSymbol(&state->manualStates[HuffLSB], stream, (uint8_t*)valueOut)) {
+    if (huffmanTripleLsbOverflowed(triplet.contents)) {
+        if (!huffmanManualDecodeMaybeSingleSymbol(&state->manualStates[HuffLSB], stream, &lsb)) {
             return -1;
         }
-        seekRunLengths = nextSymbolIsRL((uint8_t)*valueOut);
-    } else {
-        *valueOut = triplet.lsb;
+        seekRunLengths = nextSymbolIsRL(lsb);
     }
 
     /* MSB */
-    if (nextSymbolIsMSB((uint8_t)*valueOut)) {
+    int16_t value = 0;
+    if (nextSymbolIsMSB(lsb)) {
         uint8_t msb = 0;
         if (!huffmanManualDecodeMaybeSingleSymbol(&state->manualStates[HuffMSB], stream, &msb)) {
             return -1;
         }
         seekRunLengths = nextSymbolIsRL(msb);
 
-        *valueOut = (int16_t)(*valueOut & 0xfe);
-
-        int32_t exp = (msb & 0x7f) << 8 | *valueOut;
-        *valueOut = (int16_t)(exp - 0x4000);
+        const int32_t exp = ((msb & 0x7f) << 8) | (lsb & 0xfe);
+        value = (int16_t)(exp - 0x4000);
     } else {
-        *valueOut = (int16_t)((*valueOut & 0x7e) - 0x40);
+        value = (int16_t)((lsb & 0x7e) - 0x40);
     }
-    *valueOut >>= 1;
+    *valueOut = (int16_t)(value >> 1);
 
     /* RL */
     int32_t zeros = triplet.rl;

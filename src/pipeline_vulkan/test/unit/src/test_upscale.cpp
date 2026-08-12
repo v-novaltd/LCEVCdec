@@ -74,7 +74,7 @@ struct KernelEntry
 const KernelEntry kKernels[] = {
     {"Nearest", {{0, 16384, 0, 0}, 2, false}},
     {"Linear", {{0, 12288, 4096, 0}, 2, false}},
-    {"Cubic", {{-1382, 14285, 3942, -461}, 4, false}},
+    {"Cubic", {{1382, 14285, 3942, 461}, 4, false}},
 };
 
 void fillInternalNoise(int16_t* data, uint32_t count, std::mt19937& rng)

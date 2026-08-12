@@ -42,9 +42,10 @@ find_library(PLATFORM_ANDROID_LIBRARY NAMES android)
 find_library(PLATFORM_LOG_LIBRARY NAMES log)
 find_library(PLATFORM_VULKAN_LIBRARY NAMES vulkan)
 find_library(PLATFORM_NATIVE_WINDOW_LIBRARY NAMES nativewindow)
+find_library(PLATFORM_Z_LIBRARY NAMES z)
 
 list(APPEND PLATFORM_LIBRARIES ${PLATFORM_ANDROID_LIBRARY} ${PLATFORM_LOG_LIBRARY}
-     ${PLATFORM_VULKAN_LIBRARY})
+     ${PLATFORM_VULKAN_LIBRARY} ${PLATFORM_Z_LIBRARY})
 list(APPEND PLATFORM_LIBRARIES_MEDIA ${PLATFORM_NATIVE_WINDOW_LIBRARY})
 
 if (NOT ANDROID_VENDOR)
@@ -70,15 +71,20 @@ set(LCEVCDEC_CMAKE_ARGS
     -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
     -DBUILD_SHARED_LIBS=OFF
     -DANDROID_ABI=${ANDROID_ABI}
+    -DANDROID_NDK=${ANDROID_NDK}
     -DANDROID_PLATFORM=${ANDROID_PLATFORM}
     -DVN_SDK_PIPELINE_VULKAN=ON
-    -DVN_SDK_SIMD=${ANDROID_ARM_NEON})
+    -DVN_SDK_PIPELINE_CPU=OFF
+    -DVN_SDK_SIMD=${ANDROID_ARM_NEON}
+    -DVN_SDK_MINIMUM_LIB_SIZE=OFF)
+
+# VN_SDK_MINIMUM_LIB_SIZE can be enabled to reduce library size at the expense of logs, consider
+# reducing built ABIs to further reduce size.
 
 set(LCEVCDEC_MODULES
     api
     api_utility
     extract
-    pipeline_cpu
     pipeline_vulkan
     pipeline
     enhancement
@@ -125,3 +131,17 @@ target_include_directories(
     lcevc_dec_jni PRIVATE ${PROJECT_ROOT}/include ${PROJECT_ROOT}/src/api/include
                           ${PROJECT_ROOT}/src/extract/include)
 add_dependencies(lcevc_dec_jni LCEVCdec_build)
+
+# Library size reduction flags and stubs
+target_compile_options(
+    lcevc_dec_jni
+    PRIVATE -Oz
+            -fvisibility=hidden
+            -fvisibility-inlines-hidden
+            -ffunction-sections
+            -fdata-sections
+            -fno-exceptions
+            -fno-rtti)
+target_link_options(lcevc_dec_jni PRIVATE -Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,--icf=all
+                    -Wl,--no-eh-frame-hdr)
+target_sources(lcevc_dec_jni PRIVATE ${PROJECT_ROOT}/cmake/sources/minimal_runtime_stubs.cpp)

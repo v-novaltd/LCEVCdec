@@ -16,12 +16,12 @@
 #define VN_LCEVC_COMMON_CLOCK_H
 
 #include <LCEVC/common/platform.h>
-#include <stdint.h>
+#include <LCEVC/common/stdlib.h>
 
 /*! @file
  * @brief Clock and time utilities.
  *
- * A custom implementation can be provided by defining VN_SDK_TIME_CUSTOM, and providing
+ * A custom implementation can be provided by defining VN_SDK_CLOCK_CUSTOM, and providing
  * `clock_custom.h` in the include path. The custom header should provide the static inline
  * implementations declared below.
  */
@@ -57,7 +57,7 @@ static inline uint64_t ldcClockDeadlineMicroseconds(int32_t offset);
 
 // Implementation specific declarations
 //
-#if VN_SDK_FEATURE(TIME_CUSTOM)
+#if VN_SDK_FEATURE(CLOCK_CUSTOM)
 #include "clock_custom.h"
 #elif VN_OS(WINDOWS)
 #include "detail/clock_win32.h"

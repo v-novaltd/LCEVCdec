@@ -18,9 +18,8 @@
 #include "config_parser_types.h"
 #include "huffman.h"
 
+#include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/config_types.h>
-#include <stddef.h>
-#include <stdint.h>
 
 /*------------------------------------------------------------------------------*/
 
@@ -48,16 +47,18 @@ typedef enum EntropyDecoderType
 
 typedef struct EntropyDecoder
 {
-    uint8_t currHuff;
-    size_t rawOffset;
-    HuffmanSingleDecoder huffman[HuffTemporalCount]; // Note that HuffTemporalCount == HuffSizeCount
-    HuffmanTripleDecodeState comboHuffman;
+    /* Hot per-symbol state first, so that it shares cache lines rather than sitting beyond the
+     * large decode tables. */
     HuffmanStream hstream;
+    bool entropyEnabled;
     bool rleOnly;
+    uint8_t currHuff;
+    EntropyDecoderType type;
+    size_t rawOffset;
     const uint8_t* rleData;
     size_t rleSize;
-    bool entropyEnabled;
-    EntropyDecoderType type;
+    HuffmanSingleDecoder huffman[HuffTemporalCount]; // Note that HuffTemporalCount == HuffSizeCount
+    HuffmanTripleDecodeState comboHuffman;
 } EntropyDecoder;
 
 /*------------------------------------------------------------------------------*/
@@ -74,6 +75,12 @@ typedef struct EntropyDecoder
 bool entropyInitialize(EntropyDecoder* state, const LdeChunk* chunk, EntropyDecoderType type,
                        uint8_t bitstreamVersion);
 
+/*! \brief Decode the next coefficient from a raw (RLE-only) chunk. Prefer entropyDecode, which
+ *         dispatches here when required.
+ *
+ *  \return the number of zeros following this coefficient (<0 on fail) */
+int32_t entropyDecodeRleCoefficient(EntropyDecoder* state, int16_t* coeffOut);
+
 /*! \brief Decode the next coefficient from a stream. Coefficients are the things that get
  *         transformed ("Inverse hadamard transformed") to produce residuals.
  *
@@ -82,7 +89,21 @@ bool entropyInitialize(EntropyDecoder* state, const LdeChunk* chunk, EntropyDeco
  *
  *  \return the number of zeros following this coefficient (<0 on fail)
  */
-int32_t entropyDecode(EntropyDecoder* state, int16_t* coeffOut);
+static inline int32_t entropyDecode(EntropyDecoder* state, int16_t* coeffOut)
+{
+    assert(state->type == EDTDefault);
+
+    if (!state->entropyEnabled) {
+        *coeffOut = 0;
+        return EntropyNoData;
+    }
+
+    if (state->rleOnly) {
+        return entropyDecodeRleCoefficient(state, coeffOut);
+    }
+
+    return huffmanTripleDecode(&state->comboHuffman, &state->hstream, coeffOut);
+}
 
 /*! \brief Decode the next temporal signal from a temporal stream.
  *

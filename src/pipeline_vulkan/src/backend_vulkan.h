@@ -34,7 +34,6 @@
 
 #include <vk_mem_alloc.h>
 
-#include <cstring>
 #include <optional>
 #include <vector>
 
@@ -130,7 +129,8 @@ private:
 
     // Helpers - building
     bool checkValidationLayerSupport() const;
-    std::vector<const char*> getRequiredInstanceExtensions();
+    std::vector<const char*> getRequiredInstanceExtensions() const;
+    std::vector<const char*> getRequiredDeviceExtensions() const;
     void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo);
     VkResult CreateDebugUtilsMessengerEXT(VkInstance instance,
                                           const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
@@ -144,19 +144,14 @@ private:
     bool isDeviceSuitableWithSurface(VkPhysicalDevice device);
     VkPhysicalDevice pickBestDevice(const std::vector<VkPhysicalDevice>& devices);
     bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
+    bool checkDeviceExtension(VkPhysicalDevice device, const char* ext) const;
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                                                         VkDebugUtilsMessageTypeFlagsEXT messageType,
                                                         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
                                                         void* pUserData);
 
-    const std::vector<const char*> validationLayers = {"VK_LAYER_KHRONOS_validation"};
-    std::vector<const char*> deviceExtensions = {
-#if VN_OS(ANDROID)
-        "VK_ANDROID_external_memory_android_hardware_buffer",
-        "VK_EXT_queue_family_foreign",
-#endif
-    };
+    static const std::vector<const char*> validationLayers;
 
     bool m_renderingEnabled{};
     int32_t m_deviceOverride{};

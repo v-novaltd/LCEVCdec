@@ -30,7 +30,10 @@
     const bool ditherEnabled = (dither != NULL);
     const bool paEnabled = (params.applyPA != 0);
 
-    int16_t kernel[4] = {params.kernel[0], params.kernel[1], params.kernel[2], params.kernel[3]};
+    const int32_t kernel[4] = {upscaleKernelGetPreparedCoefficient(&params, 0),
+                               upscaleKernelGetPreparedCoefficient(&params, 1),
+                               upscaleKernelGetPreparedCoefficient(&params, 2),
+                               upscaleKernelGetPreparedCoefficient(&params, 3)};
 
     const int32_t srcWidthI = (int32_t)srcWidth;
     const int32_t rightEdgeSrcX = (srcWidthI >= 4) ? (srcWidthI - 4) : 0;
@@ -111,10 +114,10 @@
             int16_t v0[8];
             int16_t v1[8];
             for (int32_t i = 0; i < 8; ++i) {
-                const int32_t acc0 = (src0[i] * kernel[3]) + (src1[i] * kernel[2]) +
-                                     (src2[i] * kernel[1]) + (src3[i] * kernel[0]);
-                const int32_t acc1 = (src1[i] * kernel[0]) + (src2[i] * kernel[1]) +
-                                     (src3[i] * kernel[2]) + (src4[i] * kernel[3]);
+                const int64_t acc0 = ((int64_t)src0[i] * kernel[3]) + ((int64_t)src1[i] * kernel[2]) +
+                                     ((int64_t)src2[i] * kernel[1]) + (src3[i] * kernel[0]);
+                const int64_t acc1 = ((int64_t)src1[i] * kernel[0]) + ((int64_t)src2[i] * kernel[1]) +
+                                     ((int64_t)src3[i] * kernel[2]) + (src4[i] * kernel[3]);
 
                 v0[i] = scalarShiftRoundS15(acc0);
                 v1[i] = scalarShiftRoundS15(acc1);
@@ -123,15 +126,19 @@
             int16_t row0_16[8];
             int16_t row1_16[8];
             for (int32_t i = 0; i < 4; ++i) {
-                const int32_t row0Odd = (v0[i + 0] * kernel[3]) + (v0[i + 1] * kernel[2]) +
-                                        (v0[i + 2] * kernel[1]) + (v0[i + 3] * kernel[0]);
-                const int32_t row0Even = (v0[i + 1] * kernel[0]) + (v0[i + 2] * kernel[1]) +
-                                         (v0[i + 3] * kernel[2]) + (v0[i + 4] * kernel[3]);
+                const int64_t row0Odd = ((int64_t)v0[i + 0] * kernel[3]) +
+                                        ((int64_t)v0[i + 1] * kernel[2]) +
+                                        ((int64_t)v0[i + 2] * kernel[1]) + (v0[i + 3] * kernel[0]);
+                const int64_t row0Even = ((int64_t)v0[i + 1] * kernel[0]) +
+                                         ((int64_t)v0[i + 2] * kernel[1]) +
+                                         ((int64_t)v0[i + 3] * kernel[2]) + (v0[i + 4] * kernel[3]);
 
-                const int32_t row1Odd = (v1[i + 0] * kernel[3]) + (v1[i + 1] * kernel[2]) +
-                                        (v1[i + 2] * kernel[1]) + (v1[i + 3] * kernel[0]);
-                const int32_t row1Even = (v1[i + 1] * kernel[0]) + (v1[i + 2] * kernel[1]) +
-                                         (v1[i + 3] * kernel[2]) + (v1[i + 4] * kernel[3]);
+                const int64_t row1Odd = ((int64_t)v1[i + 0] * kernel[3]) +
+                                        ((int64_t)v1[i + 1] * kernel[2]) +
+                                        ((int64_t)v1[i + 2] * kernel[1]) + (v1[i + 3] * kernel[0]);
+                const int64_t row1Even = ((int64_t)v1[i + 1] * kernel[0]) +
+                                         ((int64_t)v1[i + 2] * kernel[1]) +
+                                         ((int64_t)v1[i + 3] * kernel[2]) + (v1[i + 4] * kernel[3]);
 
                 row0_16[(i << 1) + 0] = scalarShiftRoundS15(row0Odd);
                 row0_16[(i << 1) + 1] = scalarShiftRoundS15(row0Even);

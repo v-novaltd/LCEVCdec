@@ -17,6 +17,7 @@
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/enhancement/config_parser.h>
+#include <LCEVC/enhancement/dimensions.h>
 #include <LCEVC/utility/bin_reader.h>
 
 #include <filesystem>
@@ -197,4 +198,35 @@ TEST_F(ConfigParserTest, checkHDRParams)
     EXPECT_EQ(globalConfig.hdrInfo.tonemapperConfig[0].type, 2);
 
     ldeConfigsReleaseFrame(&frameConfig);
+}
+
+TEST_F(ConfigParserTest, dimensions)
+{
+    openAsset("parse_std.bin");
+    auto frame = getFrame();
+    EXPECT_EQ(frame.size(), 65);
+    bool globalConfigModified = false;
+    EXPECT_TRUE(ldeConfigsParse(frame.data(), frame.size(), &globalConfig, &frameConfig,
+                                &globalConfigModified));
+
+    uint16_t width = 0;
+    uint16_t height = 0;
+    ldeTileDimensionsFromConfig(&globalConfig, LOQ0, 0, 0, &width, &height);
+    EXPECT_EQ(width, 90);
+    EXPECT_EQ(height, 50);
+    ldeTileDimensionsFromConfig(&globalConfig, LOQ1, 1, 1, &width, &height);
+    EXPECT_EQ(width, 45);
+    EXPECT_EQ(height, 25);
+
+    uint16_t startX = 0;
+    uint16_t startY = 0;
+    ldeTileStartFromConfig(&globalConfig, LOQ0, 0, 3, &startX, &startY);
+    EXPECT_EQ(startX, 90);
+    EXPECT_EQ(startY, 50);
+
+    ldePlaneDimensionsFromConfig(&globalConfig, LOQ1, 2, &width, &height);
+    EXPECT_EQ(width, 45);
+    EXPECT_EQ(height, 50);
+
+    EXPECT_EQ(ldeTotalNumTiles(&globalConfig), 6);
 }
