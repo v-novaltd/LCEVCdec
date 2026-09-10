@@ -34,6 +34,13 @@ list(
     "src/transform.c"
     "src/transform_unit.c")
 
+if (VN_SDK_SIMD
+    AND TARGET_ARCH MATCHES "^x86"
+    AND NOT MSVC)
+    set_source_files_properties("src/decode.c" "src/dequant.c" "src/transform.c"
+                                PROPERTIES COMPILE_OPTIONS "-msse4.1")
+endif ()
+
 list(
     APPEND
     HEADERS

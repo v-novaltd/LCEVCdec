@@ -830,6 +830,10 @@ void ldcTaskGroupDestroy(struct LdcTaskGroup* group)
 
     group->pool = NULL;
     group->dependenciesReserved = 0;
+    group->dependenciesCount = 0;
+    group->dependenciesMet = NULL;
+    group->waitingTasks = NULL;
+    group->dependencyValues = NULL;
 
     threadMutexUnlock(&pool->mutex);
 }
@@ -1011,15 +1015,25 @@ void* ldcTaskDependencyGet(const LdcTaskGroup* group, LdcTaskDependency dependen
 void ldcTaskDependencyMet(LdcTaskGroup* group, LdcTaskDependency dependency, void* value)
 {
     assert(group);
-    assert(group->pool);
 
-    threadMutexLock(&group->pool->mutex);
+    LdcTaskPool* pool = group->pool;
+    if (pool == NULL) {
+        return; // Ignore if pool has already been destroyed
+    }
+
+    threadMutexLock(&pool->mutex);
+
+    // Re-check the pool hasn't been destroyed with after getting the mutex
+    if (group->pool == NULL) {
+        threadMutexUnlock(&pool->mutex);
+        return;
+    }
 
     dependencyMet(group, dependency, value);
 
-    threadCondVarBroadcast(&group->pool->condVarCompleted);
+    threadCondVarBroadcast(&pool->condVarCompleted);
 
-    threadMutexUnlock(&group->pool->mutex);
+    threadMutexUnlock(&pool->mutex);
 }
 
 void* ldcTaskDependencyWait(const LdcTaskGroup* group, LdcTaskDependency dependency)

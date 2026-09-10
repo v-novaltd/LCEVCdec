@@ -102,7 +102,7 @@ struct PushConstantsConversion
     // Note: convert_out_image_*.comp shaders alias `shift` and `sharpenStrength`
     // as chromaWidthShift / chromaHeightShift and do not read `nv21Swap`.
     //
-    // Strides of eash planes' temparal buffer - buffer is present if stride != 0
+    // Strides of eash planes' temporal buffer - buffer is present if stride != 0
     uint32_t containerStrideTemporal0;
     uint32_t containerOffsetTemporal0;
     uint32_t containerStrideTemporal1;
@@ -446,11 +446,94 @@ bool ComputeVulkan::createComputePipeline(ComputePipeline& computePipeline,
     return true;
 }
 
-void ComputeVulkan::updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst,
+bool ComputeVulkan::unbindInternalPictureBuffer(PictureVulkan* picture)
+{
+    if (picture->buffer == nullptr) {
+        return true;
+    }
+
+    BufferVulkan* buffer = fromPipeline(picture->buffer);
+    if (buffer != nullptr && buffer->getVkBuffer() != VK_NULL_HANDLE && buffer->size() != 0) {
+        return true;
+    }
+
+    if (picture->isExternalBuffer() || !picture->unbindBuffer()) {
+        VNLogError("failed to discard invalid internal picture buffer");
+        return false;
+    }
+
+    return true;
+}
+
+bool ComputeVulkan::prepareInternalPictureBuffer(PictureVulkan* picture, const LdpPictureDesc& desc)
+{
+    if (picture == nullptr) {
+        VNLogError("null internal picture");
+        return false;
+    }
+
+    if (!unbindInternalPictureBuffer(picture)) {
+        return false;
+    }
+
+    if (!picture->setDescAndBind(desc, pipeline::BufferUsageInternal)) {
+        unbindInternalPictureBuffer(picture);
+        VNLogError("failed to bind internal picture buffer: width=%u height=%u", desc.width, desc.height);
+        return false;
+    }
+
+    BufferVulkan* buffer = fromPipeline(picture->buffer);
+    if (buffer == nullptr || buffer->getVkBuffer() == VK_NULL_HANDLE || buffer->size() == 0) {
+        unbindInternalPictureBuffer(picture);
+        VNLogError("binding produced an invalid internal picture buffer: width=%u height=%u",
+                   desc.width, desc.height);
+        return false;
+    }
+    return true;
+}
+
+bool ComputeVulkan::prepareDescriptorBufferInfo(BufferVulkan* buffer, VkDescriptorBufferInfo& info)
+{
+    if (buffer == nullptr) {
+        VNLogError("null descriptor buffer");
+        return false;
+    }
+
+    const VkBuffer vkBuffer = buffer->getVkBuffer();
+    const uint32_t size = buffer->size();
+    if (vkBuffer == VK_NULL_HANDLE || size == 0) {
+        VNLogError("invalid descriptor buffer: object=%p vkBufferNull=%d size=%u",
+                   static_cast<void*>(buffer), vkBuffer == VK_NULL_HANDLE, size);
+        return false;
+    }
+
+    info.buffer = vkBuffer;
+    info.offset = 0;
+    info.range = size;
+    return true;
+}
+
+bool ComputeVulkan::validateDescriptorSet(VkDescriptorSet descriptorSet)
+{
+    if (descriptorSet == VK_NULL_HANDLE) {
+        VNLogError("null descriptor set");
+        return false;
+    }
+    return true;
+}
+
+bool ComputeVulkan::updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst,
                                                 VkDescriptorSet descriptorSet)
 {
-    std::array<VkDescriptorBufferInfo, 2> bufferInfos{
-        {{src->getVkBuffer(), 0, src->size()}, {dst->getVkBuffer(), 0, dst->size()}}};
+    if (!validateDescriptorSet(descriptorSet)) {
+        return false;
+    }
+
+    std::array<VkDescriptorBufferInfo, 2> bufferInfos{};
+    if (!prepareDescriptorBufferInfo(src, bufferInfos[0]) ||
+        !prepareDescriptorBufferInfo(dst, bufferInfos[1])) {
+        return false;
+    }
 
     std::array<VkWriteDescriptorSet, 2> writes{};
     for (uint32_t i = 0; i < writes.size(); ++i) {
@@ -465,22 +548,46 @@ void ComputeVulkan::updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan*
 
     vkUpdateDescriptorSets(m_backend.getDevice(), static_cast<uint32_t>(writes.size()),
                            writes.data(), 0, nullptr);
+    return true;
 }
 
-void ComputeVulkan::updateComputeImageDescriptorSets(BufferVulkan* src, BufferVulkan* dst,
+bool ComputeVulkan::updateComputeImageDescriptorSets(BufferVulkan* src, BufferVulkan* dst,
                                                      BufferVulkan* temporal, VkDescriptorSet descriptorSet)
 {
-    VkDescriptorBufferInfo bufferInfo{src->getVkBuffer(), 0, src->size()};
+    if (!validateDescriptorSet(descriptorSet)) {
+        return false;
+    }
+
+    VkDescriptorBufferInfo bufferInfo{};
+    VkDescriptorBufferInfo temporalInfo{};
+    if (!prepareDescriptorBufferInfo(src, bufferInfo) ||
+        !prepareDescriptorBufferInfo(temporal, temporalInfo)) {
+        return false;
+    }
+
+    if (dst == nullptr) {
+        VNLogError("null destination descriptor image");
+        return false;
+    }
+
+    const VkImage image = dst->getVkImage();
+    const VkImageView plane0View = dst->getVkImageView(0);
+    const VkImageView plane1View = dst->getVkImageView(1);
+    if (image == VK_NULL_HANDLE || plane0View == VK_NULL_HANDLE || plane1View == VK_NULL_HANDLE) {
+        VNLogError("invalid destination descriptor image: object=%p imageNull=%d "
+                   "plane0ViewNull=%d plane1ViewNull=%d",
+                   static_cast<void*>(dst), image == VK_NULL_HANDLE, plane0View == VK_NULL_HANDLE,
+                   plane1View == VK_NULL_HANDLE);
+        return false;
+    }
 
     VkDescriptorImageInfo imageInfoPlane0{};
-    imageInfoPlane0.imageView = dst->getVkImageView(0);
+    imageInfoPlane0.imageView = plane0View;
     imageInfoPlane0.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkDescriptorImageInfo imageInfoPlane1{};
-    imageInfoPlane1.imageView = dst->getVkImageView(1);
+    imageInfoPlane1.imageView = plane1View;
     imageInfoPlane1.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    VkDescriptorBufferInfo temporalInfo{temporal->getVkBuffer(), 0, temporal->size()};
 
     std::array<VkWriteDescriptorSet, 4> writes{};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -513,14 +620,22 @@ void ComputeVulkan::updateComputeImageDescriptorSets(BufferVulkan* src, BufferVu
 
     vkUpdateDescriptorSets(m_backend.getDevice(), static_cast<uint32_t>(writes.size()),
                            writes.data(), 0, nullptr);
+    return true;
 }
 
-void ComputeVulkan::updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst1,
+bool ComputeVulkan::updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst1,
                                                 BufferVulkan* dst2, VkDescriptorSet descriptorSet)
 {
-    std::array<VkDescriptorBufferInfo, 3> bufferInfos{{{src->getVkBuffer(), 0, src->size()},
-                                                       {dst1->getVkBuffer(), 0, dst1->size()},
-                                                       {dst2->getVkBuffer(), 0, dst2->size()}}};
+    if (!validateDescriptorSet(descriptorSet)) {
+        return false;
+    }
+
+    std::array<VkDescriptorBufferInfo, 3> bufferInfos{};
+    if (!prepareDescriptorBufferInfo(src, bufferInfos[0]) ||
+        !prepareDescriptorBufferInfo(dst1, bufferInfos[1]) ||
+        !prepareDescriptorBufferInfo(dst2, bufferInfos[2])) {
+        return false;
+    }
 
     std::array<VkWriteDescriptorSet, 3> writes{};
     for (uint32_t i = 0; i < writes.size(); ++i) {
@@ -535,23 +650,6 @@ void ComputeVulkan::updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan*
 
     vkUpdateDescriptorSets(m_backend.getDevice(), static_cast<uint32_t>(writes.size()),
                            writes.data(), 0, nullptr);
-}
-
-bool ComputeVulkan::createComputeCommandPool()
-{
-    VkCommandPoolCreateInfo commandPoolCreateInfo{};
-    commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
-    const uint32_t queueFamilyIndex = m_backend.getQueueFamilies().computeFamily.value();
-    commandPoolCreateInfo.queueFamilyIndex = queueFamilyIndex;
-
-    if (vkCreateCommandPool(m_backend.getDevice(), &commandPoolCreateInfo, nullptr, &m_commandPool) !=
-        VK_SUCCESS) {
-        VNLogError("failed to create command pool");
-        return false;
-    }
-
     return true;
 }
 
@@ -766,14 +864,10 @@ bool ComputeVulkan::init()
         return false;
     }
 
-    if (!createComputeCommandPool()) {
-        return false;
-    }
-
     // Build free list of frame contexts
     for (auto& context : m_frameContexts) {
         context.m_backend = &m_backend;
-        if (!context.init(m_commandPool)) {
+        if (!context.init()) {
             return false;
         }
 
@@ -794,16 +888,30 @@ bool ComputeVulkan::init()
 
 bool ComputeVulkan::applyCommon(VulkanApplyCommonArgs* params)
 {
+    if (params == nullptr || params->context == nullptr || params->loq >= LOQEnhancedCount) {
+        VNLogError("apply: invalid arguments");
+        return false;
+    }
+
     const bool applyTemporal = (params->picture == nullptr);
+    if (applyTemporal && params->temporalPicture == nullptr) {
+        VNLogError("apply: null temporal picture");
+        return false;
+    }
 
     if (applyTemporal && params->plane == 0) {
         LdpPictureDesc desc{};
         ldpDefaultPictureDesc(&desc, chromaToColorFormat(params->chroma), params->planeWidth,
                               params->planeHeight);
-        if (updateConfig(LOQEnhancedCount, desc)) {
-            // Allocate a new temporal buffer
-            params->temporalPicture->setDescAndBind(desc, pipeline::BufferUsageInternal);
-
+        BufferVulkan* previousBuffer = fromPipeline(params->temporalPicture->buffer);
+        const bool needsClear = updateConfig(LOQEnhancedCount, desc) || previousBuffer == nullptr ||
+                                previousBuffer->getVkBuffer() == VK_NULL_HANDLE ||
+                                previousBuffer->size() == 0;
+        if (!prepareInternalPictureBuffer(params->temporalPicture, desc)) {
+            VNLogError("apply: failed to prepare temporal picture buffer");
+            return false;
+        }
+        if (needsClear) {
             BufferVulkan* temporalBuffer = fromPipeline(params->temporalPicture->buffer);
             temporalBuffer->clearCmd(params->context->m_commandBuffer);
         }
@@ -811,7 +919,6 @@ bool ComputeVulkan::applyCommon(VulkanApplyCommonArgs* params)
 
     VulkanFrameContext* context = params->context;
     const uint8_t loq = params->loq;
-    assert(loq < LOQEnhancedCount);
 
     // Select per-LOQ command buffer and descriptor set
     BufferVulkan*& gpuCommandBuffer = context->m_gpuCommandBuffer[loq];
@@ -822,7 +929,10 @@ bool ComputeVulkan::applyCommon(VulkanApplyCommonArgs* params)
 
     // Update the per-LOQ apply descriptor set. The output plane may change between tiles
     // (different planes/pictures), so always update.
-    updateComputeDescriptorSets(gpuCommandBuffer, applyPlaneBuffer, descriptorSetApply);
+    if (!updateComputeDescriptorSets(gpuCommandBuffer, applyPlaneBuffer, descriptorSetApply)) {
+        VNLogError("apply: failed to update descriptor set");
+        return false;
+    }
 
     // Select the specialised apply pipeline based on DDS and raster order
     const ComputePipeline* applyPipeline{};
@@ -920,7 +1030,10 @@ bool ComputeVulkan::add(VulkanAddArgs* params)
 
     VulkanFrameContext* context = params->context;
 
-    updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetAdd);
+    if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetAdd)) {
+        VNLogError("add: failed to update descriptor set");
+        return false;
+    }
 
     context->bind(&m_pipelineLayoutAdd, &m_pipelineAdd, context->m_descriptorSetAdd);
 
@@ -975,7 +1088,10 @@ bool ComputeVulkan::convertIn(VulkanConvertInArgs* params)
     constants.containerOffsetV = 0;
 
     // Alias srcBuffer intop temporal
-    updateComputeDescriptorSets(srcBuffer, dstBuffer, srcBuffer, context->m_descriptorSetConversionTo);
+    if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, srcBuffer, context->m_descriptorSetConversionTo)) {
+        VNLogError("convert_in: failed to update descriptor set");
+        return false;
+    }
 
     if (is8bit) {
         context->bind(&m_pipelineLayoutConversion,
@@ -1032,6 +1148,10 @@ bool ComputeVulkan::convertOut(VulkanConvertOutArgs* params)
     PictureVulkan* srcPicture = params->src;
     PictureVulkan* dstPicture = params->dst;
     BufferVulkan* dstBuffer = fromPipeline(dstPicture->buffer);
+    if (dstBuffer == nullptr) {
+        VNLogError("convert_out: null destination buffer");
+        return false;
+    }
     const LdpColorFormat dstFormat = ldpPictureLayoutFormat(&dstPicture->layout);
 
     PushConstantsConversion constants{};
@@ -1065,18 +1185,11 @@ bool ComputeVulkan::convertOutToImage(VulkanConvertOutArgs* params, PushConstant
     const bool dstIsP010Image = dstFormat == LdpColorFormatP010_10;
     const bool dstIsNv12Image = dstFormat == LdpColorFormatNV12_8;
     const bool dstIsRgba10Image = dstFormat == LdpColorFormatRGBA_10_2_LE;
-    const bool dstIsTwoPlaneYuvImage = dstIsP010Image || dstIsNv12Image;
 
     if (params->chroma == LdeChroma::CTMonochrome) {
         VNLogError("convertOut: VkImage output requires chroma planes");
         return false;
     }
-    if (dstBuffer->getVkImageView(0) == VK_NULL_HANDLE ||
-        (dstIsTwoPlaneYuvImage && dstBuffer->getVkImageView(1) == VK_NULL_HANDLE)) {
-        VNLogError("convertOut: VkImage output has no suitable image view");
-        return false;
-    }
-
     int widthShift{};
     int heightShift{};
     getSubsamplingShifts(params->chroma, widthShift, heightShift);
@@ -1101,15 +1214,18 @@ bool ComputeVulkan::convertOutToImage(VulkanConvertOutArgs* params, PushConstant
     setTemporalStrides(constants, 2, 2, doAdd, params->numEnhancedPlanes, params->temporal);
     BufferVulkan* temporalBuffer = doAdd ? fromPipeline(params->temporal->buffer) : srcBuffer;
 
+    if (!updateComputeImageDescriptorSets(srcBuffer, dstBuffer, temporalBuffer,
+                                          context->m_descriptorSetConversionFromImage)) {
+        VNLogError("convert_out_image: failed to update descriptor set");
+        return false;
+    }
+
     // Transition the (possibly imported) destination image into GENERAL
     // layout so the convert-out compute shader can write to it.
     BufferVulkan::imageLayoutTransition(
         context->m_commandBuffer, dstBuffer->getVkImage(), VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_GENERAL, /*srcAccess=*/0, VK_ACCESS_SHADER_WRITE_BIT,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-
-    updateComputeImageDescriptorSets(srcBuffer, dstBuffer, temporalBuffer,
-                                     context->m_descriptorSetConversionFromImage);
 
     const ComputePipeline* convertOutPipeline = doAdd ? &m_pipelineConversionFromInternalRgba8ImageAddTemporal
                                                       : &m_pipelineConversionFromInternalRgba8Image;
@@ -1158,7 +1274,11 @@ bool ComputeVulkan::convertOutToBuffer(VulkanConvertOutArgs* params, PushConstan
     // Y plane (plane 0) -> slot 0; slot 2 unused for Y.
     setTemporalStrides(constants, 0, 0, doAdd, params->numEnhancedPlanes, params->temporal);
     setTemporalStrides(constants, 2, 0, false, 0, nullptr);
-    updateComputeDescriptorSets(srcBuffer, dstBuffer, temporalBuffer, context->m_descriptorSetConversionFrom);
+    if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, temporalBuffer,
+                                     context->m_descriptorSetConversionFrom)) {
+        VNLogError("convert_out_buffer: failed to update descriptor set");
+        return false;
+    }
 
     const ComputePipeline* pipeline = nullptr;
     if (is8bit) {
@@ -1234,6 +1354,12 @@ bool ComputeVulkan::convertOutToBuffer(VulkanConvertOutArgs* params, PushConstan
 
 bool ComputeVulkan::upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs* params)
 {
+    if (kernel == nullptr || params == nullptr || params->src == nullptr ||
+        params->dst == nullptr || params->context == nullptr) {
+        VNLogError("upscale_vertical: invalid arguments");
+        return false;
+    }
+
     PictureVulkan* srcPicture = params->src;
     PictureVulkan* dstPicture = params->dst;
 
@@ -1245,9 +1371,15 @@ bool ComputeVulkan::upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs* 
 
     // Vertical set for upscaling from base and writing to intermediate
     if (params->loq1) {
-        updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetSrcMidLoq1);
+        if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetSrcMidLoq1)) {
+            VNLogError("upscale_vertical_loq1: failed to update descriptor set");
+            return false;
+        }
     } else {
-        updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetSrcMidLoq0);
+        if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetSrcMidLoq0)) {
+            VNLogError("upscale_vertical_loq0: failed to update descriptor set");
+            return false;
+        }
     }
 
     const uint32_t srcWidth = srcPicture->getActiveWidth();
@@ -1299,23 +1431,22 @@ bool ComputeVulkan::upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs* 
 
 bool ComputeVulkan::upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArgs* params)
 {
+    if (kernel == nullptr || params == nullptr || params->src == nullptr ||
+        params->dst == nullptr || params->base == nullptr || params->context == nullptr) {
+        VNLogError("upscale_horizontal: invalid arguments");
+        return false;
+    }
+
     PictureVulkan* srcPicture = params->src;
     PictureVulkan* dstPicture = params->dst;
     PictureVulkan* basePicture = params->base;
 
-    assert(srcPicture);
-    assert(dstPicture);
-    assert(basePicture);
-
     // Get VkBuffers to update descriptor sets (attach buffers to shaders)
     BufferVulkan* srcBuffer = fromPipeline(srcPicture->buffer);
-    assert(srcBuffer);
 
     BufferVulkan* baseBuffer = fromPipeline(basePicture->buffer);
-    assert(baseBuffer);
 
     BufferVulkan* dstBuffer = fromPipeline(dstPicture->buffer);
-    assert(dstBuffer);
 
     const uint32_t srcWidth = srcPicture->getActiveWidth();
     const uint32_t srcHeight = srcPicture->getActiveHeight();
@@ -1324,9 +1455,17 @@ bool ComputeVulkan::upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArgs
 
     // Horizontal set for upscaling from intermediate, applying PA from base, and writing to output
     if (params->loq1) {
-        updateComputeDescriptorSets(srcBuffer, dstBuffer, baseBuffer, context->m_descriptorSetMidDstLoq1);
+        if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, baseBuffer,
+                                         context->m_descriptorSetMidDstLoq1)) {
+            VNLogError("upscale_horizontal_loq1: failed to update descriptor set");
+            return false;
+        }
     } else {
-        updateComputeDescriptorSets(srcBuffer, dstBuffer, baseBuffer, context->m_descriptorSetMidDstLoq0);
+        if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, baseBuffer,
+                                         context->m_descriptorSetMidDstLoq0)) {
+            VNLogError("upscale_horizontal_loq0: failed to update descriptor set");
+            return false;
+        }
     }
 
     PushConstantsUpscale constants{};
@@ -1385,35 +1524,57 @@ bool ComputeVulkan::upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArgs
 
 bool ComputeVulkan::upscaleFrame(const LdeKernel* kernel, VulkanUpscaleArgs* params)
 {
+    if (kernel == nullptr || params == nullptr || params->src == nullptr ||
+        params->dst == nullptr || params->context == nullptr) {
+        VNLogError("upscale: invalid arguments");
+        return false;
+    }
+
     params->base = params->src;
-    LdpPictureDesc desc;
+    LdpPictureDesc desc{};
     params->src->getDesc(desc);
     if (params->mode == Scale1D) {
         params->vertical ? desc.height *= 2 : desc.width *= 2;
-        params->dst->setDescAndBind(desc, pipeline::BufferUsageInternal);
+        if (!prepareInternalPictureBuffer(params->dst, desc)) {
+            VNLogError("upscale_1d: failed to prepare destination picture buffer");
+            return false;
+        }
 
         params->applyPA = params->applyPA ? 1 : 0;
-        params->vertical ? upscaleVertical(kernel, params) : upscaleHorizontal(kernel, params);
-    } else if (params->mode == Scale2D) {
+        return params->vertical ? upscaleVertical(kernel, params) : upscaleHorizontal(kernel, params);
+    }
+
+    if (params->mode == Scale2D) {
         PictureVulkan* output = params->dst;
-        if (updateConfig(params->loq1 ? 1 : 0, desc)) {
-            LdpPictureDesc intDesc{desc};
-            intDesc.height *= 2;
-            params->intermediateUpscalePicture[params->loq1 ? LOQ1 : LOQ0]->setDescAndBind(
-                intDesc, pipeline::BufferUsageInternal);
+        const LdeLOQIndex loq = params->loq1 ? LOQ1 : LOQ0;
+        PictureVulkan* intermediate = params->intermediateUpscalePicture[loq];
+
+        LdpPictureDesc intermediateDesc{desc};
+        intermediateDesc.height *= 2;
+        updateConfig(static_cast<uint8_t>(loq), desc);
+        if (!prepareInternalPictureBuffer(intermediate, intermediateDesc)) {
+            VNLogError("upscale_2d: failed to prepare intermediate picture buffer");
+            return false;
         }
-        params->dst = params->intermediateUpscalePicture[params->loq1 ? LOQ1 : LOQ0];
-        upscaleVertical(kernel, params);
+        params->dst = intermediate;
+        if (!upscaleVertical(kernel, params)) {
+            return false;
+        }
 
         desc.width *= 2;
         desc.height *= 2;
-        output->setDescAndBind(desc, pipeline::BufferUsageInternal);
+        if (!prepareInternalPictureBuffer(output, desc)) {
+            VNLogError("upscale_2d: failed to prepare destination picture buffer");
+            return false;
+        }
         params->src = params->dst;
         params->dst = output;
         params->applyPA = params->applyPA ? 2 : 0;
-        upscaleHorizontal(kernel, params);
+        return upscaleHorizontal(kernel, params);
     }
-    return true;
+
+    VNLogError("upscale: unsupported scaling mode %d", static_cast<int32_t>(params->mode));
+    return false;
 }
 
 void ComputeVulkan::destroyComputePipelineLayout(ComputePipelineLayout& computePipelineLayout)
@@ -1429,12 +1590,11 @@ void ComputeVulkan::destroyComputePipeline(ComputePipeline& computePipeline)
 
 void ComputeVulkan::destroy()
 {
-    vkDeviceWaitIdle(m_backend.getDevice());
+    m_backend.waitDeviceIdle();
 
     for (auto& context : m_frameContexts) {
-        context.destroy(m_commandPool);
+        context.destroy();
     }
-    vkDestroyCommandPool(m_backend.getDevice(), m_commandPool, nullptr);
 
     destroyComputePipelineLayout(m_pipelineLayoutVertical);
     destroyComputePipelineLayout(m_pipelineLayoutHorizontal);

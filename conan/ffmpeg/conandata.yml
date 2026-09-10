@@ -1,4 +1,7 @@
 sources:
+  "9.0":
+    url: "https://ffmpeg.org/releases/ffmpeg-9.0.tar.bz2"
+    sha256: "ce84a9d01766eacd271bef8fa6447593ccc691801b48ac4e7b9dc90a9483a422"
   "8.0":
     url: "https://ffmpeg.org/releases/ffmpeg-8.0.tar.bz2"
     sha256: "3e74acc48ddb9f5f70b6747d3f439d51e7cc5497f097d58e5975c84488f4d186"

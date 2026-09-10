@@ -147,7 +147,10 @@ The following options are not specific to any given pipeline and may need to be 
 =========================== ========== ================ ===============================================================
 Option                      Type       Default          Description
 =========================== ========== ================ ===============================================================
-``pipeline``                string     cpu              The decode pipeline to use, options are ‘cpu’ or ‘vulkan’.
+``pipeline``                string     cpu              The decode pipeline to use. Options are ``cpu``, ``vulkan``, or
+                                                        ``auto`` on Android. Auto selects Vulkan when the device supports
+                                                        Vulkan 1.1 or newer, and CPU otherwise or when the GPU is
+                                                        whitelisted.
 ``events``                  intArray   \-               Array of :cpp:enum:`LCEVC_Event`. The events that will be
                                                         generated via the event callback.
 ``threads``                 int        physical threads The number of threads to spawn for parallel tasks.
@@ -159,6 +162,7 @@ Option                      Type       Default          Description
                                                         logs (Windows, Linux). Windows also always prints logs to the
                                                         Debugger (e.g. the Visual Studio console).
 ``disable_simd``            boolean    false            If true, no SIMD (SSE, NEON, etc.) will be used.
+``disable_avx``             boolean    false            If true, AVX will not be used, but SSE remains enabled.
 ``passthrough_mode``        int        0                Determines if the Decoder runs in passthrough mode never (-1),
                                                         always (1), only when LCEVC Enhancement data is missing (0), or
                                                         when LCEVC Enhancement data is missing but with upscaling still

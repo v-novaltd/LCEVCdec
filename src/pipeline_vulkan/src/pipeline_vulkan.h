@@ -31,6 +31,7 @@
 #include <LCEVC/pipeline/enhancement_tile.h>
 #include <LCEVC/pipeline/pipeline_base.h>
 
+#include <array>
 #include <atomic>
 #include <vector>
 
@@ -113,6 +114,8 @@ private:
 
     void checkCompletion();
 
+    const LdppDitherFrame* findFreedFrameDither(uint64_t timestamp) const;
+
     PipelineConfigVulkan m_configuration;
 
     // Fast allocator for enhancement
@@ -123,12 +126,25 @@ private:
     common::Mutex m_allocationPicturesMutex;
 
     common::FreePool<BufferVulkanVma> m_buffersPool;
+    std::vector<BufferVulkanVma*> m_cachedBuffers;
     common::FreePool<PictureVulkan> m_picturesPool;
     common::FreePool<FrameVulkan> m_framesPool;
 
     lcevc_dec::common::Vector<TemporalBufferVulkan> m_temporalBuffers;
 
     LdppDitherGlobal m_dither{};
+
+    // Dither state of recently freed frames: a frame is freed when its picture
+    // is received, but renderSendPicture() may legitimately be called after
+    // that (receive-then-render ordering), and dither is the only per-frame
+    // state rendering needs.
+    struct FreedFrameDither
+    {
+        uint64_t timestamp;
+        LdppDitherFrame dither;
+    };
+    std::array<FreedFrameDither, 8> m_freedFrameDither{};
+    uint32_t m_freedFrameDitherNext = 0;
 
     BackendVulkan m_backend;
 

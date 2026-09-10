@@ -269,7 +269,7 @@ TEST_F(LCEVCEnhancerTest, FeedNalUnitShouldReturnNotFoundWhenLCEVCMissing)
     EXPECT_EQ(rc, LCEVC_NotFound);
 }
 
-#if 0 /// Disable for the momemnt - unstable - DEC-1056
+#if 0 /// Disable for the moment - unstable - DEC-1056
 TEST_F(LCEVCEnhancerTest, BufferCapacityShouldReturnErrorAtMaxAndAllowFeedAgainAfterSkip)
 {
     DecoderSettings settings;

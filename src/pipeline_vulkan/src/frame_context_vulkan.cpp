@@ -25,25 +25,36 @@
 
 #include <array>
 #include <cassert>
+#include <new>
 
 namespace lcevc_dec::pipeline_vulkan {
 
 VulkanFrameContext::~VulkanFrameContext() { freeTmpCmdBuffers(); }
 
-bool VulkanFrameContext::init(VkCommandPool commandPool)
+bool VulkanFrameContext::init()
 {
     assert(m_backend);
 
     VkDevice device = m_backend->getDevice();
 
+    VkCommandPoolCreateInfo commandPoolCreateInfo{};
+    commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    commandPoolCreateInfo.queueFamilyIndex = m_backend->getQueueFamilies().computeFamily.value();
+    if (vkCreateCommandPool(device, &commandPoolCreateInfo, nullptr, &m_commandPool) != VK_SUCCESS) {
+        VNLogError("failed to create command pool for context");
+        return false;
+    }
+
     VkCommandBufferAllocateInfo commandBufferAllocateInfo{};
     commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    commandBufferAllocateInfo.commandPool = commandPool;
+    commandBufferAllocateInfo.commandPool = m_commandPool;
     commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     commandBufferAllocateInfo.commandBufferCount = 1;
 
     if (vkAllocateCommandBuffers(device, &commandBufferAllocateInfo, &m_commandBuffer) != VK_SUCCESS) {
         VNLogError("failed to allocate command buffer");
+        destroy();
         return false;
     }
 
@@ -53,7 +64,7 @@ bool VulkanFrameContext::init(VkCommandPool commandPool)
 
     if (vkCreateFence(device, &fenceInfo, nullptr, &m_fence) != VK_SUCCESS) {
         VNLogError("failed to create fence for context");
-        destroy(commandPool);
+        destroy();
         return false;
     }
 
@@ -62,7 +73,7 @@ bool VulkanFrameContext::init(VkCommandPool commandPool)
 
     if (vkCreateEvent(device, &evtInfo, nullptr, &m_event) != VK_SUCCESS) {
         VNLogError("failed to create event for context");
-        destroy(commandPool);
+        destroy();
         return false;
     }
 
@@ -78,7 +89,7 @@ bool VulkanFrameContext::init(VkCommandPool commandPool)
     return true;
 }
 
-void VulkanFrameContext::destroy(VkCommandPool commandPool)
+void VulkanFrameContext::destroy()
 {
     assert(m_backend);
 
@@ -102,8 +113,13 @@ void VulkanFrameContext::destroy(VkCommandPool commandPool)
     }
 
     if (m_commandBuffer) {
-        vkFreeCommandBuffers(device, commandPool, 1, &m_commandBuffer);
+        vkFreeCommandBuffers(device, m_commandPool, 1, &m_commandBuffer);
         m_commandBuffer = VK_NULL_HANDLE;
+    }
+
+    if (m_commandPool) {
+        vkDestroyCommandPool(device, m_commandPool, nullptr);
+        m_commandPool = VK_NULL_HANDLE;
     }
 
     freeTmpCmdBuffers();
@@ -167,6 +183,8 @@ bool VulkanFrameContext::begin(const DescriptorSetLayouts& layouts, uint32_t num
 {
     assert(m_backend);
 
+    m_eventPrevAtBegin = m_eventPrev;
+
     if (!m_descriptorSetsAllocated) {
         if (!allocateDescriptorSets(layouts, numTiles)) {
             VNLogError("Failed to allocate descriptor sets!");
@@ -179,10 +197,13 @@ bool VulkanFrameContext::begin(const DescriptorSetLayouts& layouts, uint32_t num
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    vkResetCommandBuffer(m_commandBuffer, 0);
+    if (const VkResult result = vkResetCommandBuffer(m_commandBuffer, 0); result != VK_SUCCESS) {
+        VNLogError("Failed to reset compute command buffer: %d", static_cast<int32_t>(result));
+        return false;
+    }
 
-    if (vkBeginCommandBuffer(m_commandBuffer, &beginInfo) != VK_SUCCESS) {
-        VNLogError("Failed to begin compute command buffer!");
+    if (const VkResult result = vkBeginCommandBuffer(m_commandBuffer, &beginInfo); result != VK_SUCCESS) {
+        VNLogError("Failed to begin compute command buffer: %d", static_cast<int32_t>(result));
         return false;
     }
 
@@ -203,19 +224,26 @@ bool VulkanFrameContext::end(VkQueue computeQueue)
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &m_commandBuffer;
 
-    {
-        common::ScopedLock lock(m_backend->compute().submitMutex());
-
-        if (VkResult r = vkQueueSubmit(computeQueue, 1, &submitInfo, m_fence); r != VK_SUCCESS) {
-            VNLogError("vkQueueSubmit failed: %d", (int32_t)r);
-            return false;
-        }
+    if (VkResult r = m_backend->submitQueue(computeQueue, 1, &submitInfo, m_fence); r != VK_SUCCESS) {
+        VNLogError("vkQueueSubmit failed: %d", (int32_t)r);
+        return false;
     }
 
     m_computePipeline = nullptr;
     m_computePipelineLayout = nullptr;
 
     return true;
+}
+
+void VulkanFrameContext::abort()
+{
+    if (VkResult r = vkResetCommandBuffer(m_commandBuffer, 0); r != VK_SUCCESS) {
+        VNLogError("failed to reset aborted command buffer: %d", static_cast<int32_t>(r));
+    }
+
+    m_computePipeline = nullptr;
+    m_computePipelineLayout = nullptr;
+    m_eventPrev = m_eventPrevAtBegin;
 }
 
 void VulkanFrameContext::bind(const ComputePipelineLayout* computePipelineLayout,
@@ -246,24 +274,38 @@ void VulkanFrameContext::dispatch(uint32_t width, uint32_t height, const char* l
     m_timestamps.end(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, label);
 }
 
-void VulkanFrameContext::prepareCommandBuffer(LdeLOQIndex loq, uint32_t size)
+bool VulkanFrameContext::prepareCommandBuffer(LdeLOQIndex loq, uint32_t size)
 {
     assert(m_backend);
     assert(loq < LOQEnhancedCount);
 
     m_gpuCommandBufferOffset[loq] = 0;
     if (size == 0) {
-        return;
+        return true;
     }
 
-    // GPUComamndBuffer grows as necessary.
+    // GPUCommandBuffer grows as necessary.
     // Could add some sort of shrink mechanism eg: if < 1/2 for 100 consecutive frames?
-    if (!m_gpuCommandBuffer[loq] || size > m_gpuCommandBuffer[loq]->size()) {
-        if (m_gpuCommandBuffer[loq]) {
-            delete m_gpuCommandBuffer[loq];
+    if (!m_gpuCommandBuffer[loq] || m_gpuCommandBuffer[loq]->getVkBuffer() == VK_NULL_HANDLE ||
+        m_gpuCommandBuffer[loq]->size() == 0 || size > m_gpuCommandBuffer[loq]->size()) {
+        auto* replacement = new (std::nothrow) BufferVulkanVma(*m_backend, size, pipeline::BufferUsageIn);
+        if (replacement == nullptr) {
+            VNLogError("Failed to allocate command buffer object: loq=%u size=%u",
+                       static_cast<uint32_t>(loq), size);
+            return false;
         }
-        m_gpuCommandBuffer[loq] = new BufferVulkanVma(*m_backend, size, pipeline::BufferUsageIn);
+        if (replacement->getVkBuffer() == VK_NULL_HANDLE || replacement->size() == 0) {
+            VNLogError("Failed to allocate Vulkan command buffer: loq=%u size=%u",
+                       static_cast<uint32_t>(loq), size);
+            delete replacement;
+            return false;
+        }
+
+        delete m_gpuCommandBuffer[loq];
+        m_gpuCommandBuffer[loq] = replacement;
     }
+
+    return true;
 }
 
 void VulkanFrameContext::freeTmpCmdBuffers()

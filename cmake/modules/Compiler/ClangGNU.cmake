@@ -12,10 +12,6 @@
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
-if (VN_SDK_SIMD AND TARGET_ARCH MATCHES "^x86")
-    target_compile_options(lcevc_dec::compiler INTERFACE -msse4.1)
-endif ()
-
 if (TARGET_ARCH STREQUAL "wasm")
     target_compile_options(lcevc_dec::compiler INTERFACE -pthread -msimd128 -mavx)
 endif ()

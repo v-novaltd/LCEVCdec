@@ -71,6 +71,8 @@ public:
     // What sort of command buffers does this frame need?
     virtual bool needsGPUCommandBuffers() const = 0;
 
+    virtual LdcReturnCode decodeResult() const = 0;
+
     // Allocate per frame buffers
     bool initialize(const PipelineConfigBase& configuration, LdcTaskPool* taskPool,
                     LdppDitherGlobal* ditherBuffer);

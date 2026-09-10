@@ -12,6 +12,9 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include "surface_presenter.h"
+
+#include <android/hardware_buffer.h>
 #include <android/log.h>
 #include <android/native_window_jni.h>
 #include <LCEVC/extract/extract.h>
@@ -24,6 +27,7 @@
 #include <cstdint>
 #include <limits>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -132,13 +136,101 @@ static void setSampleAspectRatioFromPixelAspectRatio(float pixelAspectRatio, uin
     den /= gcd;
 }
 
+// A zero-copy decode output in flight: the external picture is backed by a
+// presenter AHardwareBuffer that the decoder writes straight into.
+struct ExternalOutput
+{
+    LCEVC_PictureHandle picture;
+    AHardwareBuffer* buffer;
+    uint32_t width;
+    uint32_t height;
+};
+
 // Client context for decoder instance and callback metadata
 struct ClientContext
 {
     LCEVC_DecoderHandle decoder = {0};
     jobject client = nullptr;
     ANativeWindow* nativeWindow = nullptr;
+
+    // Zero-copy rendering (API 29+)
+    SurfacePresenter* presenter = nullptr;
+    std::mutex externalOutputsMutex;
+    std::unordered_map<uint64_t, ExternalOutput> externalOutputs; // keyed by timestamp
+
+    // Largest output size seen so far. The decoder pairs output pictures with
+    // frames in FIFO order (not by timestamp), so frames with differing output
+    // sizes (e.g. passthrough vs enhanced) can be decoded into each other's
+    // pictures. External pictures are therefore only handed out at the maximum
+    // size, so any such frame still decodes bounded into the buffer.
+    uint32_t maxOutputWidth = 0;
+    uint32_t maxOutputHeight = 0;
+
+    // Vulkan imports Android's flexible YUV AHardwareBuffer and uses its detected planar or
+    // semiplanar layout. The CPU external-output implementation currently requires NV12.
+    bool acceptsFlexibleYuvOutput = false;
+
+    // On some devices the SurfaceControl buffer pool never recycles (its
+    // transaction-complete callback stops firing after the first frame), so
+    // zero-copy frames would otherwise interleave with copy-rendered fallback
+    // frames - each using different on-screen geometry, which reads as a
+    // corrupted/quartered image. Once zero-copy first fails, disable it for the
+    // rest of the session so every frame renders through the same path.
+    bool zeroCopyDisabled = false;
 };
+
+// Take the external output entry for a received picture, if any. Frees the
+// external picture (which unlocks its AHardwareBuffer) and either presents the
+// buffer - at the size the decoder actually produced - or returns it to the pool.
+static bool finishExternalOutput(ClientContext* context, LCEVC_PictureHandle received,
+                                 const LCEVC_DecodeInformation* decodeInformation, bool present)
+{
+    if (context->presenter == nullptr || received.hdl == 0) {
+        return false;
+    }
+
+    ExternalOutput output{};
+    {
+        std::lock_guard<std::mutex> lock(context->externalOutputsMutex);
+        auto it = context->externalOutputs.begin();
+        for (; it != context->externalOutputs.end(); ++it) {
+            if (it->second.picture.hdl == received.hdl) {
+                break;
+            }
+        }
+        if (it == context->externalOutputs.end()) {
+            return false;
+        }
+        output = it->second;
+        context->externalOutputs.erase(it);
+    }
+
+    // The frame decoded into this picture may not be the one it was allocated
+    // for - present at the size the decoder actually wrote. Passthrough frames
+    // only write base-sized content into the (possibly larger) buffer.
+    if (decodeInformation != nullptr && !decodeInformation->enhanced &&
+        decodeInformation->baseWidth != 0 && decodeInformation->baseHeight != 0) {
+        output.width = std::min(output.width, decodeInformation->baseWidth);
+        output.height = std::min(output.height, decodeInformation->baseHeight);
+    } else {
+        LCEVC_PictureDesc receivedDesc = {};
+        if (LCEVC_GetPictureDesc(context->decoder, received, &receivedDesc) == LCEVC_Success &&
+            receivedDesc.width != 0 && receivedDesc.height != 0) {
+            output.width = std::min(output.width, receivedDesc.width);
+            output.height = std::min(output.height, receivedDesc.height);
+        }
+    }
+
+    // Free the picture first: this unlocks the hardware buffer, flushing CPU
+    // writes before the compositor reads it.
+    LCEVC_FreePicture(context->decoder, output.picture);
+    if (present) {
+        context->presenter->presentBuffer(output.buffer, output.width, output.height);
+    } else {
+        context->presenter->recycleBuffer(output.buffer);
+    }
+    return true;
+}
 
 // save Java VM context
 static jobject gClassLoader = nullptr;
@@ -388,6 +480,10 @@ LCEVC_ReturnCode receiveDecoderPictureAndNotify(JNIEnv* env, jlong instance, Cli
         decodeInformation.timestamp != 0 ? decodeInformation.timestamp : fallbackTimestamp;
     LOGD("receiveDecoderPictureAndNotify: %s received decoder picture %lu", operation,
          static_cast<unsigned long>(decodedPicture.hdl));
+
+    // Dropped/flushed frame: recycle any zero-copy output without presenting
+    finishExternalOutput(context, decodedPicture, &decodeInformation, false);
+
     notifyPictureReleased(env, instance, context, ret, callbackTimestamp, decodedPicture);
     return ret;
 }
@@ -413,18 +509,50 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved)
     return JNI_VERSION_1_6;
 }
 
-NATIVE_FUNC(jlong, lcevcCreateDecoder)
+NATIVE_FUNC(jlong, lcevcCreateDecoder, jstring pipeline)
 {
     LOGV("lcevcCreateDecoder: entering");
 
-    ClientContext* context = new ClientContext(); // Zero initialised
+    std::string configuredPipeline = "auto";
+    if (pipeline != nullptr) {
+        const char* pipelineChars = env->GetStringUTFChars(pipeline, nullptr);
+        if (pipelineChars == nullptr) {
+            LOGE("lcevcCreateDecoder: could not read requested pipeline");
+            return 0;
+        }
+        configuredPipeline = pipelineChars;
+        env->ReleaseStringUTFChars(pipeline, pipelineChars);
+    }
+
+    if (configuredPipeline != "auto" && configuredPipeline != "cpu" && configuredPipeline != "vulkan") {
+        LOGE("lcevcCreateDecoder: unsupported pipeline '%s'", configuredPipeline.c_str());
+        return 0;
+    }
+
+    ClientContext* context = new ClientContext(); // Zero initialized
 
     context->client = reinterpret_cast<jobject>(env->NewWeakGlobalRef(thiz));
     context->nativeWindow = nullptr;
+    context->acceptsFlexibleYuvOutput = configuredPipeline != "cpu";
 
     LCEVC_ReturnCode ret = LCEVC_CreateDecoder(&context->decoder, LCEVC_AccelContextHandle{});
-    LCEVC_ConfigureDecoderString(context->decoder, "pipeline", "vulkan");
-    LCEVC_ConfigureDecoderInt(context->decoder, "threads", 2);
+    if (ret == LCEVC_Success) {
+        ret = LCEVC_ConfigureDecoderString(context->decoder, "pipeline", configuredPipeline.c_str());
+        if (ret != LCEVC_Success) {
+            LOGE("lcevcCreateDecoder: configuring pipeline '%s' returned %d",
+                 configuredPipeline.c_str(), ret);
+        }
+    }
+
+    if (ret == LCEVC_Success) {
+        LOGI("lcevcCreateDecoder: requested '%s' pipeline", configuredPipeline.c_str());
+    }
+
+    if (SurfacePresenter::isSupported()) {
+        context->presenter = new SurfacePresenter();
+        LOGI("lcevcCreateDecoder: zero-copy SurfaceControl rendering enabled");
+    }
+
     LCEVC_ConfigureDecoderInt(context->decoder, "passthrough_mode", 0);
     LCEVC_ConfigureDecoderBool(context->decoder, "will_render", true);
 
@@ -435,6 +563,9 @@ NATIVE_FUNC(jlong, lcevcCreateDecoder)
 
     if (ret == LCEVC_Success) {
         ret = LCEVC_InitializeDecoder(context->decoder);
+        if (ret != LCEVC_Success) {
+            LOGE("lcevcCreateDecoder: LCEVC_InitializeDecoder returned %d", ret);
+        }
     }
 
     if (ret == LCEVC_Success) {
@@ -467,6 +598,18 @@ NATIVE_FUNC(jint, lcevcDestroyDecoder, jlong instance)
         }
     }
 
+    // Release any in-flight zero-copy outputs before destroying the decoder
+    {
+        std::lock_guard<std::mutex> lock(context->externalOutputsMutex);
+        for (const auto& [timestamp, output] : context->externalOutputs) {
+            LCEVC_FreePicture(context->decoder, output.picture);
+            if (context->presenter != nullptr) {
+                context->presenter->recycleBuffer(output.buffer);
+            }
+        }
+        context->externalOutputs.clear();
+    }
+
     if (context->nativeWindow != nullptr) {
         ANativeWindow_release(context->nativeWindow);
         context->nativeWindow = nullptr;
@@ -481,6 +624,9 @@ NATIVE_FUNC(jint, lcevcDestroyDecoder, jlong instance)
         LCEVC_DestroyDecoder(context->decoder);
         context->decoder = {};
     }
+
+    delete context->presenter;
+    context->presenter = nullptr;
 
     delete context;
     return LCEVC_Success;
@@ -510,9 +656,68 @@ NATIVE_FUNC(jint, lcevcSendDecoderBase, jlong instance, jlong timeStamp, jlong i
         return ret;
     }
 
-    ret = LCEVC_SendDecoderPicture(context->decoder, outputPicture);
+    // Zero-copy path: back the decode output with a presenter AHardwareBuffer so
+    // the decoder writes straight into the buffer that will be composited.
+    // Falls back to the client-supplied picture (and a copied render) on failure -
+    // and, since mixing zero-copy and copy-rendered frames means mixing two
+    // independently-scaled presentation paths on the same surface (visible as a
+    // corrupted/split image on devices where the presenter's buffer pool doesn't
+    // recycle), any failure disables zero-copy for the rest of the session.
+    LCEVC_PictureHandle sendPicture = outputPicture;
+    if (context->presenter != nullptr && !context->zeroCopyDisabled && context->presenter->ready()) {
+        LCEVC_PictureDesc outputDesc = {};
+        const bool peeked =
+            LCEVC_PeekDecoderPictureDesc(context->decoder, static_cast<uint64_t>(timeStamp),
+                                         &outputDesc) == LCEVC_Success;
+        if (peeked) {
+            context->maxOutputWidth = std::max(context->maxOutputWidth, outputDesc.width);
+            context->maxOutputHeight = std::max(context->maxOutputHeight, outputDesc.height);
+        }
+        const bool supportedOutputFormat =
+            peeked && (outputDesc.colorFormat == LCEVC_NV12_8 ||
+                       (context->acceptsFlexibleYuvOutput && outputDesc.colorFormat == LCEVC_I420_8));
+        if (supportedOutputFormat) {
+            // Buffers are always allocated at the maximum output size seen (see
+            // ClientContext): output pictures are paired with frames FIFO, so any
+            // frame - whatever its size - must decode bounded into any buffer.
+            if (AHardwareBuffer* buffer = context->presenter->acquireBuffer(context->maxOutputWidth,
+                                                                            context->maxOutputHeight)) {
+                LCEVC_PictureBufferDesc bufferDesc = {};
+                bufferDesc.accelBuffer.hdl = reinterpret_cast<uintptr_t>(buffer);
+                bufferDesc.access = LCEVC_Access_Write;
+
+                LCEVC_PictureHandle externalPicture = {};
+                if (LCEVC_AllocPictureExternal(context->decoder, &outputDesc, &bufferDesc, nullptr,
+                                               &externalPicture) == LCEVC_Success) {
+                    std::lock_guard<std::mutex> lock(context->externalOutputsMutex);
+                    context->externalOutputs[static_cast<uint64_t>(timeStamp)] = {
+                        externalPicture, buffer, outputDesc.width, outputDesc.height};
+                    sendPicture = externalPicture;
+                } else {
+                    LOGW("lcevcSendDecoderBase: LCEVC_AllocPictureExternal failed, disabling "
+                         "zero-copy rendering");
+                    context->presenter->recycleBuffer(buffer);
+                    context->zeroCopyDisabled = true;
+                    // Tear down the presenter's surface layer - otherwise its last
+                    // presented frame stays frozen on screen, overlapping the
+                    // copy-rendered frames that follow.
+                    context->presenter->setWindow(nullptr);
+                }
+            } else {
+                LOGW("lcevcSendDecoderBase: presenter buffer pool exhausted, disabling zero-copy "
+                     "rendering");
+                context->zeroCopyDisabled = true;
+                context->presenter->setWindow(nullptr);
+            }
+        }
+    }
+
+    ret = LCEVC_SendDecoderPicture(context->decoder, sendPicture);
     if (ret != LCEVC_Success) {
         LOGE("lcevcSendDecoderBase: LCEVC_SendDecoderPicture returned %d", ret);
+        if (sendPicture.hdl != outputPicture.hdl) {
+            finishExternalOutput(context, sendPicture, nullptr, false);
+        }
         return ret;
     }
 
@@ -568,21 +773,39 @@ NATIVE_FUNC(jint, lcevcRenderSendPicture, jlong instance, jlong timeStamp, jlong
     info.rotation = rotation;
     uint64_t delay = static_cast<uint64_t>(delayUs);
     LCEVC_PictureHandle picture = {static_cast<uintptr_t>(pictureHandle)};
-    LCEVC_ReturnCode ret = LCEVC_RenderSendPicture(context->decoder, timeStamp, picture, &info, delay);
-    if (ret != LCEVC_Success) {
-        LOGE("lcevcRenderSendPicture: LCEVC_RenderSendPicture returned %d", ret);
-        return ret;
-    }
 
     LCEVC_PictureHandle decodedPicture{};
     LCEVC_DecodeInformation decodeInformation{};
-    ret = LCEVC_ReceiveDecoderPicture(context->decoder, &decodedPicture, &decodeInformation);
+
+    // Receive the decoded picture first - this blocks until the frame's decode tasks have
+    // finished writing the output picture, so it is safe to render it.
+    LCEVC_ReturnCode ret =
+        LCEVC_ReceiveDecoderPicture(context->decoder, &decodedPicture, &decodeInformation);
     if (ret != LCEVC_Success && ret != LCEVC_Flushed) {
-        LOGE("lcevcRenderSendPicture: LCEVC_ReceiveDecoderPicture after render returned %d", ret);
+        LOGE("lcevcRenderSendPicture: LCEVC_ReceiveDecoderPicture before render returned %d", ret);
         return ret;
     }
     LOGD("lcevcRenderSendPicture: LCEVC_ReceiveDecoderPicture received decoder picture %lu",
          static_cast<unsigned long>(decodedPicture.hdl));
+
+    // Zero-copy path: the received picture was decoded straight into a presenter
+    // hardware buffer - free it (unlocking the buffer) and present it.
+    if (finishExternalOutput(context, decodedPicture, &decodeInformation, ret == LCEVC_Success)) {
+        // Presented (or recycled, when flushed) - nothing left to render
+    } else if (ret == LCEVC_Success) {
+        // Copied render fallback. The picture has been received now, so always notify
+        // onRenderCompleted below (even if the render itself fails) - otherwise the
+        // client would never release the frame.
+        if (decodedPicture.hdl != 0 && decodedPicture.hdl != picture.hdl) {
+            LOGW("lcevcRenderSendPicture: received picture %lu, expected %lu",
+                 static_cast<unsigned long>(decodedPicture.hdl), static_cast<unsigned long>(picture.hdl));
+        }
+        const LCEVC_PictureHandle renderPicture = decodedPicture.hdl != 0 ? decodedPicture : picture;
+        ret = LCEVC_RenderSendPicture(context->decoder, timeStamp, renderPicture, &info, delay);
+        if (ret != LCEVC_Success) {
+            LOGE("lcevcRenderSendPicture: LCEVC_RenderSendPicture returned %d", ret);
+        }
+    }
     const uint64_t callbackTimestamp = decodeInformation.timestamp != 0
                                            ? decodeInformation.timestamp
                                            : static_cast<uint64_t>(timeStamp);
@@ -804,6 +1027,13 @@ NATIVE_FUNC(jint, lcevcRenderSetWindow, jlong instance, jobject surface, jboolea
     if (ret != LCEVC_Success) {
         LOGW("lcevcRenderSetWindow: LCEVC_RenderSetWindow returned %d", ret);
     }
+
+    // Zero-copy path: attach the presenter to the window as well - decoded
+    // hardware buffers are composited onto it via SurfaceControl.
+    if (context->presenter != nullptr && !context->presenter->setWindow(nativeWindow)) {
+        LOGW("lcevcRenderSetWindow: presenter setWindow failed, zero-copy rendering unavailable");
+    }
+
     return ret;
 }
 

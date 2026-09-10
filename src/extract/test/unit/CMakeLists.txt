@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -21,12 +21,8 @@ add_executable(lcevc_dec::test_extract_unit ALIAS lcevc_dec_extract_test_unit)
 target_sources(lcevc_dec_extract_test_unit PRIVATE ${SOURCES} ${HEADERS})
 lcevc_set_properties(lcevc_dec_extract_test_unit)
 
-target_include_directories(lcevc_dec_extract_test_unit
-                           PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
-
 target_link_libraries(
-    lcevc_dec_extract_test_unit
-    PRIVATE lcevc_dec::api_static lcevc_dec::compiler lcevc_dec::platform lcevc_dec::utility
-            GTest::gtest lcevc_dec::gtest_main)
+    lcevc_dec_extract_test_unit PRIVATE lcevc_dec::extract lcevc_dec::compiler lcevc_dec::platform
+                                        GTest::gtest lcevc_dec::gtest_main)
 
 install(TARGETS lcevc_dec_extract_test_unit)

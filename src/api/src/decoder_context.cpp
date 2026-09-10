@@ -20,6 +20,10 @@
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/log.h>
 
+#if VN_OS(ANDROID) && VN_SDK_PIPELINE(VULKAN)
+#include <vulkan/vulkan.h>
+#endif
+
 #if VN_SDK_STATIC
 #if VN_SDK_PIPELINE(CPU)
 #include <LCEVC/pipeline_cpu/create_pipeline.h>
@@ -32,7 +36,9 @@
 #endif // VN_SDK_STATIC
 
 #include <algorithm>
+#include <array>
 #include <memory>
+#include <vector>
 //
 #include "event_dispatcher.h"
 #include "pool.h"
@@ -49,6 +55,74 @@ namespace lcevc_dec::decoder {
 namespace {
     Pool<DecoderContext> decoderPool(16); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
     std::mutex decoderPoolMutex; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+#if VN_OS(ANDROID) && VN_SDK_PIPELINE(VULKAN)
+    constexpr std::array<std::string_view, 7> kVulkanBlockedGpuSubstrings = {
+        "Adreno 540",      "Adreno (TM) 540", "Adreno(TM) 540", "Adreno 630",
+        "Adreno (TM) 630", "Adreno(TM) 630",  "PowerVR",
+    };
+
+    constexpr bool contains(std::string_view str, std::string_view what) noexcept
+    {
+        return str.find(what) != std::string_view::npos;
+    }
+
+    bool isVulkanDeviceSuitableForAutoPipeline(const VkPhysicalDeviceProperties& properties)
+    {
+        for (const std::string_view gpu : kVulkanBlockedGpuSubstrings) {
+            if (contains(properties.deviceName, gpu)) {
+                VNLogInfoF("Vulkan auto-selection disabled for GPU '%s'", properties.deviceName);
+                return false;
+            }
+        }
+        return properties.apiVersion >= VK_API_VERSION_1_1;
+    }
+
+    std::vector<VkPhysicalDeviceProperties> getVulkanDeviceProperties()
+    {
+        VkApplicationInfo applicationInfo{};
+        applicationInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+        applicationInfo.pApplicationName = "LCEVCdec probe";
+        applicationInfo.apiVersion = VK_API_VERSION_1_1;
+
+        VkInstanceCreateInfo instanceInfo{};
+        instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+        instanceInfo.pApplicationInfo = &applicationInfo;
+
+        VkInstance instance = VK_NULL_HANDLE;
+        if (vkCreateInstance(&instanceInfo, nullptr, &instance) != VK_SUCCESS) {
+            return {};
+        }
+
+        uint32_t deviceCount = 0;
+        VkResult result = vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+        std::vector<VkPhysicalDevice> devices;
+        if (result == VK_SUCCESS && deviceCount != 0) {
+            devices.resize(deviceCount);
+            result = vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+            devices.resize(deviceCount);
+        }
+
+        std::vector<VkPhysicalDeviceProperties> deviceProperties;
+        if (result == VK_SUCCESS) {
+            deviceProperties.reserve(devices.size());
+            for (const VkPhysicalDevice device : devices) {
+                VkPhysicalDeviceProperties properties{};
+                vkGetPhysicalDeviceProperties(device, &properties);
+                deviceProperties.push_back(properties);
+            }
+        }
+
+        vkDestroyInstance(instance, nullptr);
+        return deviceProperties;
+    }
+
+    bool shouldUseVulkanForAutoPipeline()
+    {
+        const std::vector<VkPhysicalDeviceProperties> devices = getVulkanDeviceProperties();
+        return std::any_of(devices.begin(), devices.end(), isVulkanDeviceSuitableForAutoPipeline);
+    }
+#endif
 } // namespace
 
 // Locked add to decoder pool - take ownership of the pointer.
@@ -222,8 +296,20 @@ bool DecoderContext::configure(std::string_view name, const std::string& val)
     }
 
     if (name == "pipeline") {
-        m_pipelineName = val;
-        // Nuke any existing pipeline
+#if VN_OS(ANDROID)
+        if (val == "auto") {
+#if VN_SDK_PIPELINE(VULKAN)
+            m_pipelineName = shouldUseVulkanForAutoPipeline() ? "vulkan" : "cpu";
+#else
+            m_pipelineName = "cpu";
+#endif
+            VNLogInfoF("Resolved pipeline 'auto' to '%s'", m_pipelineName.c_str());
+        } else
+#endif
+        {
+            m_pipelineName = val;
+        }
+        // Reset any existing pipeline
         if (m_pipelineBuilder) {
             VNLogWarning("Changing pipeline: configuration may be lost.");
             m_pipelineBuilder.reset();

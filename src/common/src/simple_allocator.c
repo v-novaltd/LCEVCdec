@@ -272,7 +272,7 @@ static bool allocateBlock(LdcMemorySimpleAllocator* simpleAllocator, size_t size
 
     // Try and allocate block from parent allocator
     LdcMemoryAllocation blockAllocation = {0};
-    VNAllocateAlignedArray(simpleAllocator->parentAllcoator, &blockAllocation, uint8_t, kMinimumAlignment,
+    VNAllocateAlignedArray(simpleAllocator->parentAllocator, &blockAllocation, uint8_t, kMinimumAlignment,
                            align(requestedSize, kMinimumAlignment), "SimpleAllocator_Block");
 
     if (!VNIsAllocated(blockAllocation)) {
@@ -479,7 +479,7 @@ LdcMemoryAllocator* ldcMemorySimpleAllocatorInitialize(LdcMemorySimpleAllocator*
 
     simpleAllocator->allocator.functions = &kAllocatorFunctions;
     simpleAllocator->allocator.allocatorData = simpleAllocator;
-    simpleAllocator->parentAllcoator = parentAllocator;
+    simpleAllocator->parentAllocator = parentAllocator;
     VNCheck(threadMutexInitialize(&simpleAllocator->mutex) == ThreadResultSuccess);
 
     ldcLinkedListInitialize(&simpleAllocator->blockList);
@@ -503,7 +503,7 @@ void ldcMemorySimpleAllocatorDestroy(LdcMemorySimpleAllocator* simpleAllocator)
         ldcLinkedRemove(&block->node);
 
         LdcMemoryAllocation blockAllocation = block->allocation;
-        VNFree(simpleAllocator->parentAllcoator, &blockAllocation);
+        VNFree(simpleAllocator->parentAllocator, &blockAllocation);
     }
 
     ldcLinkedListInitialize(&simpleAllocator->blockList);

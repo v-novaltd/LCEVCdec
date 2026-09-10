@@ -525,15 +525,16 @@ LCEVC_API LCEVC_ReturnCode LCEVC_ReceiveDecoderBase(LCEVC_DecoderHandle decHandl
     }
 
     return withLockedDecoder(decHandle.hdl, [&output](DecoderContext* context) {
-        const LdpPicture* const finishedBase = context->pipeline()->receiveDecoderBase();
-        if (finishedBase == nullptr) {
-            return LCEVC_Again;
+        LdpPicture* basePicture{};
+        const LdcReturnCode receiveStatus = context->pipeline()->receiveDecoderBase(basePicture);
+        if (basePicture == nullptr) {
+            return receiveStatus == LdcReturnCodeSuccess ? LCEVC_Again : fromLdcReturnCode(receiveStatus);
         }
 
-        output->hdl = context->picturePool().reverseLookup(finishedBase).handle;
+        output->hdl = context->picturePool().reverseLookup(basePicture).handle;
 
-        VNTraceInstantArgs("ReceiveDecoderBase", "basePicture", (void*)finishedBase, "base", output->hdl);
-        return LCEVC_Success;
+        VNTraceInstantArgs("ReceiveDecoderBase", "basePicture", (void*)basePicture, "base", output->hdl);
+        return fromLdcReturnCode(receiveStatus);
     });
 }
 
@@ -560,10 +561,11 @@ LCEVC_API LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture(LCEVC_DecoderHandle decHa
     }
 
     return withLockedDecoder(decHandle.hdl, [&output, &decodeInformation](DecoderContext* context) {
-        LdpDecodeInformation di;
-        const LdpPicture* const outputPicture = context->pipeline()->receiveDecoderPicture(di);
+        LdpDecodeInformation di{};
+        LdpPicture* outputPicture{};
+        const LdcReturnCode receiveStatus = context->pipeline()->receiveDecoderPicture(di, outputPicture);
         if (outputPicture == nullptr) {
-            return LCEVC_Again;
+            return receiveStatus == LdcReturnCodeSuccess ? LCEVC_Again : fromLdcReturnCode(receiveStatus);
         }
 
         // Copy DecodeInformation over to destination
@@ -573,7 +575,7 @@ LCEVC_API LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture(LCEVC_DecoderHandle decHa
 
         VNTraceInstantArgs("ReceiveDecoderPicture", "timestamp", di.timestamp, "outputPicture",
                            (void*)outputPicture, "output", output->hdl);
-        return LCEVC_Success;
+        return fromLdcReturnCode(receiveStatus);
     });
 }
 

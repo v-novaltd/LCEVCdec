@@ -34,6 +34,7 @@ class BackendVulkan;
 class RenderVulkan;
 class FrameVulkan;
 class BufferVulkan;
+class PictureVulkan;
 class VulkanFrameContext;
 
 struct VulkanApplyCommonArgs;
@@ -141,8 +142,6 @@ public:
     void destroyComputePipelineLayout(ComputePipelineLayout& computePipelineLayout);
     void destroyComputePipeline(ComputePipeline& computePipeline);
 
-    common::Mutex& submitMutex() { return m_submitMutex; }
-
     VNNoCopyNoMove(ComputeVulkan);
 
 private:
@@ -151,21 +150,22 @@ private:
                                                 uint32_t numBuffers, uint32_t pushConstantsSize);
     bool createConvertOutImageBindingsAndPipelineLayout(ComputePipelineLayout& computePipelineLayout,
                                                         uint32_t pushConstantsSize);
-
     bool createComputePipeline(ComputePipeline& computePipeline,
                                const ComputePipelineLayout& computePipelineLayout,
                                const unsigned char* shader, size_t shaderSize, const char* name,
                                Dimension workgroup, Dimension packing,
                                const std::vector<SpecValue>& specValues);
 
-    bool createComputeCommandPool();
-    void updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst, VkDescriptorSet descriptorSet);
-    void updateComputeImageDescriptorSets(BufferVulkan* src, BufferVulkan* dst,
-                                          BufferVulkan* temporal, VkDescriptorSet descriptorSet);
-    void updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst1, BufferVulkan* dst2,
-                                     VkDescriptorSet descriptorSet);
+    static bool unbindInternalPictureBuffer(PictureVulkan* picture);
+    static bool prepareInternalPictureBuffer(PictureVulkan* picture, const LdpPictureDesc& desc);
 
-    static constexpr int NUM_PLANES = 3;
+    static bool prepareDescriptorBufferInfo(BufferVulkan* buffer, VkDescriptorBufferInfo& info);
+    static bool validateDescriptorSet(VkDescriptorSet descriptorSet);
+    bool updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst, VkDescriptorSet descriptorSet);
+    bool updateComputeImageDescriptorSets(BufferVulkan* src, BufferVulkan* dst,
+                                          BufferVulkan* temporal, VkDescriptorSet descriptorSet);
+    bool updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst1, BufferVulkan* dst2,
+                                     VkDescriptorSet descriptorSet);
 
     BackendVulkan& m_backend;
 
@@ -217,10 +217,6 @@ private:
     ComputePipeline m_pipelineAdd{};
 
     DescriptorSetLayouts m_descriptorSetLayouts{};
-
-    VkCommandPool m_commandPool{};
-
-    common::Mutex m_submitMutex;
 };
 
 } // namespace lcevc_dec::pipeline_vulkan

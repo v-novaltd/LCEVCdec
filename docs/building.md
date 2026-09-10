@@ -17,7 +17,7 @@ This repository contains two main libraries `core` and `api` as well as a suite 
 | VN_SDK_PIPELINE_VULKAN        | OFF     | vulkan-loader, vulkan-header, glslang | Build the experimental Vulkan GPU pipeline                                                                                                    |
 | VN_SDK_PIXEL_PROCESSING       | ON      | -                                     | Build the pixel processing module for format conversion, upscaling and image operations                                                       |
 | VN_SDK_DOCS                   | OFF     | doxygen, sphinx, plantuml             | Builds formatted HTML documentation for API integration                                                                                       |
-| VN_SDK_SIMD                   | ON      | -                                     | Build accelerated SSE & AVX2 functions for x86 platforms or NEON functions for ARM platforms                                                  |
+| VN_SDK_SIMD                   | ON      | -                                     | Build accelerated SSE4.1 & AVX2 functions for x86 platforms or NEON functions for ARM platforms                                               |
 | VN_SDK_LTO                    | OFF     | -                                     | Build with link time optimisation and interprocedural optimization if supported                                                               |
 | VN_SDK_MINIMUM_LIB_SIZE       | OFF     | zlib when with VN_SDK_PIPELINE_VULKAN | Apply aggressive size library optimisations                                                                                                   |
 | VN_SDK_STD_FILE               | ON      | -                                     | Enable use of the C standard library FILE struct                                                                                              |
@@ -32,7 +32,7 @@ This repository contains two main libraries `core` and `api` as well as a suite 
 | VN_SDK_WARNINGS_FAIL          | OFF     | -                                     | Enable build flags such as `Werror`, use for development and CI to maintain clean builds                                                      |
 | VN_SDK_BUILD_DETAILS          | OFF     | -                                     | Include build time and origin in libraries - non-reproducible build                                                                           |
 | VN_SDK_SYSTEM_INSTALL         | ON      | -                                     | Gives correct install paths for a Linux system, disable for installing to a portable package                                                  |
-| VN_SDK_STATIC_LIB_TYPE        | STATIC  | -                                     | Override the library type for static libraries. OBJECT libraries will compile but not produce a library. INTERFACE libraries will do neither.                         |
+| VN_SDK_STATIC_LIB_TYPE        | STATIC  | -                                     | Override the library type for static libraries. OBJECT libraries will compile but not produce a library. INTERFACE libraries will do neither. |
 | VN_SDK_FFMPEG_LIBS_PACKAGE    | ''      | external ffmpeg package path          | Specify a local path to ffmpeg libraries if they cannot be found via a package manager                                                        |
 | VN_SDK_ATOMIC_CUSTOM          | OFF     |                                       | Use a custom implementation of our common/atomic.h. Must be called "atomic_custom.h" and be accessible in the include path                    |
 | VN_SDK_CLOCK_CUSTOM           | OFF     |                                       | Use a custom implementation of our common/clock.h. Must be called "clock_custom.h" and be accessible in the include path                      |
@@ -59,6 +59,13 @@ All build options can be added to the cmake generation step eg. `-DVN_SDK_EXECUT
 ### Windows requirements
 
 [Visual Studio](https://visualstudio.microsoft.com/downloads/) with the 'Desktop development with C++' option is required. Ensure you use the 'x64 Native Tools Command Prompt' for all cmake operations.
+
+### CPU runtime requirements
+
+On x86, the SSE implementations enabled by `VN_SDK_SIMD` require SSE4.1. AVX2 upscalers are used
+when AVX2 is available. CPU capabilities are detected at runtime and scalar implementations are
+used as a fallback when available. `VN_SDK_MINIMUM_LIB_SIZE` builds omit scalar and SSE
+implementations; the x86 minimum-size build therefore requires AVX2.
 
 ## Building libraries only - native
 

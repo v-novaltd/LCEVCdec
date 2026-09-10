@@ -14,7 +14,6 @@
 
 #include "tasks_vulkan.h"
 
-#include "buffer_vulkan.h"
 #include "from_base.h"
 #include "picture_vulkan.h"
 
@@ -34,24 +33,17 @@
 
 namespace lcevc_dec::pipeline_vulkan {
 
-// All tasks fns. are static - only exported function is generateTasks()
-//
 namespace {
 
     //// ConvertToInternal
     //
     // Copy incoming picture plane to internal fixed point surface format
     //
-    void* vConvertToInternal(PipelineVulkan* pipeline, VulkanFrameContext* context,
-                             uint32_t baseDepth, uint32_t enhancementDepth)
+    bool vConvertToInternal(PipelineVulkan* pipeline, VulkanFrameContext* context)
     {
-        if (pipeline->isSkipped(context->getFrame())) {
-            return nullptr;
-        }
-
         auto* srcPicture = fromPipeline(context->getFrame()->basePicture);
         if (!srcPicture) {
-            return nullptr;
+            return false;
         }
         // external base check
         LdpPictureBufferDesc exDesc{};
@@ -59,11 +51,17 @@ namespace {
         LdpPicturePlaneDesc srcPlaneDescs[kLdpPictureMaxNumPlanes]{};
         if (srcPicture->getPlaneDescArr(srcPlaneDescs)) {
             if (srcPicture->buffer == nullptr) {
-                srcPicture->bindBuffer(pipeline::BufferUsageIn);
+                if (!srcPicture->bindBuffer(pipeline::BufferUsageIn)) {
+                    VNLogError("bindBuffer failed for ConvertToInternal");
+                    return false;
+                }
             }
 
             auto* managedBuffer = fromPipeline(srcPicture->buffer);
-            assert(managedBuffer);
+            if (!managedBuffer) {
+                VNLogError("managedBuffer is null for ConvertToInternal");
+                return false;
+            }
 
             uint32_t compactSize = 0;
             bool needsCompaction = !hasBufferDesc || exDesc.data == nullptr;
@@ -113,10 +111,21 @@ namespace {
         LdpPicture* dstLdp = nullptr;
         if (pipeline->allocPicture(srcDesc, dstLdp) != LdcReturnCodeSuccess || !dstLdp) {
             VNLogError("allocPicture failed for ConvertToInternal");
-            return nullptr;
+            return false;
         }
+
         auto* dstPicture = fromPipeline(dstLdp);
-        dstPicture->bindBuffer(pipeline::BufferUsageInternal);
+        if (!dstPicture) {
+            VNLogError("fromPipeline failed for ConvertToInternal");
+            pipeline->freePicture(dstLdp);
+            return false;
+        }
+
+        if (!dstPicture->bindBuffer(pipeline::BufferUsageInternal)) {
+            VNLogError("bindBuffer failed for ConvertToInternal");
+            pipeline->freePicture(dstPicture);
+            return false;
+        }
         context->getFrame()->addIntermediatePicture(dstPicture);
 
         VulkanConvertInArgs args{};
@@ -128,38 +137,54 @@ namespace {
 
         if (!pipeline->backend().convertIn(&args)) {
             VNLogError("Conversion to internal failed");
+            return false;
         }
 
         context->getFrame()->setIntermediatePicture(LOQ2, dstPicture);
 
-        return nullptr;
+        return true;
     }
 
     //// ConvertFromInternal
     //
     // Concert a picture plane from internal fixed point to output picture pixel format.
     //
-    void* vConvertFromInternal(PipelineVulkan* pipeline, VulkanFrameContext* context,
-                               uint32_t bitDepth, uint8_t intermediatePtr)
+    bool vConvertFromInternal(PipelineVulkan* pipeline, VulkanFrameContext* context,
+                              uint32_t bitDepth, uint8_t intermediatePtr)
     {
-        if (pipeline->isSkipped(context->getFrame())) {
-            return nullptr;
-        }
-
         auto* srcPicture = context->getFrame()->getIntermediatePicture(intermediatePtr);
+        if (!srcPicture) {
+            VNLogError("srcPicture is null for ConvertFromInternal");
+            return false;
+        }
 
         LdpPictureDesc dstDesc;
         srcPicture->getDesc(dstDesc);
+
+        auto* dstPicture = fromPipeline(context->getFrame()->outputPicture);
+        if (!dstPicture) {
+            VNLogError("dstPicture is null for ConvertFromInternal");
+            return false;
+        }
+
         dstDesc.colorFormat = context->getFrame()->outputPicture->layout.layoutInfo->format;
-        PictureVulkan* op = fromPipeline(context->getFrame()->outputPicture);
-        op->setDescAndBind(dstDesc, pipeline::BufferUsageOut);
+
+        PictureVulkan* outPicture = fromPipeline(context->getFrame()->outputPicture);
+        if (!outPicture) {
+            VNLogError("outPicture is null for ConvertFromInternal");
+            return false;
+        }
+        if (!outPicture->setDescAndBind(dstDesc, pipeline::BufferUsageOut)) {
+            VNLogError("setDescAndBind failed for ConvertFromInternal");
+            return false;
+        }
 
         // sharpeningStrength() and the crop check both touch globalConfig,
         // which is null in the unscaled-passthrough path.
         const auto* gc = context->getFrame()->globalConfig;
         VulkanConvertOutArgs args{};
         args.src = srcPicture;
-        args.dst = fromPipeline(context->getFrame()->outputPicture);
+        args.dst = dstPicture;
         args.bitDepth = bitDepth;
         args.chroma = pipeline->getChroma();
         args.sharpenStrength = gc ? context->getFrame()->sharpeningStrength(0) : 0.0f;
@@ -171,6 +196,7 @@ namespace {
 
         if (!pipeline->backend().convertOut(&args)) {
             VNLogError("Conversion from internal failed");
+            return false;
         }
 
         // Crop only applies when there's an LCEVC global configuration; the
@@ -182,7 +208,7 @@ namespace {
             args.dst->margins.bottom = gc->crop.bottom;
         }
 
-        return nullptr;
+        return true;
     }
 
     //// Upsample
@@ -192,31 +218,43 @@ namespace {
     // Inputs and outputs may be fixed point or 'external' format if no residuals are being applied.
     //
 
-    void* vUpscale(PipelineVulkan* pipeline, VulkanFrameContext* context, LdeLOQIndex loq,
-                   uint8_t intermediatePtr)
+    bool vUpscale(PipelineVulkan* pipeline, VulkanFrameContext* context, LdeLOQIndex loq, uint8_t intermediatePtr)
     {
-        if (pipeline->isSkipped(context->getFrame())) {
-            return nullptr;
+        auto* srcPicture = context->getFrame()->getIntermediatePicture(intermediatePtr);
+        if (!srcPicture) {
+            VNLogError("getIntermediatePicture failed for Upscale");
+            return false;
         }
 
-        VulkanUpscaleArgs upscaleArgs{};
-        upscaleArgs.src = context->getFrame()->getIntermediatePicture(intermediatePtr);
         LdpPictureDesc desc{};
         ldpDefaultPictureDesc(&desc, LdpColorFormatI420_8, 2, 2);
 
         LdpPicture* ipLdp = nullptr;
         if (pipeline->allocPicture(desc, ipLdp) != LdcReturnCodeSuccess || !ipLdp) {
             VNLogError("allocPicture failed for Upscale");
-            return nullptr;
+            return false;
         }
+
         PictureVulkan* ip = fromPipeline(ipLdp);
-        ip->bindBuffer(pipeline::BufferUsageInternal);
+        if (!ip) {
+            VNLogError("fromPipeline failed for Upscale");
+            pipeline->freePicture(ipLdp);
+            return false;
+        }
         context->getFrame()->setIntermediatePicture(intermediatePtr - 1, ip);
 
-        upscaleArgs.dst = context->getFrame()->getIntermediatePicture(intermediatePtr - 1);
+        auto* dstPicture = context->getFrame()->getIntermediatePicture(intermediatePtr - 1);
+        if (!dstPicture) {
+            VNLogError("getIntermediatePicture failed for Upscale");
+            return false;
+        }
+
         context->getFrame()->addIntermediatePicture(
             context->getFrame()->getIntermediatePicture(intermediatePtr - 1));
 
+        VulkanUpscaleArgs upscaleArgs{};
+        upscaleArgs.src = srcPicture;
+        upscaleArgs.dst = dstPicture;
         upscaleArgs.applyPA =
             static_cast<uint8_t>(context->getFrame()->globalConfig->predictedAverageEnabled);
         upscaleArgs.dither = nullptr; // TODO pipeline->m_dither;
@@ -235,9 +273,10 @@ namespace {
 
         if (!pipeline->backend().upscaleFrame(&context->getFrame()->globalConfig->kernel, &upscaleArgs)) {
             VNLogError("Upsample failed");
+            return false;
         }
 
-        return nullptr;
+        return true;
     }
 
     //// ApplyCmdBufferDirect
@@ -246,10 +285,14 @@ namespace {
     //
     // NB: The output plane will be in 'internal' fixed' point format
     //
-    void vApplyCommon(PipelineVulkan* pipeline, VulkanFrameContext* context,
+    bool vApplyCommon(PipelineVulkan* pipeline, VulkanFrameContext* context,
                       LdpEnhancementTile* enhancementTile, uint8_t intermediatePtr, bool applyDirect)
     {
         auto* picture = context->getFrame()->getIntermediatePicture(intermediatePtr);
+        if (!picture) {
+            VNLogError("Invalid picture for intermediatePtr %u", intermediatePtr);
+            return false;
+        }
 
         VulkanApplyCommonArgs args{};
         pipeline->prepareApplyCommonArgs(args, picture, enhancementTile, context, applyDirect);
@@ -259,29 +302,33 @@ namespace {
 
         if (!pipeline->backend().applyCommon(&args)) {
             VNLogError("Vulkan applyCommon failed");
+            return false;
         }
+
+        return true;
     }
 
-    void* vApplyCmdBufferDirect(PipelineVulkan* pipeline, VulkanFrameContext* context,
-                                LdpEnhancementTile* enhancementTile, uint8_t intermediatePtr)
+    bool vApplyCmdBufferDirect(PipelineVulkan* pipeline, VulkanFrameContext* context,
+                               LdpEnhancementTile* enhancementTile, uint8_t intermediatePtr)
     {
-        if (pipeline->isSkipped(context->getFrame())) {
-            return nullptr;
+        auto* picture = context->getFrame()->getIntermediatePicture(intermediatePtr);
+        if (!picture) {
+            VNLogError("Invalid picture for intermediatePtr %u", intermediatePtr);
+            return false;
         }
 
         VNLogDebug("taskApplyCmdBufferDirect timestamp:%" PRIx64 " loq:%d plane:%d",
                    context->getFrame()->timestamp, (uint32_t)enhancementTile->loq, enhancementTile->plane);
-
-        auto* picture = context->getFrame()->getIntermediatePicture(intermediatePtr);
 
         VulkanApplyTileArgs args{};
         pipeline->prepareApplyTileArgs(args, picture, enhancementTile, context, true);
 
         if (!pipeline->backend().applyTile(&args)) {
             VNLogError("Vulkan apply direct failed");
+            return false;
         }
 
-        return nullptr;
+        return true;
     }
 
     //// ApplyCmdBufferTemporal
@@ -289,14 +336,18 @@ namespace {
     // Apply a generated GPU command buffer to a temporal buffer.
     //
 
-    void* vApplyCmdBufferTemporal(PipelineVulkan* pipeline, VulkanFrameContext* context,
-                                  LdpEnhancementTile* enhancementTile, uint8_t intermediatePtr)
+    bool vApplyCmdBufferTemporal(PipelineVulkan* pipeline, VulkanFrameContext* context,
+                                 LdpEnhancementTile* enhancementTile, uint8_t intermediatePtr)
     {
         VNLogDebug("taskApplyCmdBufferTemporal timestamp:%" PRIx64 " tile:%d loq:%d plane:%d",
                    context->getFrame()->timestamp, enhancementTile->tile,
                    (uint32_t)enhancementTile->loq, enhancementTile->plane);
 
         auto* picture = context->getFrame()->getIntermediatePicture(intermediatePtr);
+        if (!picture) {
+            VNLogError("Invalid picture for intermediatePtr %u", intermediatePtr);
+            return false;
+        }
 
         VulkanApplyTileArgs args{};
         pipeline->prepareApplyTileArgs(args, picture, enhancementTile, context, false);
@@ -304,9 +355,10 @@ namespace {
 
         if (!pipeline->backend().applyTile(&args)) {
             VNLogError("Vulkan apply temporal failed");
+            return false;
         }
 
-        return nullptr;
+        return true;
     }
 
     //// VulkanDecode
@@ -320,6 +372,22 @@ namespace {
         uint64_t previousTimestamp;
     };
 
+    void abortVulkanTask(PipelineVulkan* pipeline, FrameVulkan* frame, VulkanFrameContext* frameContext)
+    {
+        const bool outcomeSet = frame->setComputeOutcome(VulkanComputeOutcome::Failed);
+
+        frameContext->abort();
+        frame->freeIntermediatePictures(pipeline);
+        pipeline->backend().compute().releaseFrameContext(frameContext);
+
+        // It is only safe to signalComputeTaskDone once, so don't do it if outcomeSet didn't work -
+        // that means another caller managed to set the outcome before this one did. Applies to all
+        // uses of signalComputeTaskDone.
+        if (outcomeSet) {
+            frame->signalComputeTaskDone();
+        }
+    }
+
     void* taskVulkanDecode(LdcTask* task, const LdcTaskPart* /*part*/)
     {
         VNTraceScoped();
@@ -328,11 +396,12 @@ namespace {
         PipelineVulkan* const pipeline{data.pipeline};
         FrameVulkan* frame{data.frame};
 
-        // Skip flushed or skipped frames — their base/output pictures and
-        // globalConfig may be null.  Signal computeTaskDone so downstream
-        // tasks (OutputDone, BaseDone) can still complete during flush.
+        // Skip flushed or skipped frames before admitting them to Vulkan. Once admitted, the task
+        // must finish so helper success always means its output was produced.
         if (pipeline->isFlushed(frame) || pipeline->isSkipped(frame)) {
-            frame->signalComputeTaskDone();
+            if (frame->setComputeOutcome(VulkanComputeOutcome::Cancelled)) {
+                frame->signalComputeTaskDone();
+            }
             VNTraceScopedEnd();
             return nullptr;
         }
@@ -341,6 +410,9 @@ namespace {
         VulkanFrameContext* frameContext = compute.acquireFrameContext(frame);
         if (!frameContext) {
             VNLogError("Failed to acquire Vulkan frame context");
+            if (frame->setComputeOutcome(VulkanComputeOutcome::Failed)) {
+                frame->signalComputeTaskDone();
+            }
             VNTraceScopedEnd();
             return nullptr;
         }
@@ -370,20 +442,36 @@ namespace {
         };
 
         // begin vulkan recording state
-        pipeline->backend().compute().beginCompute(frameContext, tileCountTotal);
+        if (!compute.beginCompute(frameContext, tileCountTotal)) {
+            VNLogError("Failed to begin Vulkan compute");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
 
         // Make sure Apply input buffers have enough space for all tiles
-        frameContext->prepareCommandBuffer(LOQ1, gpuCommandBufferSize[LOQ1]);
-        frameContext->prepareCommandBuffer(LOQ0, gpuCommandBufferSize[LOQ0]);
+        if (!frameContext->prepareCommandBuffer(LOQ1, gpuCommandBufferSize[LOQ1]) ||
+            !frameContext->prepareCommandBuffer(LOQ0, gpuCommandBufferSize[LOQ0])) {
+            VNLogError("Failed to prepare Vulkan apply command buffers");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
 
         //// Input conversion
-        vConvertToInternal(pipeline, frameContext, frame->getEnhancementBitDepth(), globalConfig.baseDepth);
+        if (!vConvertToInternal(pipeline, frameContext)) {
+            VNLogError("vConvertToInternal failed");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
 
         //// LoQ 1
 
         // First upsample
         if (globalConfig.scalingModes[LOQ1] != Scale0D) {
-            vUpscale(pipeline, frameContext, LOQ2, intermediatePtr);
+            if (!vUpscale(pipeline, frameContext, LOQ2, intermediatePtr)) {
+                VNLogError("vUpscale failed");
+                abortVulkanTask(pipeline, frame, frameContext);
+                return nullptr;
+            }
             intermediatePtr--;
         }
 
@@ -391,7 +479,11 @@ namespace {
         if (gpuCommandBufferSize[LOQ1] > 0) {
             // Bind descriptor sets once for the LOQ before processing all planes
             LdpEnhancementTile* firstTile = frame->getEnhancementTile(enhancementTileIdx);
-            vApplyCommon(pipeline, frameContext, firstTile, intermediatePtr, true);
+            if (!vApplyCommon(pipeline, frameContext, firstTile, intermediatePtr, true)) {
+                VNLogError("vApplyCommon failed for LOQ1");
+                abortVulkanTask(pipeline, frame, frameContext);
+                return nullptr;
+            }
             for (uint8_t plane = 0; plane < numImagePlanes; ++plane) {
                 const bool isEnhanced1 = frame->isPlaneEnhanced(LOQ1, plane);
                 if (isEnhanced1 && frameConfig.loqEnabled[LOQ1]) {
@@ -399,7 +491,11 @@ namespace {
                     for (unsigned tile = 0; tile < numTiles; ++tile) {
                         LdpEnhancementTile* et{frame->getEnhancementTile(enhancementTileIdx++)};
                         assert(et->loq == LOQ1 && et->tile == tile);
-                        vApplyCmdBufferDirect(pipeline, frameContext, et, intermediatePtr);
+                        if (!vApplyCmdBufferDirect(pipeline, frameContext, et, intermediatePtr)) {
+                            VNLogError("vApplyCmdBufferDirect failed for LOQ1 tile %u", tile);
+                            abortVulkanTask(pipeline, frame, frameContext);
+                            return nullptr;
+                        }
                         ldeCmdBufferGpuFree(&et->bufferGpu, &et->bufferGpuBuilder);
                     }
                 }
@@ -410,7 +506,11 @@ namespace {
 
         // Upsample from combined intermediate picture to preliminary output picture
         if (globalConfig.scalingModes[LOQ0] != Scale0D) {
-            vUpscale(pipeline, frameContext, LOQ1, intermediatePtr);
+            if (!vUpscale(pipeline, frameContext, LOQ1, intermediatePtr)) {
+                VNLogError("vUpscale failed");
+                abortVulkanTask(pipeline, frame, frameContext);
+                return nullptr;
+            }
             intermediatePtr--;
         }
 
@@ -420,7 +520,11 @@ namespace {
         if (gpuCommandBufferSize[LOQ0] > 0) {
             const bool applyDirect = !(globalConfig.temporalEnabled && !frame->isPassthrough());
             LdpEnhancementTile* firstTile = frame->getEnhancementTile(enhancementTileIdx);
-            vApplyCommon(pipeline, frameContext, firstTile, intermediatePtr, applyDirect);
+            if (!vApplyCommon(pipeline, frameContext, firstTile, intermediatePtr, applyDirect)) {
+                VNLogError("vApplyCommon failed for LOQ0");
+                abortVulkanTask(pipeline, frame, frameContext);
+                return nullptr;
+            }
         }
 
         if (globalConfig.temporalEnabled && !frame->isPassthrough()) {
@@ -445,7 +549,11 @@ namespace {
                     for (unsigned tile = 0; tile < numPlaneTiles; ++tile) {
                         LdpEnhancementTile* et{frame->getEnhancementTile(enhancementTileIdx++)};
                         assert(et->loq == LOQ0 && et->tile == tile);
-                        vApplyCmdBufferTemporal(pipeline, frameContext, et, intermediatePtr);
+                        if (!vApplyCmdBufferTemporal(pipeline, frameContext, et, intermediatePtr)) {
+                            VNLogError("vApplyCmdBufferTemporal failed for LOQ0 tile %u", tile);
+                            abortVulkanTask(pipeline, frame, frameContext);
+                            return nullptr;
+                        }
                         ldeCmdBufferGpuFree(&et->bufferGpu, &et->bufferGpuBuilder);
                     }
                 }
@@ -466,7 +574,11 @@ namespace {
                     for (unsigned tile = 0; tile < numPlaneTiles; ++tile) {
                         LdpEnhancementTile* et{frame->getEnhancementTile(enhancementTileIdx++)};
                         assert(et->loq == LOQ0 && et->tile == tile);
-                        vApplyCmdBufferDirect(pipeline, frameContext, et, intermediatePtr);
+                        if (!vApplyCmdBufferDirect(pipeline, frameContext, et, intermediatePtr)) {
+                            VNLogError("vApplyCmdBufferDirect failed for LOQ0 tile %u", tile);
+                            abortVulkanTask(pipeline, frame, frameContext);
+                            return nullptr;
+                        }
                         ldeCmdBufferGpuFree(&et->bufferGpu, &et->bufferGpuBuilder);
                     }
                 }
@@ -480,10 +592,18 @@ namespace {
 
         assert(enhancementTileIdx == frame->enhancementTileCount);
 
-        vConvertFromInternal(pipeline, frameContext, frame->getEnhancementBitDepth(), intermediatePtr);
+        if (!vConvertFromInternal(pipeline, frameContext, frame->getEnhancementBitDepth(), intermediatePtr)) {
+            VNLogError("vConvertFromInternal failed");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
 
         // end Vulkan recording state
-        pipeline->backend().compute().endCompute(frameContext);
+        if (!compute.endCompute(frameContext)) {
+            VNLogError("Failed to end Vulkan compute");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
 
         pipeline->addCompletionContext(frameContext);
 
@@ -513,9 +633,17 @@ namespace {
         PipelineVulkan* const pipeline{data.pipeline};
         FrameVulkan* const frame{data.frame};
 
-        if (pipeline->isFlushed(frame) || pipeline->isSkipped(frame) ||
-            frame->basePicture == nullptr || frame->outputPicture == nullptr) {
-            frame->signalComputeTaskDone();
+        if (pipeline->isFlushed(frame) || pipeline->isSkipped(frame)) {
+            if (frame->setComputeOutcome(VulkanComputeOutcome::Cancelled)) {
+                frame->signalComputeTaskDone();
+            }
+            return nullptr;
+        }
+        if (frame->basePicture == nullptr || frame->outputPicture == nullptr) {
+            VNLogError("Missing picture for Vulkan passthrough");
+            if (frame->setComputeOutcome(VulkanComputeOutcome::Failed)) {
+                frame->signalComputeTaskDone();
+            }
             return nullptr;
         }
 
@@ -523,7 +651,9 @@ namespace {
         VulkanFrameContext* frameContext = compute.acquireFrameContext(frame);
         if (!frameContext) {
             VNLogError("Failed to acquire Vulkan frame context (passthrough)");
-            frame->signalComputeTaskDone();
+            if (frame->setComputeOutcome(VulkanComputeOutcome::Failed)) {
+                frame->signalComputeTaskDone();
+            }
             return nullptr;
         }
 
@@ -531,12 +661,28 @@ namespace {
         pipeline->setChroma(ldpPictureLayoutChroma(&frame->basePicture->layout));
 
         // No enhancement tiles in passthrough.
-        compute.beginCompute(frameContext, /*tileCountTotal=*/0);
+        if (!compute.beginCompute(frameContext, /*tileCountTotal=*/0)) {
+            VNLogError("Failed to begin Vulkan compute (passthrough)");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
 
-        vConvertToInternal(pipeline, frameContext, frame->baseBitdepth, frame->baseBitdepth);
-        vConvertFromInternal(pipeline, frameContext, frame->baseBitdepth, static_cast<uint8_t>(LOQ2));
+        if (!vConvertToInternal(pipeline, frameContext)) {
+            VNLogError("vConvertToInternal failed");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
+        if (!vConvertFromInternal(pipeline, frameContext, frame->baseBitdepth, static_cast<uint8_t>(LOQ2))) {
+            VNLogError("vConvertFromInternal failed");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
 
-        compute.endCompute(frameContext);
+        if (!compute.endCompute(frameContext)) {
+            VNLogError("Failed to end Vulkan compute (passthrough)");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
         pipeline->addCompletionContext(frameContext);
 
         return nullptr;

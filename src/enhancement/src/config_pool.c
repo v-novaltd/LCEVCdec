@@ -28,7 +28,7 @@ typedef struct WrappedGlobalConfig
     uint32_t referenceCount;      //**< Number of outstanding references, including 'latest'
 } WrappedGlobalConfig;
 
-// Allocate a new wrapped GlobaConfig
+// Allocate a new wrapped GlobalConfig
 //
 static WrappedGlobalConfig* allocateGlobalConfig(LdeConfigPool* configPool, const LdeGlobalConfig* initial)
 {

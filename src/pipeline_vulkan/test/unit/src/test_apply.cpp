@@ -163,8 +163,8 @@ TEST_F(PipelineVulkanApplyFixture, ApplyGpuCommandBufferToPlane)
     ASSERT_NE(frameContext, nullptr);
     args.context = frameContext;
     compute.beginCompute(frameContext);
-    frameContext->prepareCommandBuffer(LOQ0, mergedBufferSize({&cmdBuffer}));
-    frameContext->prepareCommandBuffer(LOQ1, 0);
+    ASSERT_TRUE(frameContext->prepareCommandBuffer(LOQ0, mergedBufferSize({&cmdBuffer})));
+    ASSERT_TRUE(frameContext->prepareCommandBuffer(LOQ1, 0));
     EXPECT_TRUE(pipeline->backend().applyCommon(&args));
 
     VulkanApplyTileArgs tileArgs{};
@@ -313,8 +313,10 @@ protected:
         }
         args.context = frameContext;
         compute.beginCompute(frameContext);
-        frameContext->prepareCommandBuffer(LOQ0, mergedBufferSize({&mCmdBuffer}));
-        frameContext->prepareCommandBuffer(LOQ1, 0);
+        if (!frameContext->prepareCommandBuffer(LOQ0, mergedBufferSize({&mCmdBuffer})) ||
+            !frameContext->prepareCommandBuffer(LOQ1, 0)) {
+            return "";
+        }
 
         if (!pipeline->backend().applyCommon(&args)) {
             return "";
@@ -541,8 +543,10 @@ protected:
             VulkanFrameContext* ctx = compute.acquireFrameContext(nullptr);
             EXPECT_NE(ctx, nullptr);
             compute.beginCompute(ctx);
-            ctx->prepareCommandBuffer(LOQ0, mergedBufferSize({&tile}));
-            ctx->prepareCommandBuffer(LOQ1, 0);
+            if (!ctx->prepareCommandBuffer(LOQ0, mergedBufferSize({&tile})) ||
+                !ctx->prepareCommandBuffer(LOQ1, 0)) {
+                return "";
+            }
 
             VulkanApplyCommonArgs common{};
             common.picture = temporal ? nullptr : picture;
@@ -610,8 +614,10 @@ protected:
         VulkanFrameContext* ctx = compute.acquireFrameContext(nullptr);
         EXPECT_NE(ctx, nullptr);
         compute.beginCompute(ctx, 2);
-        ctx->prepareCommandBuffer(LOQ0, mergedBufferSize({&m_cmdBuf1, &m_cmdBuf2}));
-        ctx->prepareCommandBuffer(LOQ1, 0);
+        if (!ctx->prepareCommandBuffer(LOQ0, mergedBufferSize({&m_cmdBuf1, &m_cmdBuf2})) ||
+            !ctx->prepareCommandBuffer(LOQ1, 0)) {
+            return "";
+        }
 
         VulkanApplyCommonArgs common{};
         common.picture = temporal ? nullptr : picture;

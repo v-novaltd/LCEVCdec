@@ -21,60 +21,12 @@
 
 #if VN_SDK_FEATURE(NEON)
 
-#include "fp_types.h"
-
 #include <arm_neon.h>
 #include <assert.h>
 #include <LCEVC/pixel_processing/dither.h>
-
-/*------------------------------------------------------------------------------*/
-
-// int16x8_t & uint8x8_t (input ranges) conversion to int16x8_t (S16 range)
-#define U8ToS16(v) \
-    vreinterpretq_s16_u16(vsubq_u16(vshll_n_u8(v, 7), vreinterpretq_u16_s16(kMidpointS16)))
-#define U16ToS16(v) vsubq_s16(vshlq_s16(v, kLeftShift), kMidpointS16)
-
-// int16x4_t & uint8x8_t (input ranges) conversion to int16x4_t (S16 range), required for some edges
-#define U8ToS16x4(v)                                              \
-    vreinterpret_s16_u16(vsub_u16(vget_low_u16(vshll_n_u8(v, 7)), \
-                                  vget_low_u16(vreinterpretq_u16_s16(kMidpointS16))))
-#define U16ToS16x4(v) vsub_s16(vshl_s16(v, vget_low_s16(kLeftShift)), vget_low_s16(kMidpointS16))
-
-// int16x8_t (S16 range) conversion to int16x8_t & uint8x8_t (output ranges)
-#define S16ToU8(v)                          \
-    vreinterpret_u8_s8(vmovn_s16(vminq_s16( \
-        vqaddq_s16(vmaxq_s16(vshrq_n_s16(vqaddq_s16(v, kOffset), 7), kS8Min), kMidpoint), kU8Max)))
-#define S16ToU16(v) vaddq_s16(vshlq_s16(vaddq_s16(v, kOffset), kRightShift), kMidpoint)
-
-static inline void neonApplyPA(int16x8_t* row0, int16x8_t* row1, const int16x4_t base)
-{
-    const int32x4_t sum0 = vpaddlq_s16(*row0);
-    const int32x4_t sum1 = vpaddlq_s16(*row1);
-    const int32x4_t mean = vrshrq_n_s32(vaddq_s32(sum0, sum1), 2);
-    const int32x4_t adjust = vsubq_s32(vmovl_s16(base), mean);
-    const int32x4x2_t broadcast = vzipq_s32(adjust, adjust);
-
-    const int32x4_t row0Lo = vaddq_s32(vmovl_s16(vget_low_s16(*row0)), broadcast.val[0]);
-    const int32x4_t row0Hi = vaddq_s32(vmovl_s16(vget_high_s16(*row0)), broadcast.val[1]);
-    const int32x4_t row1Lo = vaddq_s32(vmovl_s16(vget_low_s16(*row1)), broadcast.val[0]);
-    const int32x4_t row1Hi = vaddq_s32(vmovl_s16(vget_high_s16(*row1)), broadcast.val[1]);
-
-    *row0 = vcombine_s16(vqmovn_s32(row0Lo), vqmovn_s32(row0Hi));
-    *row1 = vcombine_s16(vqmovn_s32(row1Lo), vqmovn_s32(row1Hi));
-}
-
-#if defined(__aarch64__)
-#define VTBL1Q_U8_COMPAT(src, idx) vqtbl1q_u8((src), (idx))
-#else
-static inline uint8x16_t VTBL1Q_U8_COMPAT_IMPL(const uint8x16_t src, const uint8x16_t idx)
-{
-    const uint8x8x2_t table = {{vget_low_u8(src), vget_high_u8(src)}};
-    const uint8x8_t lo = vtbl2_u8(table, vget_low_u8(idx));
-    const uint8x8_t hi = vtbl2_u8(table, vget_high_u8(idx));
-    return vcombine_u8(lo, hi);
-}
-#define VTBL1Q_U8_COMPAT(src, idx) VTBL1Q_U8_COMPAT_IMPL((src), (idx))
-#endif
+//
+#include "fp_types.h"
+#include "upscale_macros/common_neon.h"
 
 /*------------------------------------------------------------------------------*/
 
@@ -83,28 +35,28 @@ static inline uint8x16_t VTBL1Q_U8_COMPAT_IMPL(const uint8x16_t src, const uint8
 void planar1DS16ToS16PAOnDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_S16, FP_S16, 1, 0)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar1DS16ToS16PAOnDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_S16, FP_S16, 1, 1)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar1DS16ToS16PAOffDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_S16, FP_S16, 0, 0)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar1DS16ToS16PAOffDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_S16, FP_S16, 0, 1)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
@@ -113,28 +65,28 @@ void planar1DS16ToS16PAOffDitherOn(VN_UPSCALE_ARGS)
 void planar1DU8ToU8PAOnDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U8, FP_U8, 1, 0)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar1DU8ToU8PAOnDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U8, FP_U8, 1, 1)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar1DU8ToU8PAOffDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U8, FP_U8, 0, 0)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar1DU8ToU8PAOffDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U8, FP_U8, 0, 1)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
@@ -144,7 +96,7 @@ void planar1DNV12PAOffDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_NV12, FP_NV12, 0, 0)
 #define DIMENSION DIMENSION_1D
-#include "upscale_macros/neon_nv12_loop.h"
+#include "upscale_macros/upscale_1d_nv12_neon.h"
 #undef DIMENSION
 #undef VN_UPSCALE_LOOP
 }
@@ -153,7 +105,7 @@ void planar1DNV12PAOnDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_NV12, FP_NV12, 1, 0)
 #define DIMENSION DIMENSION_1D
-#include "upscale_macros/neon_nv12_loop.h"
+#include "upscale_macros/upscale_1d_nv12_neon.h"
 #undef DIMENSION
 #undef VN_UPSCALE_LOOP
 }
@@ -163,28 +115,28 @@ void planar1DNV12PAOnDitherOff(VN_UPSCALE_ARGS)
 void planar1DU16ToU16PAOnDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U16, FP_U16, 1, 0)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar1DU16ToU16PAOnDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U16, FP_U16, 1, 1)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar1DU16ToU16PAOffDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U16, FP_U16, 0, 0)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar1DU16ToU16PAOffDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U16, FP_U16, 0, 1)
-#include "upscale_macros/neon_1d_loop.h"
+#include "upscale_macros/upscale_1d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
@@ -193,28 +145,28 @@ void planar1DU16ToU16PAOffDitherOn(VN_UPSCALE_ARGS)
 void planar2DS16ToS16PAOnDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_S16, FP_S16, 1, 0)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar2DS16ToS16PAOnDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_S16, FP_S16, 1, 1)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar2DS16ToS16PAOffDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_S16, FP_S16, 0, 0)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar2DS16ToS16PAOffDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_S16, FP_S16, 0, 1)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
@@ -223,28 +175,28 @@ void planar2DS16ToS16PAOffDitherOn(VN_UPSCALE_ARGS)
 void planar2DU8ToU8PAOnDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U8, FP_U8, 1, 0)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar2DU8ToU8PAOnDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U8, FP_U8, 1, 1)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar2DU8ToU8PAOffDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U8, FP_U8, 0, 0)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar2DU8ToU8PAOffDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U8, FP_U8, 0, 1)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
@@ -252,7 +204,7 @@ void planar2DNV12PAOffDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_NV12, FP_NV12, 0, 0)
 #define DIMENSION DIMENSION_2D
-#include "upscale_macros/neon_nv12_loop.h"
+#include "upscale_macros/upscale_2d_nv12_neon.h"
 #undef DIMENSION
 #undef VN_UPSCALE_LOOP
 }
@@ -261,7 +213,7 @@ void planar2DNV12PAOnDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_NV12, FP_NV12, 1, 0)
 #define DIMENSION DIMENSION_2D
-#include "upscale_macros/neon_nv12_loop.h"
+#include "upscale_macros/upscale_2d_nv12_neon.h"
 #undef DIMENSION
 #undef VN_UPSCALE_LOOP
 }
@@ -271,28 +223,28 @@ void planar2DNV12PAOnDitherOff(VN_UPSCALE_ARGS)
 void planar2DU16ToU16PAOnDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U16, FP_U16, 1, 0)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar2DU16ToU16PAOnDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U16, FP_U16, 1, 1)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar2DU16ToU16PAOffDitherOff(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U16, FP_U16, 0, 0)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 
 void planar2DU16ToU16PAOffDitherOn(VN_UPSCALE_ARGS)
 {
 #define VN_UPSCALE_LOOP VN_UPSCALE_LOOP_CONFIG(FP_U16, FP_U16, 0, 1)
-#include "upscale_macros/neon_2d_loop.h"
+#include "upscale_macros/upscale_2d_neon.h"
 #undef VN_UPSCALE_LOOP
 }
 

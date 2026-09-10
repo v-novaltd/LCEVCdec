@@ -13,8 +13,9 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include <gtest/gtest.h>
-#include <LCEVC/utility/extract.h>
+#include <LCEVC/extract/extract.h>
 
+#include <algorithm>
 #include <array>
 #include <memory>
 
@@ -243,23 +244,28 @@ TEST(Extract, ExtractH264_Remove_OnlyLcevc)
                                            'a',  'y',  'l',  'o',  'a',  'd'};
 
     std::vector<uint8_t> nalu;
+    nalu.reserve(foreignSei.size() + ccSei.size() + idrSlice.size() + lcevcNal.size() + 8);
     nalu.insert(nalu.end(), foreignSei.begin(), foreignSei.end());
     nalu.insert(nalu.end(), ccSei.begin(), ccSei.end());
     nalu.insert(nalu.end(), idrSlice.begin(), idrSlice.end());
     nalu.insert(nalu.end(), lcevcNal.begin(), lcevcNal.end());
+    const size_t accessUnitSize = nalu.size();
+    constexpr std::array<uint8_t, 8> guard = {0xa5, 0xa5, 0xa5, 0xa5, 0xa5, 0xa5, 0xa5, 0xa5};
+    nalu.insert(nalu.end(), guard.begin(), guard.end());
 
     EXPECT_EQ(LCEVC_extractAndRemoveEnhancementFromNAL(
-                  nalu.data(), static_cast<uint32_t>(nalu.size()), LCEVC_NALFormat_AnnexB,
+                  nalu.data(), static_cast<uint32_t>(accessUnitSize), LCEVC_NALFormat_AnnexB,
                   LCEVC_CodecType_H264, output.data(), static_cast<uint32_t>(output.size()),
                   &outputSize, &strippedOffset, &strippedSize),
               1);
     EXPECT_EQ(outputSize, lcevcNal.size());
     EXPECT_EQ(memcmp(output.data(), lcevcNal.data(), lcevcNal.size()), 0);
     EXPECT_EQ(strippedOffset, 0u);
-    EXPECT_EQ(strippedSize, nalu.size() - lcevcNal.size());
+    EXPECT_EQ(strippedSize, accessUnitSize - lcevcNal.size());
     EXPECT_EQ(memcmp(nalu.data(), foreignSei.data(), foreignSei.size()), 0);
     EXPECT_EQ(memcmp(nalu.data() + foreignSei.size(), ccSei.data(), ccSei.size()), 0);
     EXPECT_EQ(memcmp(nalu.data() + foreignSei.size() + ccSei.size(), idrSlice.data(), idrSlice.size()), 0);
+    EXPECT_TRUE(std::equal(guard.begin(), guard.end(), nalu.begin() + accessUnitSize));
 
     // An AU with no LCEVC at all must come back untouched in remove mode.
     std::vector<uint8_t> baseOnly;

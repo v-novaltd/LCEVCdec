@@ -42,7 +42,7 @@ CMAKE_TYPES = ('*.cmake', 'CMakeLists.txt')
 PYTHON_TYPES = ('*.py',)
 JAVA_TYPES = ('*.java',)
 WORKFLOW_TYPES = ('*.yml', '*.yaml')
-GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/lcevc_dec_headers/*', 'conan/ffmpeg/[!conanfile.py]*'
+GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/lcevc_dec_headers/*', 'conan/ffmpeg/[!conanfile.py]*',
              'include/**/', 'docs/sphinx/**', '.github/**/', 'wrappers/**/', '')
 CLANG_FORMAT_ENV_VAR = 'CLANG_FORMAT_PATH'
 WIN_CLANG_FORMAT_ENV_VAR = 'CLANG_FORMAT_PATH'
@@ -54,7 +54,10 @@ EXCLUDED_GLOBS = ('cmake/toolchains/ios.toolchain.cmake',
                   'src/pipeline_vulkan/src/vma/vk_mem_alloc.h',
                   'src/pipeline_vulkan/src/shaders/src/specialization_ids.h')
 INCLUDE_GUARD_OVERRIDES = {'src/api/include/LCEVC/lcevc_dec.h': 'LCEVC_DEC_H',
+                           'include/LCEVC/api_defs.h': 'API_DEFS_H',
                            'wrappers/jni/library/src/main/jni/lcevc_dec_jni.h': 'LCEVC_DEC_JNI_H',
+                           'wrappers/jni/library/src/main/jni/surface_presenter.h': 'LCEVC_DEC_JNI_SURFACE_PRESENTER_H',
+                           'wrappers/jni/library/src/main/jni/weak_api29.h': 'LCEVC_DEC_JNI_WEAK_API29_H',
                            'src/pixel_processing/src/upscale_macros': None}
 TRAILING_SPACE_GLOB_DIRS = ('src/**/', 'cmake/**/', 'conan/**/', 'include/**/',
                             'docs/', 'docs/sphinx/**', '.github/**/', 'licenses/**/', 'wrappers/', '')

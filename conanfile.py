@@ -101,7 +101,8 @@ class LCEVCDecoderSDK(ConanFile):
             if self.settings.os in ("Macos", "iOS", "tvOS"):
                 self.options['ffmpeg'].with_coreimage = False
                 self.options['ffmpeg'].with_audiotoolbox = False
-                self.options['ffmpeg'].with_videotoolbox = False
+                self.options['ffmpeg'].with_videotoolbox = self.settings.os == "Macos"
+                self.options['ffmpeg'].with_metal = False
             self.options['ffmpeg'].with_asm = False
             self.options['ffmpeg'].with_zlib = False
             self.options['ffmpeg'].with_bzip2 = False
@@ -134,7 +135,7 @@ class LCEVCDecoderSDK(ConanFile):
             reqs.append('nlohmann_json/3.11.3')
 
         if self.options.base_decoder == "ffmpeg":
-            reqs.append('ffmpeg/8.0')
+            reqs.append('ffmpeg/9.0')
 
         if self.options.base_decoder == "libav":
             reqs.append('libav/12.3')

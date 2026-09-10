@@ -46,8 +46,13 @@ UpscaleFunction getUpscaleFunction(LdpFixedPoint srcFP, LdpFixedPoint dstFP, Int
     UpscaleFunction res = NULL;
     const LdcAcceleration* acceleration = ldcAccelerationGet();
 
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
     if (acceleration->hasSSE) {
         res = upscaleGetFunctionSSE(srcFP, dstFP, interleaving, is2d, pa, ditheringEnabled);
+    }
+#endif
+    if (acceleration->hasAVX2) {
+        res = upscaleGetFunctionAVX(srcFP, dstFP, interleaving, is2d, pa, ditheringEnabled);
     }
     if (acceleration->hasNeon) {
         res = upscaleGetFunctionNEON(srcFP, dstFP, interleaving, is2d, pa, ditheringEnabled);

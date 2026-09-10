@@ -53,7 +53,7 @@ def readGitValue = { String key, String fileName, List<String> gitArgs, Closure<
 
 String GIT_TAG = readGitValue('gitTag', '.gitshortversion', ['describe', '--match', '*.*.*', '--abbrev=0'])
 String GIT_DATE = readGitValue('gitDate', '.gitdate', ['log', '-1', '--date=format:%Y%m%d', '--pretty=format:%cd'], { it.replace("-", "") })
-String GIT_HASH = readGitValue('gitHash', '.githash', ['rev-parse', '--short=7', 'HEAD'])
+String GIT_HASH = readGitValue('gitHash', '.githash', ['rev-parse', '--short=8', 'HEAD'])
 String GIT_BRANCH = readGitValue('gitBranch', '.gitbranch', ['rev-parse', '--abbrev-ref', 'HEAD'])
 
 String PUBLISH_LABEL = System.getenv('PUBLISH_LABEL') ?: ''

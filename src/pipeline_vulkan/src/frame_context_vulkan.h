@@ -44,15 +44,16 @@ public:
     VulkanFrameContext& operator=(const VulkanFrameContext&) = delete;
 
     // Initialization and clean-up
-    bool init(VkCommandPool commandPool);
-    void destroy(VkCommandPool commandPool);
+    bool init();
+    void destroy();
 
     // Lifecycle
     bool begin(const DescriptorSetLayouts& layouts, uint32_t numTiles);
     bool end(VkQueue computeQueue);
+    void abort();
 
     // Pre-allocate GPU command buffer for LOQ apply.
-    void prepareCommandBuffer(LdeLOQIndex loq, uint32_t size);
+    bool prepareCommandBuffer(LdeLOQIndex loq, uint32_t size);
 
     // Bind a pipeline and layout
     void bind(const ComputePipelineLayout* computePipelineLayout,
@@ -84,6 +85,7 @@ private:
 
     BackendVulkan* m_backend{};
 
+    VkCommandPool m_commandPool{};
     VkCommandBuffer m_commandBuffer{};
     VkFence m_fence{};
     FrameVulkan* m_frame{};
@@ -108,6 +110,7 @@ private:
     // Temporal buffer sequencing
     VkEvent m_event{};
     VkEvent m_eventPrev{};
+    VkEvent m_eventPrevAtBegin{};
 
     // Currently bound pipeline and layout
     const ComputePipelineLayout* m_computePipelineLayout{};

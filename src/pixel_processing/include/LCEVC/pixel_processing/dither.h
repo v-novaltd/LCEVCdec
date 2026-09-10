@@ -127,7 +127,7 @@ void ldppDitherGlobalRelease(LdppDitherGlobal* dither);
  * \param frame            The frame dither module to initialize.
  * \param global           The global dither module to retrieve entropy from.
  * \param seed             The seed for this particular frame, this should be unique
- *                         for each frame to avoid repitition, the frames timestamp is
+ *                         for each frame to avoid repetition, the frames timestamp is
  *                         a ideal seed. if 0 it will use the wall clock.
  * \param strength         The dithering strength for this particular frame.
  *

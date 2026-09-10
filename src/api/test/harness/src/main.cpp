@@ -20,6 +20,7 @@
 #include <fmt/core.h>
 #include <fmt/ostream.h>
 #include <LCEVC/api_utility/chrono.h>
+#include <LCEVC/build_config.h>
 #include <LCEVC/common/constants.h>
 #include <LCEVC/lcevc_dec.h>
 #include <LCEVC/utility/base_decoder.h>
@@ -42,6 +43,7 @@ struct Config
     std::string inputBaseFile;
     LCEVC_ColorFormat inputColorFormat{LCEVC_ColorFormat_Unknown};
     bool baseExternal{false};
+    bool hardwareBase{false};
     bool readBinLinearly = false;
     bool simulatePadding{false};
     // Outputs
@@ -122,6 +124,8 @@ int setupConfig(int argc, char** argv, Config& cfgOut)
     app.add_option("--input-color-format", cfgOut.inputColorFormat, "Override input color format");
     app.add_flag("--base-external", cfgOut.baseExternal,
                  "Use externally allocated memory for base pictures.");
+    app.add_flag("--hardware-base",
+                 cfgOut.hardwareBase, "Use hardware decoding for base pictures (MediaCodec on Android, VideoToolbox on macOS, or QSV on Intel Linux/Windows).");
     app.add_flag("--read-bin-linearly",
                  cfgOut.readBinLinearly, "Use this to measure LCEVC Decode performance. If true, then .bin+.yuv streams are decoded in presentation order (rather than decode order, as with encapsulated files)");
     app.add_flag("--simulate-padding", cfgOut.simulatePadding,
@@ -168,7 +172,8 @@ static std::unique_ptr<BaseDecoder> createBaseDecoder(const Config& cfg)
 {
     if (!cfg.inputFile.empty()) {
         std::unique_ptr<BaseDecoder> baseDecoderLibAV =
-            createBaseDecoderLibAV(cfg.inputFile, cfg.inputFileFormat, cfg.inputColorFormat, cfg.verbose);
+            createBaseDecoderLibAV(cfg.inputFile, cfg.inputFileFormat, cfg.inputColorFormat,
+                                   cfg.verbose, true, cfg.hardwareBase);
         if (!baseDecoderLibAV) {
             fmt::print("Could not open input {}\n", cfg.inputFile);
         }

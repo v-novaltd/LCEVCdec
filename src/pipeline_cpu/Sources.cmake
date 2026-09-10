@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2025-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -16,10 +16,12 @@ list(
     SOURCES
     "src/buffer_cpu.cpp"
     "src/frame_cpu.cpp"
+    "src/hardware_buffer_cpu.cpp"
     "src/picture_cpu.cpp"
     "src/picture_lock_cpu.cpp"
     "src/pipeline_builder_cpu.cpp"
     "src/pipeline_cpu.cpp"
+    "src/render_cpu.cpp"
     "src/tasks_cpu.cpp"
     "src/temporal_buffer_cpu.cpp")
 
@@ -28,11 +30,13 @@ list(
     HEADERS
     "src/buffer_cpu.h"
     "src/frame_cpu.h"
+    "src/hardware_buffer_cpu.h"
     "src/picture_cpu.h"
     "src/picture_lock_cpu.h"
     "src/pipeline_builder_cpu.h"
     "src/pipeline_config_cpu.h"
     "src/pipeline_cpu.h"
+    "src/render_cpu.h"
     "src/tasks_cpu.h"
     "src/temporal_buffer_cpu.h")
 

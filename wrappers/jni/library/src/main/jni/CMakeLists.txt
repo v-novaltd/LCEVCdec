@@ -74,7 +74,7 @@ set(LCEVCDEC_CMAKE_ARGS
     -DANDROID_NDK=${ANDROID_NDK}
     -DANDROID_PLATFORM=${ANDROID_PLATFORM}
     -DVN_SDK_PIPELINE_VULKAN=ON
-    -DVN_SDK_PIPELINE_CPU=OFF
+    -DVN_SDK_PIPELINE_CPU=ON
     -DVN_SDK_SIMD=${ANDROID_ARM_NEON}
     -DVN_SDK_MINIMUM_LIB_SIZE=OFF)
 
@@ -85,6 +85,7 @@ set(LCEVCDEC_MODULES
     api
     api_utility
     extract
+    pipeline_cpu
     pipeline_vulkan
     pipeline
     enhancement
@@ -106,8 +107,20 @@ ExternalProject_Add(
     CMAKE_GENERATOR ${CMAKE_GENERATOR}
     CMAKE_ARGS ${LCEVCDEC_CMAKE_ARGS}
     BUILD_BYPRODUCTS ${LCEVCDEC_STATIC_BYPRODUCTS}
+    BUILD_ALWAYS TRUE
     BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
     INSTALL_COMMAND "")
+
+# ExternalProject's configure step is normally stamped as complete forever. Re-run it before each
+# incremental build so changes to LCEVCDEC_CMAKE_ARGS (such as enabling another pipeline) are
+# applied to existing Android Studio build trees.
+ExternalProject_Add_Step(
+    LCEVCdec_build reconfigure
+    COMMAND ${CMAKE_COMMAND} -S ${PROJECT_ROOT} -B <BINARY_DIR> -G ${CMAKE_GENERATOR}
+            ${LCEVCDEC_CMAKE_ARGS}
+    DEPENDEES configure
+    DEPENDERS build
+    ALWAYS TRUE)
 
 set(LCEVCDEC_LIBS)
 foreach (MODULE IN LISTS LCEVCDEC_MODULES)
@@ -124,9 +137,13 @@ endforeach ()
 # Dec JNI library
 # ~~~
 
-add_library(lcevc_dec_jni SHARED lcevc_dec_jni.cpp)
+add_library(lcevc_dec_jni SHARED lcevc_dec_jni.cpp surface_presenter.cpp)
 
 target_link_libraries(lcevc_dec_jni PRIVATE ${LCEVCDEC_LIBS} ${PLATFORM_LIBRARIES})
+
+# Make NDK symbols newer than the target API weak imports (SurfaceControl and
+# AHardwareBuffer_lockPlanes are API 29) - call sites gate on the device API level.
+target_compile_definitions(lcevc_dec_jni PRIVATE __ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__)
 target_include_directories(
     lcevc_dec_jni PRIVATE ${PROJECT_ROOT}/include ${PROJECT_ROOT}/src/api/include
                           ${PROJECT_ROOT}/src/extract/include)

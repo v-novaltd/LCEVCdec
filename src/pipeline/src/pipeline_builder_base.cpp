@@ -46,8 +46,8 @@ PipelineBuilderBase::PipelineBuilderBase(LdcMemoryAllocator* allocator, Pipeline
 void PipelineBuilderBase::setDefaultThreadCount(PipelineConfigBase& configuration)
 {
 #if VN_OS(ANDROID) || !VN_SDK_FEATURE(THREADING)
-    // Special case for Android, single threaded operation often gives better performance on mobile
-    configuration.numThreads = 1;
+    // Special case for Android, 4 threads often give better performance on mobile
+    configuration.numThreads = 4;
 #else
     // Set default thread count - number of platform cores, plus 1 for main thread
     configuration.numThreads = threadNumCores();

@@ -18,6 +18,7 @@
 #include <LCEVC/common/task_pool.h>
 #include <LCEVC/pipeline/frame_base.h>
 
+#include <atomic>
 #include <cassert>
 #include <vector>
 
@@ -25,6 +26,14 @@ namespace lcevc_dec::pipeline_vulkan {
 
 class PipelineVulkan;
 class PictureVulkan;
+
+enum class VulkanComputeOutcome : uint8_t
+{
+    Pending,
+    Succeeded,
+    Cancelled,
+    Failed,
+};
 
 class FrameVulkan : public pipeline::FrameBase
 {
@@ -49,6 +58,11 @@ public:
 
     bool needsGPUCommandBuffers() const override { return true; };
 
+    LdcReturnCode decodeResult() const override
+    {
+        return computeOutcome() == VulkanComputeOutcome::Failed ? LdcReturnCodeError : LdcReturnCodeSuccess;
+    }
+
     void setIntermediatePicture(uint8_t loq, PictureVulkan* picture)
     {
         assert(loq < LOQMaxCount);
@@ -70,8 +84,14 @@ public:
 
     void setComputeTaskDone(LdcTaskDependency dep) { m_computeTaskDone = dep; }
 
-    /// Signal the compute-done dependency without doing any GPU work.
-    /// Used when skipping flushed/skipped frames in taskVulkanDecode.
+    VulkanComputeOutcome computeOutcome() const
+    {
+        return m_computeOutcome.load(std::memory_order_acquire);
+    }
+
+    bool setComputeOutcome(VulkanComputeOutcome outcome);
+
+    /// Signal compute completion after publishing an outcome.
     void signalComputeTaskDone();
 
     void computeTaskFinish(PipelineVulkan* pipeline);
@@ -82,6 +102,7 @@ private:
     PictureVulkan* m_intermediatePicture[LOQMaxCount]{};
 
     LdcTaskDependency m_computeTaskDone{kTaskDependencyInvalid};
+    std::atomic<VulkanComputeOutcome> m_computeOutcome{VulkanComputeOutcome::Pending};
 
     std::vector<LdpPicture*> m_intermediatePicturePool;
 };

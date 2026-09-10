@@ -234,6 +234,12 @@ std::unique_ptr<BufferVulkanAhb> BufferVulkanAhb::create(BackendVulkan& backend,
                 return image;
             }
         }
+        if (formatProps.format == VK_FORMAT_UNDEFINED) {
+            VNLogWarning("BufferVulkanAhb::create: YUV AHB (format 0x%x) has no importable "
+                         "VkFormat on this driver",
+                         desc.format);
+            return nullptr;
+        }
         VNLogDebug("BufferVulkanAhb::create: importing YUV AHB as VkBuffer (format 0x%x, "
                    "VkFormat %d); VUID-VkMemoryAllocateInfo-pNext-02384 will fire under validation",
                    desc.format, static_cast<int>(formatProps.format));

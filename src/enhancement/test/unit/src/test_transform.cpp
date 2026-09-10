@@ -121,7 +121,7 @@ struct TransformTestParams
 class TransformTest : public testing::TestWithParam<TransformTestParams>
 {};
 
-// This test checks that the SIMD functions matche the equivalent
+// This test checks that the SIMD functions match the equivalent
 // scalar functions across a couple numeric conditions.
 TEST_P(TransformTest, CompareSIMD)
 {

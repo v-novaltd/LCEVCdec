@@ -16,6 +16,7 @@
 #define VN_LCEVC_PIPELINE_CPU_PIPELINE_CPU_H
 
 #include "pipeline_config_cpu.h"
+#include "render_cpu.h"
 #include "temporal_buffer_cpu.h"
 
 #include <LCEVC/pipeline/pipeline_base.h>
@@ -36,25 +37,29 @@ public:
     ~PipelineCPU() override;
 
     // Render
-    LdcReturnCode renderInit() override { return LdcReturnCodeNotSupported; }
+    LdcReturnCode renderInit() override
+    {
+        return RenderCPU::isSupported() ? LdcReturnCodeSuccess : LdcReturnCodeNotSupported;
+    }
     LdcReturnCode renderSendPicture(uint64_t timestamp, LdpPicture* outputPicture,
                                     const LdpRenderSendInformation* renderSendInformation,
-                                    uint64_t delayUs) override
-    {
-        return LdcReturnCodeNotSupported;
-    }
+                                    uint64_t delayUs) override;
     LdpPicture* renderReceivePicture(LdpRenderReceiveInformation& renderReceiveInformation) override
     {
         return nullptr;
     }
     LdcReturnCode renderSetWindow(void* window, bool secure) override
     {
-        VNUnused(window);
         VNUnused(secure);
-        return LdcReturnCodeNotSupported;
+        return m_render.setWindow(window);
     }
 
     const PipelineConfigCPU& configuration() const override { return m_configuration; }
+
+    // Accept an AHardwareBuffer-backed external picture (Android): decode output
+    // is written directly into the locked hardware buffer.
+    LdcReturnCode storeAccelBuffer(pipeline::PictureBase* picture, const LdpPictureDesc& desc,
+                                   LdpAccelBuffer* accelBuffer) override;
 
     //    LdppDitherGlobal* globalDitherBuffer() override { return &m_dither; }
 
@@ -108,6 +113,9 @@ private:
 
     // Global dither module
     LdppDitherGlobal m_dither{};
+
+    // Window rendering (Android surface output)
+    RenderCPU m_render;
 };
 
 } // namespace lcevc_dec::pipeline_cpu

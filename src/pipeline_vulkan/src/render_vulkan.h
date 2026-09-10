@@ -44,6 +44,7 @@
 
 struct LdppDitherGlobal;
 struct LdppDitherFrame;
+struct LdpPictureLayout;
 
 namespace lcevc_dec::pipeline_vulkan {
 
@@ -61,6 +62,8 @@ struct SwapChainSupportDetails
 class RenderVulkan
 {
 public:
+    static constexpr int NUM_PLANES = 3;
+
     RenderVulkan(BackendVulkan& backend)
         : m_backend(backend)
     {}
@@ -84,7 +87,10 @@ public:
 
     void drawFrame();
     void closeWindow();
-    void ensureTextureResources(uint32_t width, uint32_t height);
+    bool ensureTextureResources(uint32_t width, uint32_t height);
+    bool mapTexturePlanes(const uint8_t* source, const LdpPictureLayout& layout, uint32_t width,
+                          uint32_t height);
+    bool waitForTextureUpload();
 
     bool windowReady() const
     {
@@ -104,12 +110,12 @@ public:
         if (newWindow == nullptr) {
             m_window = nullptr;
             m_pendingSurfaceRecreate = true;
-            framebufferResized = true;
+            m_framebufferResized = true;
             return;
         }
         m_window = (ANativeWindow*)(newWindow);
         m_pendingSurfaceRecreate = true;
-        framebufferResized = true;
+        m_framebufferResized = true;
         VNLogDebug("got window! ptr=%p", (void*)m_window);
 #endif
     };
@@ -134,10 +140,6 @@ public:
 #elif defined(USE_GLFW)
     GLFWwindow* getWindow() { return m_window; }
 #endif
-
-    static const int NUM_PLANES = 3;
-    VkImage textureImage[NUM_PLANES] = {};
-    VkDeviceMemory textureImageMemory[NUM_PLANES] = {};
 
     void setRenderFormat(bool bit8, bool nv12)
     {
@@ -204,8 +206,8 @@ private:
                                VkImageLayout newLayout);
 
     const int MAX_FRAMES_IN_FLIGHT = 2;
-    uint32_t currentFrame = 0;
-    bool framebufferResized = false;
+    uint32_t m_currentFrame = 0;
+    bool m_framebufferResized = false;
     bool m_isInitialised = false;
     bool m_pendingSurfaceRecreate = false;
     int m_lastWindowWidth = 0;
@@ -213,6 +215,10 @@ private:
     uint32_t m_rotation = 0;
     uint32_t m_textureWidth = 0;
     uint32_t m_textureHeight = 0;
+    bool m_textureBit8 = true;
+
+    VkImage m_textureImage[NUM_PLANES] = {};
+    VkDeviceMemory m_textureImageMemory[NUM_PLANES] = {};
 
 #if VN_OS(ANDROID)
     ANativeWindow* m_window = nullptr;
@@ -265,6 +271,7 @@ private:
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkSemaphore> m_renderFinishedSemaphores;
     std::vector<VkFence> m_inFlightFences;
+    VkFence m_textureInFlightFence{VK_NULL_HANDLE};
 
     BackendVulkan& m_backend;
 };

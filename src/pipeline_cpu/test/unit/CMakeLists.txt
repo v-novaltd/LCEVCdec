@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2025-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -31,7 +31,6 @@ target_link_libraries(
     PRIVATE lcevc_dec::compiler
             lcevc_dec::platform
             lcevc_dec::pipeline_cpu
-            lcevc_dec::utility
             lcevc_dec::gtest_main
             lcevc_dec::api
             GTest::gtest

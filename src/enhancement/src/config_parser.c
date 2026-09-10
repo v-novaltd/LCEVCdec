@@ -1081,7 +1081,7 @@ static bool parseVUIParameters(ByteStream* stream, LdeVUIInfo* vuiInfo, uint32_t
     if (bit) {
         vuiInfo->flags |= VUIOverscanInfoPresent;
 
-        /* overscan_appropraite_flag: 1 bit*/
+        /* overscan_appropriate_flag: 1 bit*/
         VNCheckB(bitstreamReadBit(&bitstream, &bit));
         if (bit) {
             vuiInfo->flags |= VUIOverscanAppropriate;

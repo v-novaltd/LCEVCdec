@@ -28,7 +28,7 @@
 // Capacity of diagnostic ring buffer in records
 #define VN_CAPACITY 1024
 
-// Total bytes of exta variable data associated with diagnostic ring buffer
+// Total bytes of extra variable data associated with diagnostic ring buffer
 #define VN_VAR_DATA_SIZE 1024 * 1024
 
 // Maximum number of values for diagnostic records

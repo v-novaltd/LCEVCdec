@@ -258,11 +258,15 @@ protected:
 
         compute.beginCompute(frameContext);
         if (loq == LOQ0) {
-            frameContext->prepareCommandBuffer(LOQ0, mergedBufferSize({&m_cmdBufferGpu}));
-            frameContext->prepareCommandBuffer(LOQ1, 0);
+            if (!frameContext->prepareCommandBuffer(LOQ0, mergedBufferSize({&m_cmdBufferGpu})) ||
+                !frameContext->prepareCommandBuffer(LOQ1, 0)) {
+                return {};
+            }
         } else {
-            frameContext->prepareCommandBuffer(LOQ0, 0);
-            frameContext->prepareCommandBuffer(LOQ1, mergedBufferSize({&m_cmdBufferGpu}));
+            if (!frameContext->prepareCommandBuffer(LOQ0, 0) ||
+                !frameContext->prepareCommandBuffer(LOQ1, mergedBufferSize({&m_cmdBufferGpu}))) {
+                return {};
+            }
         }
 
         EXPECT_TRUE(pipeline->backend().applyCommon(&commonArgs));

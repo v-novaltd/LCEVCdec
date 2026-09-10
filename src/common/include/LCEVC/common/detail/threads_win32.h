@@ -111,7 +111,7 @@ static inline int threadCondVarInitialize(ThreadCondVar* condVar)
 static inline void threadCondVarDestroy(ThreadCondVar* condVar)
 {
     VNUnused(condVar);
-    // CONDITION_VARIABLEs do not need destroying
+    // CONDITION_VARIABLEEs do not need destroying
 }
 
 static inline int threadCondVarSignal(ThreadCondVar* condVar)

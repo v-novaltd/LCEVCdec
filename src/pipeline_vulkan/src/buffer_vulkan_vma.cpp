@@ -43,6 +43,8 @@ void BufferVulkanVma::destroy()
         vmaDestroyBuffer(m_pipeline.getVmaAllocator(), m_buffer, m_vmaAllocation);
         m_buffer = VK_NULL_HANDLE;
     }
+    m_vmaAllocation = {};
+    m_size = 0;
 }
 
 pipeline::BufferUsage BufferVulkanVma::usage() const { return m_usage; }
@@ -102,8 +104,12 @@ bool BufferVulkanVma::createBufferAndMemory(uint32_t size)
     }
 
     VmaAllocationInfo allocationInfo = {};
-    vmaCreateBuffer(m_pipeline.getVmaAllocator(), &bufferCreateInfo, &allocInfo, &m_buffer,
-                    &m_vmaAllocation, &allocationInfo);
+    const VkResult result = vmaCreateBuffer(m_pipeline.getVmaAllocator(), &bufferCreateInfo,
+                                            &allocInfo, &m_buffer, &m_vmaAllocation, &allocationInfo);
+    if (result != VK_SUCCESS) {
+        VNLogError("vmaCreateBuffer failed: %d", static_cast<int32_t>(result));
+        return false;
+    }
 
     m_size = size;
 
@@ -133,13 +139,28 @@ bool BufferVulkanVma::map(LdpBufferMapping* mapping, int32_t offset, uint32_t ma
 
     // Do the mapping
     void* mappedPtr{};
-    vmaMapMemory(m_pipeline.getVmaAllocator(), m_vmaAllocation, &mappedPtr);
-    m_ptr = static_cast<uint8_t*>(mappedPtr);
+    const VkResult mapResult = vmaMapMemory(m_pipeline.getVmaAllocator(), m_vmaAllocation, &mappedPtr);
+    if (mapResult != VK_SUCCESS) {
+        VNLogError("vmaMapMemory failed: %d", static_cast<int32_t>(mapResult));
+        return false;
+    }
+    if (mappedPtr == nullptr) {
+        VNLogError("vmaMapMemory returned a null pointer");
+        vmaUnmapMemory(m_pipeline.getVmaAllocator(), m_vmaAllocation);
+        return false;
+    }
 
     // Make sure CPU sees the GPU writes
-    vmaInvalidateAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation, 0, m_size);
+    const VkResult invalidateResult =
+        vmaInvalidateAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation, 0, m_size);
+    if (invalidateResult != VK_SUCCESS) {
+        VNLogError("vmaInvalidateAllocation failed: %d", static_cast<int32_t>(invalidateResult));
+        vmaUnmapMemory(m_pipeline.getVmaAllocator(), m_vmaAllocation);
+        return false;
+    }
 
     // Record details
+    m_ptr = static_cast<uint8_t*>(mappedPtr);
     mapping->buffer = this;
     mapping->offset = offset;
     mapping->size = mapSize;

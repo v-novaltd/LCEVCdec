@@ -17,6 +17,7 @@
 
 #include <LCEVC/common/configure.hpp>
 #include <LCEVC/common/memory.h>
+#include <LCEVC/common/return_code.h>
 #include <LCEVC/pipeline/event_sink.h>
 #include <LCEVC/pipeline/picture.h>
 #include <LCEVC/pipeline/types.h>
@@ -80,8 +81,9 @@ public:
                                                      uint32_t byteSize) = 0;
     virtual LdcReturnCode sendDecoderPicture(LdpPicture* outputPicture) = 0;
 
-    virtual LdpPicture* receiveDecoderPicture(LdpDecodeInformation& decodeInfoOut) = 0;
-    virtual LdpPicture* receiveDecoderBase() = 0;
+    virtual LdcReturnCode receiveDecoderPicture(LdpDecodeInformation& decodeInfoOut,
+                                                LdpPicture*& pictureOut) = 0;
+    virtual LdcReturnCode receiveDecoderBase(LdpPicture*& pictureOut) = 0;
 
     virtual void getCapacity(LdpPipelineCapacity* capacity) = 0;
 

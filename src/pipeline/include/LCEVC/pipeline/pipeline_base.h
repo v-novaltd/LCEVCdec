@@ -92,8 +92,8 @@ public:
                                              uint32_t byteSize) override;
     LdcReturnCode sendDecoderPicture(LdpPicture* outputPicture) override;
 
-    LdpPicture* receiveDecoderPicture(LdpDecodeInformation& decodeInfoOut) override;
-    LdpPicture* receiveDecoderBase() override;
+    LdcReturnCode receiveDecoderPicture(LdpDecodeInformation& decodeInfoOut, LdpPicture*& pictureOut) override;
+    LdcReturnCode receiveDecoderBase(LdpPicture*& pictureOut) override;
 
     void getCapacity(LdpPipelineCapacity* capacity) override;
 

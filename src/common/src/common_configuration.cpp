@@ -62,11 +62,26 @@ public:
 
     bool setDisableSIMD(const bool& val)
     {
+        m_disableSIMD = val;
+        return updateAcceleration();
+    }
+
+    bool setDisableAVX(const bool& val)
+    {
+        m_disableAVX = val;
+        return updateAcceleration();
+    }
+
+    bool updateAcceleration()
+    {
 #if VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
         /* Minimum size builds contain no scalar implementations */
-        VNUnused(val);
 #else
-        ldcAccelerationInitialize(!val);
+        ldcAccelerationInitialize(!m_disableSIMD);
+        m_acceleration = *ldcAccelerationGet();
+        m_acceleration.hasAVX2 &= !m_disableAVX;
+        m_acceleration.hasSIMD = m_acceleration.hasSSE || m_acceleration.hasAVX2 || m_acceleration.hasNeon;
+        ldcAccelerationSet(&m_acceleration);
 #endif
         return true;
     }
@@ -82,6 +97,11 @@ public:
 
 private:
     bool m_logStdout = false;
+    bool m_disableSIMD = false;
+    bool m_disableAVX = false;
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
+    LdcAcceleration m_acceleration = {};
+#endif
 #if VN_SDK_FEATURE(TRACING)
     std::string m_traceFile;
 #endif
@@ -90,6 +110,7 @@ private:
 static const common::ConfigMemberMap<CommonConfiguration> kConfigMemberMap = {
     {"log_stdout", makeBinding(&CommonConfiguration::setLogToStdout)},
     {"disable_simd", makeBinding(&CommonConfiguration::setDisableSIMD)},
+    {"disable_avx", makeBinding(&CommonConfiguration::setDisableAVX)},
     {"log_level", makeBinding(&CommonConfiguration::setLogLevel)},
     {"trace_file", makeBinding(&CommonConfiguration::setTraceFile)},
 };

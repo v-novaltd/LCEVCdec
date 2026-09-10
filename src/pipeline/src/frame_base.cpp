@@ -394,6 +394,10 @@ bool FrameBase::tryAttachTemporalBuffer(uint32_t plane, TemporalBufferBase* temp
     assert(m_temporalBuffer[plane] == nullptr);
     assert(temporalBuffer->frame == nullptr);
 
+    if (m_depTemporalBuffer[plane] == kTaskDependencyInvalid) {
+        return false;
+    }
+
     // Plane must match
     if (temporalBuffer->desc.plane != plane) {
         return false;

@@ -20,6 +20,7 @@
 
 #include <LCEVC/common/class_utils.hpp>
 #include <LCEVC/common/log.h>
+#include <LCEVC/common/threads.hpp>
 #include <LCEVC/enhancement/bitstream_types.h>
 #include <vulkan/vulkan.h>
 
@@ -90,10 +91,10 @@ public:
     };
 
     bool initVulkan();
-    bool initRemaningRender();
+    bool initRemainingRender();
     void destroy();
 
-    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+    bool findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties, uint32_t& memoryTypeIndex);
     VkInstance& getInstance() { return m_instance; }
     VkDevice& getDevice() { return m_device; }
     VkPhysicalDevice& getPhysicalDevice() { return m_physicalDevice; }
@@ -107,6 +108,11 @@ public:
     VkQueue& getGraphicsQueue() { return m_graphicsQueue; }
     VkQueue& getPresentQueue() { return m_presentQueue; }
     const QueueFamilyIndices& getQueueFamilies() { return m_indices; }
+
+    VkResult submitQueue(VkQueue queue, uint32_t submitCount, const VkSubmitInfo* submits, VkFence fence);
+    VkResult presentQueue(VkQueue queue, const VkPresentInfoKHR* presentInfo);
+    VkResult waitQueueIdle(VkQueue queue);
+    VkResult waitDeviceIdle();
 
     VmaAllocator getVmaAllocator() { return m_allocator; }
 
@@ -167,6 +173,7 @@ private:
     VkQueue m_computeQueue{};
     VkQueue m_graphicsQueue{};
     VkQueue m_presentQueue{};
+    common::Mutex m_queueMutex;
     ComputeVulkan m_compute;
     RenderVulkan m_render;
 

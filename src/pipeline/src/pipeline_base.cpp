@@ -263,8 +263,10 @@ LdcReturnCode PipelineBase::sendDecoderPicture(LdpPicture* outputPicture)
     return LdcReturnCodeSuccess;
 }
 
-LdpPicture* PipelineBase::receiveDecoderPicture(LdpDecodeInformation& decodeInfoOut)
+LdcReturnCode PipelineBase::receiveDecoderPicture(LdpDecodeInformation& decodeInfoOut, LdpPicture*& pictureOut)
 {
+    pictureOut = nullptr;
+
     FrameBase* frame{};
 
     releaseFlushedFrames();
@@ -303,12 +305,13 @@ LdpPicture* PipelineBase::receiveDecoderPicture(LdpDecodeInformation& decodeInfo
     }
 
     if (!frame) {
-        return nullptr;
+        return LdcReturnCodeAgain;
     }
 
     // Copy surviving data from frame
     decodeInfoOut = frame->decodeInformation;
-    LdpPicture* pictureOut{frame->outputPicture};
+    pictureOut = frame->outputPicture;
+    const LdcReturnCode decodeResult = frame->decodeResult();
 
     VNLogDebug("receiveDecoderPicture: ts:%" PRIx64 " %p hb:%d he:%d sk:%d enh:%d",
                decodeInfoOut.timestamp, (void*)pictureOut, decodeInfoOut.hasBase,
@@ -317,20 +320,21 @@ LdpPicture* PipelineBase::receiveDecoderPicture(LdpDecodeInformation& decodeInfo
     // Once an output picture has left the building - we can drop the associated frame
     freeFrame(frame);
 
-    return pictureOut;
+    return decodeResult;
 }
 
-LdpPicture* PipelineBase::receiveDecoderBase()
+LdcReturnCode PipelineBase::receiveDecoderBase(LdpPicture*& pictureOut)
 {
+    pictureOut = nullptr;
+
     // Is there anything in finished base FIFO?
-    LdpPicture* basePicture{};
-    if (!m_basePictureOutBuffer.tryPop(basePicture)) {
-        return nullptr;
+    if (!m_basePictureOutBuffer.tryPop(pictureOut)) {
+        return LdcReturnCodeAgain;
     }
 
-    VNLogDebug("receiveDecoderBase: %" PRIx64 " %p", (void*)basePicture);
+    VNLogDebug("receiveDecoderBase: %" PRIx64 " %p", (void*)pictureOut);
 
-    return basePicture;
+    return LdcReturnCodeSuccess;
 }
 
 void PipelineBase::getCapacity(LdpPipelineCapacity* capacity)
@@ -434,7 +438,7 @@ LdcReturnCode PipelineBase::skip(uint64_t timestamp)
 
     VNLogDebug("skip: ts:%" PRIx64 " %p", timestamp);
 
-    // Using kInvalidTimstamp skips all sent frames
+    // Using kInvalidTimestamp skips all sent frames
     if (timestamp == kInvalidTimestamp) {
         timestamp = m_sendLimit;
     }
@@ -469,7 +473,7 @@ LdcReturnCode PipelineBase::flush(uint64_t timestamp)
 
     VNLogDebug("flush: ts:%" PRIx64 " %p", timestamp);
 
-    // Using kInvalidTimstamp flushed all sent frames
+    // Using kInvalidTimestamp flushed all sent frames
     if (timestamp == kInvalidTimestamp) {
         timestamp = m_sendLimit;
     }
@@ -990,16 +994,16 @@ void PipelineBase::transferTemporalBuffer(FrameBase* frame, uint32_t plane)
                 break;
             }
         }
-    }
+        if (!foundNextFrame) {
+            return;
+        }
 
-    if (!foundNextFrame) {
-        return;
-    }
+        VNLogDebug("  Base::releaseTemporalBuffer found: plane:%" PRIu32 " next_ts:%" PRIx64
+                   " ts:%" PRIx64,
+                   plane, foundNextFrame->timestamp, frame->timestamp);
 
-    VNLogDebug("  Base::releaseTemporalBuffer found: plane:%" PRIu32 " next_ts:%" PRIx64
-               " ts:%" PRIx64,
-               plane, foundNextFrame->timestamp, frame->timestamp);
-    foundNextFrame->updateTemporalBuffer(plane);
+        foundNextFrame->updateTemporalBuffer(plane);
+    }
 }
 
 // End of frame processing

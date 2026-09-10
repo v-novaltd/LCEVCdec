@@ -319,7 +319,9 @@ static bool removeNalUnit(ExtractState* state, NalUnitSpan* nalSpan)
 #endif
     {
         // Move following data down
-        memmove(nalSpan->data, nalSpan->data + nalSpan->size, state->size - nalSpan->size);
+        const uint32_t nalOffset = (uint32_t)(nalSpan->data - state->data);
+        const uint32_t followingSize = state->size - nalOffset - nalSpan->size;
+        memmove(nalSpan->data, nalSpan->data + nalSpan->size, followingSize);
     }
 
     // Adjust offset and size

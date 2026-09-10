@@ -132,6 +132,11 @@ PipelineVulkan::~PipelineVulkan()
         ldcMemorySimpleAllocatorDestroy(&m_simpleAllocator);
     }
 
+    for (BufferVulkanVma* buffer : m_cachedBuffers) {
+        m_buffersPool.destroy(buffer);
+    }
+    m_cachedBuffers.clear();
+
     if (m_initialised) {
         m_backend.destroy();
     }
@@ -139,14 +144,64 @@ PipelineVulkan::~PipelineVulkan()
 
 BufferVulkan* PipelineVulkan::allocateBuffer(uint32_t requiredSize, pipeline::BufferUsage usage)
 {
-    common::ScopedLock lock(m_allocationBuffersMutex);
+    BufferVulkanVma* buffer = nullptr;
+    {
+        common::ScopedLock lock(m_allocationBuffersMutex);
 
-    BufferVulkan* const buffer = m_buffersPool.make(m_backend, requiredSize, usage);
+        // Prefer the smallest cached allocation that already fits. If none fits, reuse and
+        // resize another buffer with the same memory usage rather than consuming another pool slot.
+        auto selected = m_cachedBuffers.end();
+        for (auto it = m_cachedBuffers.begin(); it != m_cachedBuffers.end(); ++it) {
+            if ((*it)->usage() != usage) {
+                continue;
+            }
+            if (selected == m_cachedBuffers.end() ||
+                ((*it)->size() >= requiredSize &&
+                 ((*selected)->size() < requiredSize || (*it)->size() < (*selected)->size()))) {
+                selected = it;
+            }
+        }
 
-    if (!buffer) {
-        VNLogError("Could not allocate buffer");
+        if (selected != m_cachedBuffers.end()) {
+            buffer = *selected;
+            *selected = m_cachedBuffers.back();
+            m_cachedBuffers.pop_back();
+        } else {
+            buffer = m_buffersPool.make(m_backend, 0, usage);
+
+            // A resolution or usage change can leave every pool slot in the cache. Discard one
+            // stale allocation so the fixed-size object pool can adapt to the new workload.
+            if (buffer == nullptr && !m_cachedBuffers.empty()) {
+                m_buffersPool.destroy(m_cachedBuffers.back());
+                m_cachedBuffers.pop_back();
+                buffer = m_buffersPool.make(m_backend, 0, usage);
+            }
+        }
+    }
+
+    if (buffer == nullptr) {
+        VNLogError("Could not allocate buffer object: size=%u usage=%d", requiredSize,
+                   static_cast<int32_t>(usage));
         return nullptr;
     }
+
+    // Vulkan allocation can occasionally block in the driver for tens of milliseconds. Keep it
+    // outside the cache mutex so completed frames can return other buffers concurrently.
+    if (buffer->size() < requiredSize && !buffer->resize(requiredSize)) {
+        common::ScopedLock lock(m_allocationBuffersMutex);
+        m_buffersPool.destroy(buffer);
+        VNLogError("Could not resize Vulkan buffer: size=%u usage=%d", requiredSize,
+                   static_cast<int32_t>(usage));
+        return nullptr;
+    }
+    if (buffer->getVkBuffer() == VK_NULL_HANDLE || buffer->size() == 0) {
+        VNLogError("Could not allocate Vulkan buffer: size=%u usage=%d", requiredSize,
+                   static_cast<int32_t>(usage));
+        common::ScopedLock lock(m_allocationBuffersMutex);
+        m_buffersPool.destroy(buffer);
+        return nullptr;
+    }
+
     return buffer;
 }
 
@@ -155,7 +210,7 @@ void PipelineVulkan::releaseBuffer(pipeline::BufferBase* buffer)
     common::ScopedLock lock(m_allocationBuffersMutex);
     assert(buffer);
 
-    m_buffersPool.destroy(fromBase(buffer));
+    m_cachedBuffers.push_back(fromBase(buffer));
 }
 
 PictureVulkan* PipelineVulkan::allocatePicture()
@@ -232,6 +287,13 @@ void PipelineVulkan::freeFrame(pipeline::FrameBase* frame)
 
     m_allocatedFrames.removeReorderIndex(idx);
 
+    // Keep the frame's dither state: the frame is freed when its picture is
+    // received, but renderSendPicture() may still be called for it afterwards.
+    if (const LdppDitherFrame* dither = frame->dither()) {
+        m_freedFrameDither[m_freedFrameDitherNext] = {frame->timestamp, *dither};
+        m_freedFrameDitherNext = (m_freedFrameDitherNext + 1) % m_freedFrameDither.size();
+    }
+
     frame->release(true);
     m_framesPool.destroy(fromBase(frame));
 
@@ -242,6 +304,16 @@ void PipelineVulkan::freeFrame(pipeline::FrameBase* frame)
         m_skipLimit = kInvalidTimestamp;
         m_flushLimit = kInvalidTimestamp;
     }
+}
+
+const LdppDitherFrame* PipelineVulkan::findFreedFrameDither(uint64_t timestamp) const
+{
+    for (const FreedFrameDither& entry : m_freedFrameDither) {
+        if (entry.timestamp == timestamp && entry.dither.strength != 0) {
+            return &entry.dither;
+        }
+    }
+    return nullptr;
 }
 
 pipeline::TemporalBufferBase* PipelineVulkan::getTemporalBuffer(uint32_t n)
@@ -261,7 +333,7 @@ LdcReturnCode PipelineVulkan::renderSetWindow(void* window, bool secure)
 #else
     VNUnused(window);
 #endif
-    m_backend.initRemaningRender();
+    m_backend.initRemainingRender();
 
     return LdcReturnCodeSuccess;
 }
@@ -318,36 +390,24 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
                        colorFormat == LdpColorFormatI444_8 || colorFormat == LdpColorFormatNV12_8 ||
                        colorFormat == LdpColorFormatNV21_8 || colorFormat == LdpColorFormatGRAY_8);
 
-    FrameVulkan* frame = fromBase(findFrame(timestamp, true));
-
-    if (frame == nullptr) {
-        VNLogWarning("Null frame");
-        return LdcReturnCodeError;
-    }
-
-    const LdppDitherFrame* frameDither = frame ? frame->dither() : nullptr;
+    // The frame may already have been freed by receiveDecoderPicture()
+    // (receive-then-render ordering) - dither, the only per-frame render
+    // state, is stashed at free time.
+    const FrameVulkan* frame = fromBase(findFrame(timestamp, true));
+    const LdppDitherFrame* frameDither = frame ? frame->dither() : findFreedFrameDither(timestamp);
     backend().getRenderer().setRenderFormat(bit8, nv12);
     backend().getRenderer().setLimitedRange(desc.colorRange == LdpColorRangeLimited);
-    backend().getRenderer().ensureTextureResources(pictureWidth, pictureHeight);
+    if (!backend().getRenderer().ensureTextureResources(pictureWidth, pictureHeight)) {
+        VNLogError("Failed to prepare render texture resources");
+        return LdcReturnCodeError;
+    }
+    if (!backend().getRenderer().waitForTextureUpload()) {
+        VNLogError("Failed to wait for render textures");
+        return LdcReturnCodeError;
+    }
     backend().getRenderer().updateDitherState(&m_dither, frameDither);
 
-    VkImageSubresource subresource{};
-    subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-    VkSubresourceLayout layout0;
-    vkGetImageSubresourceLayout(backend().getDevice(), backend().getRenderer().textureImage[0],
-                                &subresource, &layout0);
-
-    VkSubresourceLayout layout1;
-    vkGetImageSubresourceLayout(backend().getDevice(), backend().getRenderer().textureImage[1],
-                                &subresource, &layout1);
-
-    VkSubresourceLayout layout2;
-    vkGetImageSubresourceLayout(backend().getDevice(), backend().getRenderer().textureImage[2],
-                                &subresource, &layout2);
-
-    BufferVulkan* buffer = fromPipeline(picture->buffer);
-
+    auto* buffer = fromPipeline(picture->buffer);
     if (buffer == nullptr) {
         VNLogWarning("Null buffer");
         return LdcReturnCodeError;
@@ -358,58 +418,19 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
         VNLogError("Mapping failed");
         return LdcReturnCodeError;
     }
-
-    const auto* db = mapping.ptr;
-
-    void* data0 = nullptr;
-    void* data1 = nullptr;
-    void* data2 = nullptr;
-
-    vkMapMemory(backend().getDevice(), backend().getRenderer().textureImageMemory[0], 0,
-                layout0.size, 0, &data0);
-    vkMapMemory(backend().getDevice(), backend().getRenderer().textureImageMemory[1], 0,
-                layout1.size, 0, &data1);
-    vkMapMemory(backend().getDevice(), backend().getRenderer().textureImageMemory[2], 0,
-                layout2.size, 0, &data2);
-
-    const uint8_t* srcY = db + picture->layout.planeOffsets[0];
-    uint8_t* dstY = static_cast<uint8_t*>(data0);
-
-    for (uint32_t y = 0; y < pictureHeight; ++y) {
-        memcpy(dstY + y * layout0.rowPitch, srcY + y * picture->layout.rowStrides[0], pictureWidth);
+    if (mapping.ptr == nullptr) {
+        VNLogError("Mapping returned a null pointer");
+        buffer->unmap(&mapping);
+        return LdcReturnCodeError;
     }
-
-    if (nv12) {
-        const uint8_t* uvSrc = db + picture->layout.planeOffsets[1];
-        for (uint32_t y = 0; y < pictureHeight / 2; ++y) {
-            const uint8_t* rowSrc = uvSrc + y * picture->layout.rowStrides[1];
-            uint8_t* rowU = static_cast<uint8_t*>(data1) + y * layout1.rowPitch;
-            uint8_t* rowV = static_cast<uint8_t*>(data2) + y * layout2.rowPitch;
-
-            for (uint32_t x = 0; x < pictureWidth / 2; ++x) {
-                rowU[x] = rowSrc[2 * x + 0];
-                rowV[x] = rowSrc[2 * x + 1];
-            }
-        }
-    } else {
-        for (uint32_t y = 0; y < pictureHeight / 2; ++y) {
-            memcpy(static_cast<uint8_t*>(data1) + y * layout1.rowPitch,
-                   db + picture->layout.planeOffsets[1] + y * picture->layout.rowStrides[1],
-                   picture->layout.rowStrides[1]);
-        }
-
-        for (uint32_t y = 0; y < pictureHeight / 2; ++y) {
-            memcpy(static_cast<uint8_t*>(data2) + y * layout2.rowPitch,
-                   db + picture->layout.planeOffsets[2] + y * picture->layout.rowStrides[2],
-                   picture->layout.rowStrides[2]);
-        }
-    }
-
-    vkUnmapMemory(backend().getDevice(), backend().getRenderer().textureImageMemory[2]);
-    vkUnmapMemory(backend().getDevice(), backend().getRenderer().textureImageMemory[1]);
-    vkUnmapMemory(backend().getDevice(), backend().getRenderer().textureImageMemory[0]);
-
+    const bool texturePlanesMapped = backend().getRenderer().mapTexturePlanes(
+        mapping.ptr, picture->layout, pictureWidth, pictureHeight);
     buffer->unmap(&mapping);
+
+    if (!texturePlanesMapped) {
+        VNLogError("Failed to map texture planes");
+        return LdcReturnCodeError;
+    }
 
     backend().getRenderer().drawFrame();
 

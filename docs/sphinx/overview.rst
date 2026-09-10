@@ -68,7 +68,7 @@ Once configured, the decoder is moved to the *Initialized* state by calling :cpp
    return **LCEVC_Success** or **LCEVC_NotSupported**
   end
   |||
-  Integration -> Decoder: **LCEVC_InitilizeDecoder**(//decoderHandle//)
+  Integration -> Decoder: **LCEVC_InitializeDecoder**(//decoderHandle//)
   return **LCEVC_Success**
 
 Enhancement Decoding
@@ -428,7 +428,7 @@ Whilst a picture with an external buffer is being used by the decoder (i.e. betw
 Access
 ......
 
-The buffer description includes an :cpp:member:`~LCEVC_PictureBufferDesc::access` member, that describes whether the buffer is read only, or can be written. The base pictures would usually be read-only, and the enhancement pictures would be writeable. This access level will be checked when the integration tries to access the picture's data using  :cpp:func:`LCEVC_LockPicture`.
+The buffer description includes an :cpp:member:`~LCEVC_PictureBufferDesc::access` member, that describes whether the buffer is read only, or can be written. The base pictures would usually be read-only, and the enhancement pictures would be writable. This access level will be checked when the integration tries to access the picture's data using  :cpp:func:`LCEVC_LockPicture`.
 
 Events
 ------

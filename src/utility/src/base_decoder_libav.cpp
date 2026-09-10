@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -17,6 +17,7 @@
 #include <LCEVC/utility/base_decoder.h>
 //
 #include <LCEVC/api_utility/picture_layout.h>
+#include <LCEVC/build_config.h>
 #include <LCEVC/extract/extract.h>
 #include <LCEVC/utility/string_utils.h>
 
@@ -33,9 +34,12 @@ extern "C"
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
+#include <libavutil/dict.h>
 #include <libavutil/error.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/log.h>
+#include <libavutil/pixdesc.h>
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
@@ -54,7 +58,10 @@ namespace lcevc_dec::utility {
 
 namespace {
     // Generate an LCEVC picture description for output of context, or filter if present
-    LCEVC_PictureDesc lcevcPictureDesc(const AVCodecContext& ctx, const AVFilterLink* filterLink);
+    LCEVC_PictureDesc lcevcPictureDesc(const AVCodecContext& ctx, const AVFilterLink* filterLink,
+                                       AVPixelFormat pixelFormat = AV_PIX_FMT_NONE);
+    // Convert a libav pixel format to an LCEVC color format
+    LCEVC_ColorFormat lcevcColorFormat(AVPixelFormat fmt);
     // Convert libav codec type to LCEVC
     LCEVC_CodecType lcevcCodecType(enum AVCodecID avCodecID);
     // Return a libav filter string to convert to given color format
@@ -100,15 +107,16 @@ public:
     bool update() override;
 
 private:
-    friend std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view source,
-                                                               std::string_view sourceFormat,
-                                                               LCEVC_ColorFormat baseFormat,
-                                                               bool verbose, bool extract);
+    friend std::unique_ptr<BaseDecoder>
+    createBaseDecoderLibAV(std::string_view source, std::string_view sourceFormat,
+                           LCEVC_ColorFormat baseFormat, bool verbose, bool extract, bool hardware);
     int openInput(std::string_view source, std::string_view sourceFormat);
     int openStream(AVMediaType type);
     int addFilter(std::string_view filters);
 
     bool isInputFormat(std::string_view fmt) const;
+    static AVPixelFormat getHardwareFormat(AVCodecContext* context, const AVPixelFormat* formats);
+    AVPixelFormat decodedPixelFormat() const;
 
     void close();
 
@@ -134,10 +142,15 @@ private:
     AVFilterContext* m_bufferSrcCtx = nullptr;  // Input to filter
     AVFilterContext* m_bufferSinkCtx = nullptr; // Output from filter
 
-    AVPacket* m_demuxPacket = nullptr; // Demuxed packet
-    AVPacket* m_videoPacket = nullptr; // combined video packet
-    AVPacket* m_basePacket = nullptr;  // base packet
-    AVFrame* m_frame = nullptr;        // In flight frame
+    AVPacket* m_demuxPacket = nullptr;  // Demuxed packet
+    AVPacket* m_videoPacket = nullptr;  // combined video packet
+    AVPacket* m_basePacket = nullptr;   // base packet
+    AVFrame* m_frame = nullptr;         // In flight frame
+    AVFrame* m_softwareFrame = nullptr; // Hardware frame transferred to system memory
+    AVBufferRef* m_hardwareDeviceContext = nullptr;
+    AVHWDeviceType m_hardwareDeviceType = AV_HWDEVICE_TYPE_NONE;
+    AVPixelFormat m_hardwarePixelFormat = AV_PIX_FMT_NONE;
+    AVPixelFormat m_softwarePixelFormat = AV_PIX_FMT_NONE;
 
     // NAL format (i.e. whether packets begin 001 or 002)
     LCEVC_NALFormat m_nalFormat = LCEVC_NALFormat_Unknown;
@@ -150,6 +163,9 @@ private:
 
     // True if enhancement data should be extracted from NAL Units before passing it on.
     bool m_extractEnhanced = true;
+
+    // True if the base stream is decoded with platform hardware acceleration.
+    bool m_hardware = false;
 
     // Current state of decoder
     enum class State
@@ -241,6 +257,27 @@ bool BaseDecoderLibAV::isInputFormat(std::string_view fmt) const
     return std::find(m_inputFormats.begin(), m_inputFormats.end(), fmt) != m_inputFormats.end();
 }
 
+AVPixelFormat BaseDecoderLibAV::getHardwareFormat(AVCodecContext* context, const AVPixelFormat* formats)
+{
+    const auto* decoder = static_cast<const BaseDecoderLibAV*>(context->opaque);
+    for (const AVPixelFormat* format = formats; *format != AV_PIX_FMT_NONE; ++format) {
+        if (*format == decoder->m_hardwarePixelFormat) {
+            return *format;
+        }
+    }
+
+    fmt::print(stderr, "Hardware pixel format is not supported by the decoder\n");
+    return AV_PIX_FMT_NONE;
+}
+
+AVPixelFormat BaseDecoderLibAV::decodedPixelFormat() const
+{
+    if (m_softwarePixelFormat != AV_PIX_FMT_NONE) {
+        return m_softwarePixelFormat;
+    }
+    return m_videoDecCtx->pix_fmt;
+}
+
 int BaseDecoderLibAV::openStream(AVMediaType type)
 {
     // Find stream index
@@ -250,18 +287,99 @@ int BaseDecoderLibAV::openStream(AVMediaType type)
     }
     m_stream = stream;
 
-    // find codec for the stream
+    // Find codec for the stream
     AVCodecParameters* const codecParameters = m_fmtCtx->streams[stream]->codecpar;
-    const AVCodec* const codec = avcodec_find_decoder(codecParameters->codec_id);
+    const AVCodec* codec = nullptr;
+    if (m_hardware) {
+#if VN_OS(ANDROID)
+        const std::string codecName =
+            fmt::format("{}_mediacodec", avcodec_get_name(codecParameters->codec_id));
+        codec = avcodec_find_decoder_by_name(codecName.c_str());
+        if (!codec) {
+            fmt::print(stderr, "MediaCodec decoder not available for {}\n",
+                       avcodec_get_name(codecParameters->codec_id));
+            return -1;
+        }
+#elif VN_OS(MACOS)
+        codec = avcodec_find_decoder(codecParameters->codec_id);
+        if (!codec) {
+            return -1;
+        }
+        m_hardwareDeviceType = AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
+#elif (VN_OS(LINUX) || VN_OS(WINDOWS)) && (VN_ARCH(X86) || VN_ARCH(X64))
+        const std::string codecName = fmt::format("{}_qsv", avcodec_get_name(codecParameters->codec_id));
+        codec = avcodec_find_decoder_by_name(codecName.c_str());
+        if (!codec) {
+            fmt::print(stderr, "QSV decoder not available for {}\n",
+                       avcodec_get_name(codecParameters->codec_id));
+            return -1;
+        }
+        m_hardwareDeviceType = AV_HWDEVICE_TYPE_QSV;
+#else
+        fmt::print(stderr, "Hardware base decoding is not supported on this platform\n");
+        return -1;
+#endif
+
+#if VN_OS(MACOS) || ((VN_OS(LINUX) || VN_OS(WINDOWS)) && (VN_ARCH(X86) || VN_ARCH(X64)))
+        const AVPixFmtDescriptor* inputFormat =
+            av_pix_fmt_desc_get(static_cast<AVPixelFormat>(codecParameters->format));
+        if (inputFormat && (inputFormat->comp[0].depth > 8 || inputFormat->log2_chroma_w != 1 ||
+                            inputFormat->log2_chroma_h != 1)) {
+            fmt::print(stderr,
+                       "Hardware base decoding currently supports only 8-bit 4:2:0 streams\n");
+            return -1;
+        }
+        m_softwarePixelFormat = AV_PIX_FMT_NV12;
+
+        for (int index = 0;; ++index) {
+            const AVCodecHWConfig* config = avcodec_get_hw_config(codec, index);
+            if (!config) {
+                fmt::print(stderr, "{} decoding is not available for {}\n",
+                           av_hwdevice_get_type_name(m_hardwareDeviceType),
+                           avcodec_get_name(codecParameters->codec_id));
+                return -1;
+            }
+            if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) != 0 &&
+                config->device_type == m_hardwareDeviceType) {
+                m_hardwarePixelFormat = config->pix_fmt;
+                break;
+            }
+        }
+#endif
+    } else {
+        codec = avcodec_find_decoder(codecParameters->codec_id);
+    }
     if (!codec) {
         return -1;
     }
-
     // Create the codec instance
     m_videoDecCtx = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(m_videoDecCtx, codecParameters);
-    if (int r = avcodec_open2(m_videoDecCtx, codec, nullptr); r < 0) {
-        return r;
+    AVDictionary* codecOptions = nullptr;
+#if VN_OS(ANDROID)
+    if (m_hardware) {
+        // The test harness is a native executable and has no Java VM, so use the NDK API directly.
+        av_dict_set(&codecOptions, "ndk_codec", "1", 0);
+    }
+#endif
+    if (m_hardwareDeviceType != AV_HWDEVICE_TYPE_NONE) {
+        m_videoDecCtx->opaque = this;
+        m_videoDecCtx->get_format = getHardwareFormat;
+        const char* deviceName = m_hardwareDeviceType == AV_HWDEVICE_TYPE_QSV ? "auto" : nullptr;
+        if (const int result = av_hwdevice_ctx_create(&m_hardwareDeviceContext,
+                                                      m_hardwareDeviceType, deviceName, nullptr, 0);
+            result < 0) {
+            fmt::print(stderr, "Could not create {} device: {}\n",
+                       av_hwdevice_get_type_name(m_hardwareDeviceType), libavError(result));
+            return result;
+        }
+        m_videoDecCtx->hw_device_ctx = av_buffer_ref(m_hardwareDeviceContext);
+    }
+    const int openResult = avcodec_open2(m_videoDecCtx, codec, &codecOptions);
+    av_dict_free(&codecOptions);
+    if (openResult < 0) {
+        fmt::print(stderr, "Could not open {} decoder: {}\n", codec->name, libavError(openResult));
+        return openResult;
     }
 
     // Create the parser
@@ -272,6 +390,7 @@ int BaseDecoderLibAV::openStream(AVMediaType type)
 #endif
 
     m_frame = av_frame_alloc();
+    m_softwareFrame = av_frame_alloc();
     m_demuxPacket = av_packet_alloc();
     m_videoPacket = av_packet_alloc();
     m_basePacket = av_packet_alloc();
@@ -289,7 +408,7 @@ int BaseDecoderLibAV::addFilter(std::string_view filter)
 
     const std::string args =
         fmt::format("width={}:height={}:pix_fmt={}:time_base=1/1:sar={}/{}", m_videoDecCtx->width,
-                    m_videoDecCtx->height, (int)m_videoDecCtx->pix_fmt,
+                    m_videoDecCtx->height, static_cast<int>(decodedPixelFormat()),
                     m_videoDecCtx->time_base.num ? m_videoDecCtx->time_base.num : 1,
                     m_videoDecCtx->time_base.den, m_videoDecCtx->sample_aspect_ratio.num,
                     m_videoDecCtx->sample_aspect_ratio.den);
@@ -350,6 +469,7 @@ void BaseDecoderLibAV::close()
     av_parser_close(m_parserCtx);
 
     av_frame_free(&m_frame);
+    av_frame_free(&m_softwareFrame);
     av_packet_free(&m_demuxPacket);
     av_packet_free(&m_videoPacket);
     av_packet_free(&m_basePacket);
@@ -360,6 +480,8 @@ void BaseDecoderLibAV::close()
 #endif
         avcodec_free_context(&m_videoDecCtx);
     }
+
+    av_buffer_unref(&m_hardwareDeviceContext);
 
     if (m_fmtCtx) {
         avformat_close_input(&m_fmtCtx);
@@ -432,8 +554,8 @@ void BaseDecoderLibAV::updateDescription()
         m_pictureDesc = lcevcPictureDesc(*m_videoDecCtx, m_bufferSinkCtx->inputs[0]);
         m_pixelFormat = static_cast<AVPixelFormat>(m_bufferSinkCtx->inputs[0]->format);
     } else {
-        m_pictureDesc = lcevcPictureDesc(*m_videoDecCtx, nullptr);
-        m_pixelFormat = m_videoDecCtx->pix_fmt;
+        m_pixelFormat = decodedPixelFormat();
+        m_pictureDesc = lcevcPictureDesc(*m_videoDecCtx, nullptr, m_pixelFormat);
     }
 
     m_pictureLayout = PictureLayout(m_pictureDesc);
@@ -522,12 +644,35 @@ bool BaseDecoderLibAV::update()
             }
             int32_t enhancementFound = 0;
 
-            // Extract enhanced data from AU, leaving enhancement NAL units in place
-            enhancementFound = LCEVC_extractEnhancementFromNAL(
-                m_videoPacket->data, m_videoPacket->size, m_nalFormat,
-                lcevcCodecType(m_videoDecCtx->codec_id), m_enhancement.data(),
-                static_cast<uint32_t>(m_enhancement.size()), &enhancementSize);
-            av_packet_ref(m_basePacket, m_videoPacket);
+            if (const int r = av_packet_ref(m_basePacket, m_videoPacket); r < 0) {
+                fmt::print(stderr, "Could not reference base packet: {}\n", libavError(r));
+                break;
+            }
+
+            // Extract enhanced data from the AU. Hardware decoders receive a stripped base packet
+            // because some implementations reject the reserved NAL units used to carry LCEVC data.
+            if (m_hardware) {
+                uint32_t strippedOffset = 0;
+                uint32_t strippedSize = 0;
+                if (const int r = av_packet_make_writable(m_basePacket); r < 0) {
+                    fmt::print(stderr, "Could not make base packet writable: {}\n", libavError(r));
+                    break;
+                }
+                enhancementFound = LCEVC_extractAndRemoveEnhancementFromNAL(
+                    m_basePacket->data, m_basePacket->size, m_nalFormat,
+                    lcevcCodecType(m_videoDecCtx->codec_id), m_enhancement.data(),
+                    static_cast<uint32_t>(m_enhancement.size()), &enhancementSize, &strippedOffset,
+                    &strippedSize);
+                if (enhancementFound >= 0) {
+                    m_basePacket->data += strippedOffset;
+                    m_basePacket->size = static_cast<int>(strippedSize);
+                }
+            } else {
+                enhancementFound = LCEVC_extractEnhancementFromNAL(
+                    m_videoPacket->data, m_videoPacket->size, m_nalFormat,
+                    lcevcCodecType(m_videoDecCtx->codec_id), m_enhancement.data(),
+                    static_cast<uint32_t>(m_enhancement.size()), &enhancementSize);
+            }
 
             if (enhancementFound < 0) {
                 fmt::print(stderr, "extract function failed, data {}, size {}\n",
@@ -584,6 +729,24 @@ bool BaseDecoderLibAV::update()
                 return true;
             } else {
                 // Got a picture from base decoder
+                if (m_hardwarePixelFormat != AV_PIX_FMT_NONE && m_frame->format == m_hardwarePixelFormat) {
+                    av_frame_unref(m_softwareFrame);
+                    if (const int transferResult = av_hwframe_transfer_data(m_softwareFrame, m_frame, 0);
+                        transferResult < 0) {
+                        fmt::print(stderr, "Could not transfer hardware frame: {}\n",
+                                   libavError(transferResult));
+                        break;
+                    }
+                    if (const int copyResult = av_frame_copy_props(m_softwareFrame, m_frame);
+                        copyResult < 0) {
+                        fmt::print(stderr, "Could not copy hardware frame properties: {}\n",
+                                   libavError(copyResult));
+                        break;
+                    }
+                    m_softwarePixelFormat = static_cast<AVPixelFormat>(m_softwareFrame->format);
+                    av_frame_unref(m_frame);
+                    av_frame_move_ref(m_frame, m_softwareFrame);
+                }
                 if (m_frame->pts == m_lastDiscontinuity) {
                     m_imageDiscontinuityCount++;
                 }
@@ -668,11 +831,13 @@ int64_t BaseDecoderLibAV::generateIncreasingPoc(int64_t decodedPoc, bool isIdr)
 // If baseFormat is not Unknown, then the decoded images will be converted to the given format
 //
 std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view input, std::string_view inputFormat,
-                                                    LCEVC_ColorFormat baseFormat, bool verbose, bool extract)
+                                                    LCEVC_ColorFormat baseFormat, bool verbose,
+                                                    bool extract, bool hardware)
 {
     auto decoder = std::make_unique<BaseDecoderLibAV>();
 
     decoder->m_extractEnhanced = extract;
+    decoder->m_hardware = hardware;
 
     if (static bool registered = false; !registered) {
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 10, 100)
@@ -807,7 +972,8 @@ namespace {
         }
     }
 
-    LCEVC_PictureDesc lcevcPictureDesc(const AVCodecContext& ctx, const AVFilterLink* filterLink)
+    LCEVC_PictureDesc lcevcPictureDesc(const AVCodecContext& ctx, const AVFilterLink* filterLink,
+                                       AVPixelFormat pixelFormat)
     {
         LCEVC_PictureDesc desc{};
 
@@ -822,7 +988,8 @@ namespace {
             // Get picture format from codec context
             desc.width = ctx.width;
             desc.height = ctx.height;
-            desc.colorFormat = lcevcColorFormat(ctx.pix_fmt);
+            desc.colorFormat =
+                lcevcColorFormat(pixelFormat == AV_PIX_FMT_NONE ? ctx.pix_fmt : pixelFormat);
             desc.sampleAspectRatioNum = ctx.sample_aspect_ratio.num;
             desc.sampleAspectRatioDen = ctx.sample_aspect_ratio.den;
         }

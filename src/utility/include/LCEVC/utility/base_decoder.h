@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -119,13 +119,15 @@ public:
  * @param[in]       baseFormat      Optional output format for decoded base images.
  * @param[in]       verbose         Set the libav log level to verbose..
  * @param[in]       extract         Extract the LVEVC data from NAL Units,
+ * @param[in]       hardware        Use platform hardware decoding (MediaCodec on Android,
+ *                                  VideoToolbox on macOS, or QSV on Intel Linux/Windows).
  *
  * @return                          Unique pointer to a new base Decoder, or nullptr if failed.
  */
-std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view source,
-                                                    std::string_view sourceFormat = std::string_view(),
-                                                    LCEVC_ColorFormat baseFormat = LCEVC_ColorFormat_Unknown,
-                                                    bool verbose = false, bool extract = true);
+std::unique_ptr<BaseDecoder>
+createBaseDecoderLibAV(std::string_view source, std::string_view sourceFormat = std::string_view(),
+                       LCEVC_ColorFormat baseFormat = LCEVC_ColorFormat_Unknown,
+                       bool verbose = false, bool extract = true, bool hardware = false);
 
 /*!
  * \brief Create a base video stream decoder that reads LCEVC bin files and raw base frames in

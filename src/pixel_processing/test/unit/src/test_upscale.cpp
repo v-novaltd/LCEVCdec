@@ -304,7 +304,9 @@ TEST(UpscaleTest, SIMDConvolutionSaturatesBeforeNarrowing)
         const UpscaleFunction scalarFunction =
             upscaleGetFunctionScalar(LdpFPS8, LdpFPS8, ILNone, is2D, false, false);
         UpscaleFunction simdFunction = nullptr;
-        if (ldcAccelerationGet()->hasNeon) {
+        if (ldcAccelerationGet()->hasAVX2) {
+            simdFunction = upscaleGetFunctionAVX(LdpFPS8, LdpFPS8, ILNone, is2D, false, false);
+        } else if (ldcAccelerationGet()->hasNeon) {
             simdFunction = upscaleGetFunctionNEON(LdpFPS8, LdpFPS8, ILNone, is2D, false, false);
         } else if (ldcAccelerationGet()->hasSSE) {
             simdFunction = upscaleGetFunctionSSE(LdpFPS8, LdpFPS8, ILNone, is2D, false, false);
@@ -329,3 +331,133 @@ TEST(UpscaleTest, SIMDConvolutionSaturatesBeforeNarrowing)
 }
 
 INSTANTIATE_TEST_SUITE_P(UpscaleTests, UpscaleTest, testing::ValuesIn(kUpscaleTestParams), testNames);
+
+TEST(UpscaleTest, SIMDMatchesScalarForUnsignedFormats)
+{
+    constexpr uint32_t width = 32;
+    constexpr uint32_t height = 8;
+    constexpr uint16_t kernel[4] = {static_cast<uint16_t>(-1382), 14285, 3942,
+                                    static_cast<uint16_t>(-461)};
+
+    ldcAccelerationInitialize(true);
+
+    for (const LdpFixedPoint fp : {LdpFPU8, LdpFPU10, LdpFPU12, LdpFPU14}) {
+        const bool isU8 = fp == LdpFPU8;
+        const uint32_t bytesPerSample = isU8 ? 1 : 2;
+        const uint16_t maximum = fp == LdpFPU10 ? 1023 : fp == LdpFPU12 ? 4095 : 16383;
+
+        for (const bool is2D : {false, true}) {
+            for (const bool applyPA : {false, true}) {
+                const UpscaleFunction scalar =
+                    upscaleGetFunctionScalar(fp, fp, ILNone, is2D, applyPA, false);
+                UpscaleFunction simd = nullptr;
+                if (ldcAccelerationGet()->hasAVX2) {
+                    simd = upscaleGetFunctionAVX(fp, fp, ILNone, is2D, applyPA, false);
+                }
+                if (!simd) {
+                    simd = upscaleGetFunctionSSE(fp, fp, ILNone, is2D, applyPA, false);
+                }
+                if (!simd) {
+                    simd = upscaleGetFunctionNEON(fp, fp, ILNone, is2D, applyPA, false);
+                }
+                ASSERT_NE(scalar, nullptr);
+                if (!simd) {
+                    GTEST_SKIP() << "No SIMD upscaler available";
+                }
+
+                const uint32_t dstWidth = width * 2;
+                const uint32_t dstHeight = is2D ? height * 2 : height;
+                std::vector<uint8_t> src(width * height * bytesPerSample);
+                std::vector<uint8_t> scalarDst(dstWidth * dstHeight * bytesPerSample);
+                std::vector<uint8_t> simdDst(dstWidth * dstHeight * bytesPerSample);
+
+                if (isU8) {
+                    for (uint32_t y = 0; y < height; ++y) {
+                        for (uint32_t x = 0; x < width; ++x) {
+                            src[(y * width) + x] = static_cast<uint8_t>(32 + ((x * 17 + y * 11) % 192));
+                        }
+                    }
+                } else {
+                    uint16_t* samples = reinterpret_cast<uint16_t*>(src.data());
+                    for (uint32_t y = 0; y < height; ++y) {
+                        for (uint32_t x = 0; x < width; ++x) {
+                            samples[(y * width) + x] = static_cast<uint16_t>((x * 37 + y * 23) & maximum);
+                        }
+                    }
+                }
+
+                LdppUpscaleParams params = {};
+                std::copy(std::begin(kernel), std::end(kernel), params.kernel);
+                params.applyPA = applyPA;
+                params.shift = fp == LdpFPU8 ? 7 : fp == LdpFPU10 ? 5 : fp == LdpFPU12 ? 3 : 1;
+                params.offset = fp == LdpFPU8 ? 64 : fp == LdpFPU10 ? 16 : fp == LdpFPU12 ? 4 : 1;
+                params.midpoint = fp == LdpFPU8    ? 128
+                                  : fp == LdpFPU10 ? 512
+                                  : fp == LdpFPU12 ? 2048
+                                                   : 8192;
+
+                scalar(src.data(), scalarDst.data(), width * bytesPerSample,
+                       dstWidth * bytesPerSample, width, height, 0, height, params, nullptr);
+                simd(src.data(), simdDst.data(), width * bytesPerSample, dstWidth * bytesPerSample,
+                     width, height, 0, height, params, nullptr);
+
+                EXPECT_EQ(scalarDst, simdDst)
+                    << "fp=" << static_cast<int>(fp) << " is2D=" << is2D << " applyPA=" << applyPA;
+            }
+        }
+    }
+}
+
+TEST(UpscaleTest, SIMDMatchesScalarForNV12)
+{
+    ldcAccelerationInitialize(true);
+
+    constexpr uint32_t width = 32;
+    constexpr uint32_t height = 8;
+    constexpr uint16_t kernel[4] = {static_cast<uint16_t>(-1382), 14285, 3942,
+                                    static_cast<uint16_t>(-461)};
+
+    std::vector<uint8_t> src(width * height);
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; x += 2) {
+            src[(y * width) + x] = static_cast<uint8_t>(32 + ((x * 13 + y * 7) % 192));
+            src[(y * width) + x + 1] = static_cast<uint8_t>(48 + ((x * 5 + y * 19) % 160));
+        }
+    }
+
+    for (const bool is2D : {false, true}) {
+        for (const bool applyPA : {false, true}) {
+            const UpscaleFunction scalar =
+                upscaleGetFunctionScalar(LdpFPU8, LdpFPU8, ILNV12, is2D, applyPA, false);
+            UpscaleFunction simd = nullptr;
+            if (ldcAccelerationGet()->hasAVX2) {
+                simd = upscaleGetFunctionAVX(LdpFPU8, LdpFPU8, ILNV12, is2D, applyPA, false);
+            }
+            if (!simd) {
+                simd = upscaleGetFunctionSSE(LdpFPU8, LdpFPU8, ILNV12, is2D, applyPA, false);
+            }
+            if (!simd) {
+                simd = upscaleGetFunctionNEON(LdpFPU8, LdpFPU8, ILNV12, is2D, applyPA, false);
+            }
+            ASSERT_NE(scalar, nullptr);
+            if (!simd) {
+                GTEST_SKIP() << "No SIMD upscaler available";
+            }
+
+            const uint32_t dstHeight = is2D ? height * 2 : height;
+            std::vector<uint8_t> scalarDst(width * 2 * dstHeight);
+            std::vector<uint8_t> simdDst(width * 2 * dstHeight);
+            LdppUpscaleParams params = {};
+            std::copy(std::begin(kernel), std::end(kernel), params.kernel);
+            params.applyPA = applyPA;
+            params.shift = 7;
+            params.offset = 64;
+            params.midpoint = 128;
+
+            scalar(src.data(), scalarDst.data(), width, width * 2, width, height, 0, height, params, nullptr);
+            simd(src.data(), simdDst.data(), width, width * 2, width, height, 0, height, params, nullptr);
+
+            EXPECT_EQ(scalarDst, simdDst) << "is2D=" << is2D << " applyPA=" << applyPA;
+        }
+    }
+}

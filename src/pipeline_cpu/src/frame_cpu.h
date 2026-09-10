@@ -50,6 +50,8 @@ public:
 
     bool needsGPUCommandBuffers() const override { return false; };
 
+    LdcReturnCode decodeResult() const override { return LdcReturnCodeSuccess; }
+
     VNNoCopyNoMove(FrameCPU);
 
 private:

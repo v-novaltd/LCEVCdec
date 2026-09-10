@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2024-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2024-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -12,6 +12,9 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+#include <LCEVC/build_config.h>
+#include <LCEVC/common/acceleration.h>
+#include <LCEVC/common/common_configuration.h>
 #include <LCEVC/common/configure.hpp>
 #include <LCEVC/common/configure_members.hpp>
 //
@@ -185,4 +188,35 @@ TEST_F(ConfigFixture, SetStringArray)
     for (size_t i = 0; i < arr.size(); ++i) {
         EXPECT_EQ(arr[i], config.configVecString[i]);
     }
+}
+
+TEST(CommonConfiguration, DisableAVX)
+{
+    Configurable* configurable = getCommonConfiguration();
+    ASSERT_TRUE(configurable->configure("disable_simd", false));
+    ASSERT_TRUE(configurable->configure("disable_avx", false));
+
+#if !VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
+    const LdcAcceleration detected = *ldcAccelerationGet();
+
+    ASSERT_TRUE(configurable->configure("disable_avx", true));
+    const LdcAcceleration avxDisabled = *ldcAccelerationGet();
+    EXPECT_EQ(avxDisabled.hasSSE, detected.hasSSE);
+    EXPECT_FALSE(avxDisabled.hasAVX2);
+    EXPECT_EQ(avxDisabled.hasNeon, detected.hasNeon);
+    EXPECT_EQ(avxDisabled.hasSIMD, avxDisabled.hasSSE || avxDisabled.hasNeon);
+
+    ASSERT_TRUE(configurable->configure("disable_simd", true));
+    EXPECT_FALSE(ldcAccelerationGet()->hasSIMD);
+
+    ASSERT_TRUE(configurable->configure("disable_simd", false));
+    EXPECT_FALSE(ldcAccelerationGet()->hasAVX2);
+
+    ASSERT_TRUE(configurable->configure("disable_avx", false));
+    const LdcAcceleration restored = *ldcAccelerationGet();
+    EXPECT_EQ(restored.hasSSE, detected.hasSSE);
+    EXPECT_EQ(restored.hasAVX2, detected.hasAVX2);
+    EXPECT_EQ(restored.hasNeon, detected.hasNeon);
+    EXPECT_EQ(restored.hasSIMD, detected.hasSIMD);
+#endif
 }

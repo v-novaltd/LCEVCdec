@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2025-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -26,6 +26,15 @@ target_link_libraries(
     lcevc_dec_pipeline_cpu
     PUBLIC lcevc_dec::platform lcevc_dec::compiler lcevc_dec::pipeline
     PRIVATE lcevc_dec::common lcevc_dec::enhancement lcevc_dec::pixel_processing)
+
+if (ANDROID)
+    # ANativeWindow surface rendering
+    target_link_libraries(lcevc_dec_pipeline_cpu PRIVATE android)
+    # Make NDK symbols newer than the target API weak imports (e.g. AHardwareBuffer_lockPlanes, API
+    # 29) - call sites gate on the device API level.
+    target_compile_definitions(lcevc_dec_pipeline_cpu
+                               PRIVATE __ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__)
+endif ()
 
 add_library(lcevc_dec::pipeline_cpu ALIAS lcevc_dec_pipeline_cpu)
 

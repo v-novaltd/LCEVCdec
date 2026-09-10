@@ -52,6 +52,11 @@ public class LcevcNativeAdapter {
   public static final int LCEVC_NALSyntaxH265 = 2;
   public static final int LCEVC_NALSyntaxH266 = 3;
 
+  // Decoder pipeline names, passed to the native decoder before initialization.
+  public static final String LCEVC_PipelineAuto = "auto";
+  public static final String LCEVC_PipelineCpu = "cpu";
+  public static final String LCEVC_PipelineVulkan = "vulkan";
+
   // Image color format, shall match LCEVC_ColorFormat
   public static final int LCEVC_ColorFormat_Unknown = 0;
   public static final int LCEVC_I420_8 = 1001;
@@ -332,7 +337,18 @@ public class LcevcNativeAdapter {
    */
 
   /* 15-255, Reserved For future use by ITU-T | ISO/IEC */
-  public native long lcevcCreateDecoder();
+  /** Creates and initializes a decoder using automatic pipeline selection. */
+  public long lcevcCreateDecoder() {
+    return lcevcCreateDecoder(null);
+  }
+
+  /**
+   * Creates and initializes a decoder using the requested pipeline.
+   *
+   * @param pipeline {@link #LCEVC_PipelineAuto}, {@link #LCEVC_PipelineCpu}, or {@link
+   *     #LCEVC_PipelineVulkan}. A null value selects {@link #LCEVC_PipelineAuto}.
+   */
+  public native long lcevcCreateDecoder(String pipeline);
 
   public native int lcevcDestroyDecoder(long instance);
 

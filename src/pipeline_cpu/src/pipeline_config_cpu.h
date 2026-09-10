@@ -30,6 +30,9 @@ struct PipelineConfigCPU : public pipeline::PipelineConfigBase
 {
     // Directly use system allocator (malloc/free) for pipeline allocations
     bool useSystemAllocator = false;
+
+    // Output pictures will be rendered to a window via renderSendPicture()
+    bool willRender = false;
 };
 
 } // namespace lcevc_dec::pipeline_cpu

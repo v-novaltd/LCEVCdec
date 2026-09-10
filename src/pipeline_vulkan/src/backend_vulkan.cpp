@@ -27,7 +27,7 @@
 #define VMA_STATS_STRING_ENABLED 0
 #endif
 
-// The VulkanMemeoryAllocator implementation collides with some of the more paranoid GCC warnings.
+// The VulkanMemoryAllocator implementation collides with some of the more paranoid GCC warnings.
 //
 #if !VN_COMPILER(MSVC)
 #pragma GCC diagnostic push
@@ -63,7 +63,7 @@ BackendVulkan::BackendVulkan(bool renderingEnabled, int32_t deviceOverride,
 
 void BackendVulkan::destroy()
 {
-    vkDeviceWaitIdle(m_device);
+    waitDeviceIdle();
     m_compute.destroy();
     if (m_renderingEnabled) {
         m_render.destroy();
@@ -73,13 +73,41 @@ void BackendVulkan::destroy()
     vmaDestroyAllocator(m_allocator);
 
     // this needs to defer until dec is finished with all vulkan buffers
-    vkDestroyDevice(m_device, nullptr);
+    {
+        common::ScopedLock lock(m_queueMutex);
+        vkDestroyDevice(m_device, nullptr);
+    }
 
     if (m_enableValidationLayers) {
         DestroyDebugUtilsMessengerEXT(m_instance, m_debugMessenger, nullptr);
     }
 
     vkDestroyInstance(m_instance, nullptr);
+}
+
+VkResult BackendVulkan::submitQueue(VkQueue queue, uint32_t submitCount,
+                                    const VkSubmitInfo* submits, VkFence fence)
+{
+    common::ScopedLock lock(m_queueMutex);
+    return vkQueueSubmit(queue, submitCount, submits, fence);
+}
+
+VkResult BackendVulkan::presentQueue(VkQueue queue, const VkPresentInfoKHR* presentInfo)
+{
+    common::ScopedLock lock(m_queueMutex);
+    return vkQueuePresentKHR(queue, presentInfo);
+}
+
+VkResult BackendVulkan::waitQueueIdle(VkQueue queue)
+{
+    common::ScopedLock lock(m_queueMutex);
+    return vkQueueWaitIdle(queue);
+}
+
+VkResult BackendVulkan::waitDeviceIdle()
+{
+    common::ScopedLock lock(m_queueMutex);
+    return vkDeviceWaitIdle(m_device);
 }
 VKAPI_ATTR VkBool32 VKAPI_CALL BackendVulkan::debugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT,
@@ -255,7 +283,7 @@ bool BackendVulkan::checkDeviceExtensionSupport(VkPhysicalDevice device) const
     std::set<std::string, std::less<>> requiredDeviceExtensions(rde.begin(), rde.end());
 
     VNLogInfo("Required %d device extensions:", requiredDeviceExtensions.size());
-    for (const auto& e : requiredDeviceExtensions) {
+    for ([[maybe_unused]] const auto& e : requiredDeviceExtensions) {
         VNLogInfoF(" - %s", e.c_str());
     }
 
@@ -265,7 +293,7 @@ bool BackendVulkan::checkDeviceExtensionSupport(VkPhysicalDevice device) const
 
     if (!requiredDeviceExtensions.empty()) {
         VNLogError("Missing %d device extensions:", requiredDeviceExtensions.size());
-        for (const auto& e : requiredDeviceExtensions) {
+        for ([[maybe_unused]] const auto& e : requiredDeviceExtensions) {
             VNLogErrorF("  - %s", e.c_str());
         }
     }
@@ -510,7 +538,7 @@ bool BackendVulkan::createLogicalDeviceAndQueues()
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
     deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
 
-    // Device entensions - add VK_EXT_queue_family_foreign if available
+    // Device extensions - add VK_EXT_queue_family_foreign if available
     auto deviceExtensions = getRequiredDeviceExtensions();
     if (checkDeviceExtension(m_physicalDevice, "VK_EXT_queue_family_foreign")) {
         deviceExtensions.push_back("VK_EXT_queue_family_foreign");
@@ -576,21 +604,23 @@ bool BackendVulkan::finalisePresentQueueAfterSurface()
     return true;
 }
 
-uint32_t BackendVulkan::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
+bool BackendVulkan::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties,
+                                   uint32_t& memoryTypeIndex)
 {
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
     for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
         if ((typeFilter & (1 << i)) &&
             (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            return i;
+            memoryTypeIndex = i;
+            return true;
         }
     }
     VNLogError("failed to find suitable memory type!");
-    return 0;
+    return false;
 }
 
-bool BackendVulkan::initRemaningRender()
+bool BackendVulkan::initRemainingRender()
 {
     // debug - window created here now we can continue render setup
     if (m_renderingEnabled) {

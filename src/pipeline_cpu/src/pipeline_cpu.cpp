@@ -16,6 +16,7 @@
 //
 #include "frame_cpu.h"
 #include "from_base.h"
+#include "hardware_buffer_cpu.h"
 
 #include <LCEVC/common/log.h>
 
@@ -143,8 +144,44 @@ void PipelineCPU::releasePicture(pipeline::PictureBase* picture)
 
     m_allocatedPictures.removeReorderIndex(idx);
 
+    if (picture->isExternalBuffer() && picture->buffer != nullptr) {
+        // The only external BufferBase attached by this pipeline is the
+        // AHardwareBuffer wrapper from storeAccelBuffer() - unlock and free it.
+        bufferAHardwareDestroy(m_allocator, static_cast<BufferAHardware*>(
+                                                static_cast<pipeline::BufferBase*>(picture->buffer)));
+        picture->setExternalBuffer(nullptr);
+    }
+
     picture->unbindBuffer();
     m_picturesPool.destroy(fromBase(picture));
+}
+
+LdcReturnCode PipelineCPU::storeAccelBuffer(pipeline::PictureBase* picture,
+                                            const LdpPictureDesc& desc, LdpAccelBuffer* accelBuffer)
+{
+#if VN_OS(ANDROID)
+    // accelBuffer is an AHardwareBuffer* that was cast into LCEVC_AccelBufferHandle by the caller.
+    auto* hardwareBuffer =
+        reinterpret_cast<AHardwareBuffer*>(accelBuffer); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+
+    LdpPicturePlaneDesc planes[kLdpPictureMaxNumPlanes] = {};
+    BufferAHardware* buffer = bufferAHardwareCreate(m_allocator, hardwareBuffer, desc, planes);
+    if (buffer == nullptr) {
+        return LdcReturnCodeNotSupported;
+    }
+
+    // Attach the wrapper as an externally-owned buffer (so no pipeline buffer
+    // is bound) and point the picture's planes into the locked memory.
+    picture->setExternalBuffer(buffer);
+    picture->setExternalPlaneDesc(planes);
+    return LdcReturnCodeSuccess;
+#else
+    VNUnused(picture);
+    VNUnused(desc);
+    VNUnused(accelBuffer);
+    VNLogVerbose("storeAccelBuffer: AHardwareBuffer support requires Android");
+    return LdcReturnCodeNotSupported;
+#endif
 }
 
 // Frames
@@ -205,6 +242,25 @@ void PipelineCPU::freeFrame(pipeline::FrameBase* frame)
 
 //// Temporal
 //
+// Render
+//
+LdcReturnCode PipelineCPU::renderSendPicture(uint64_t timestamp, LdpPicture* outputPicture,
+                                             const LdpRenderSendInformation* renderSendInformation,
+                                             uint64_t delayUs)
+{
+    VNUnused(timestamp);
+    VNUnused(renderSendInformation);
+
+    if (outputPicture == nullptr) {
+        return LdcReturnCodeInvalidParam;
+    }
+    if (delayUs > 0) {
+        VNLogWarning("renderSendPicture delayUs is not implemented yet, rendering with zero delay");
+    }
+
+    return m_render.sendPicture(static_cast<pipeline::PictureBase*>(outputPicture));
+}
+
 TemporalBufferCPU* PipelineCPU::getTemporalBuffer(uint32_t n)
 {
     if (n >= m_temporalBuffers.size()) {

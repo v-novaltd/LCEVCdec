@@ -28,15 +28,35 @@ list(
     "src/dither.c"
     "src/fp_types.c"
     "src/upscale.c"
-    "src/upscale_sse.c"
+    "src/upscale_avx.c"
     "src/upscale_neon.c"
     "src/sharpen.c"
     "src/sharpen_neon.c"
     "src/sharpen_sse.c")
 
+if (VN_SDK_SIMD AND TARGET_ARCH MATCHES "^x86")
+    if (MSVC)
+        set_source_files_properties("src/upscale_avx.c" PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
+    else ()
+        set(SSE_SOURCES "src/add_sse.c" "src/apply_cmdbuffer_sse.c" "src/convert_sse.c"
+                        "src/sharpen_sse.c")
+        if (NOT VN_SDK_MINIMUM_LIB_SIZE)
+            list(APPEND SSE_SOURCES "src/upscale_sse.c")
+        endif ()
+        set_source_files_properties(${SSE_SOURCES} PROPERTIES COMPILE_OPTIONS "-msse4.1")
+        set_source_files_properties("src/upscale_avx.c" PROPERTIES COMPILE_OPTIONS "-mavx2")
+    endif ()
+endif ()
+
 if (NOT VN_SDK_MINIMUM_LIB_SIZE)
-    list(APPEND SOURCES "src/add_scalar.c" "src/apply_cmdbuffer_scalar.c" "src/upscale_scalar.c"
-         "src/sharpen_scalar.c")
+    list(
+        APPEND
+        SOURCES
+        "src/add_scalar.c"
+        "src/apply_cmdbuffer_scalar.c"
+        "src/upscale_scalar.c"
+        "src/upscale_sse.c"
+        "src/sharpen_scalar.c")
 endif ()
 
 list(

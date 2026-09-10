@@ -12,7 +12,7 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-// Specialisation ID's shared between shadets and pipeline build
+// Specialisation ID's shared between shaders and pipeline build
 //
 #define SPECID_LOCAL_SIZE_X 0
 #define SPECID_LOCAL_SIZE_Y 1

@@ -21,7 +21,7 @@ static LdcAcceleration defaultAcceleration = {0};
 static const LdcAcceleration* currentAcceleration = &defaultAcceleration;
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
-#if (VN_SDK_FEATURE(SSE) || VN_SDK_FEATURE(AVX2)) && !VN_ARCH(WASM)
+#if (VN_SDK_FEATURE(SSE) || (VN_SDK_FEATURE(SIMD) && (VN_ARCH(X86) || VN_ARCH(X64)))) && !VN_ARCH(WASM)
 #include <stdint.h>
 #if !VN_COMPILER(MSVC)
 #include <cpuid.h>
@@ -58,12 +58,12 @@ static bool detectSSE(void)
     }
     loadCPUInfo(cpuInfo, 1);
 
-    static const int32_t kSSEFlag = 1 << 20;
-    return (cpuInfo[2] & kSSEFlag) == kSSEFlag;
+    static const int32_t kSSE41Flag = 1 << 19;
+    return (cpuInfo[2] & kSSE41Flag) == kSSE41Flag;
 }
 #endif
 
-#if VN_SDK_FEATURE(AVX2)
+#if VN_SDK_FEATURE(SIMD) && (VN_ARCH(X86) || VN_ARCH(X64))
 /*! \brief Returns true if AVX2 is detected at runtime. */
 static bool detectAVX2(void)
 {
@@ -118,7 +118,7 @@ void ldcAccelerationInitialize(bool enable)
 #if VN_SDK_FEATURE(SSE)
         defaultAcceleration.hasSSE = detectSSE();
 #endif
-#if VN_SDK_FEATURE(AVX2)
+#if VN_SDK_FEATURE(SIMD) && (VN_ARCH(X86) || VN_ARCH(X64))
         defaultAcceleration.hasAVX2 = detectAVX2();
 #endif
 #if VN_SDK_FEATURE(NEON)

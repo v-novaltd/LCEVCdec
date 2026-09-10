@@ -26,6 +26,7 @@ using namespace common;
 //
 static const ConfigMemberMap<PipelineConfigCPU> kConfigMemberMap = {
     {"use_system_allocator", makeBinding(&PipelineConfigCPU::useSystemAllocator)},
+    {"will_render", makeBinding(&PipelineConfigCPU::willRender)},
 };
 
 PipelineBuilderCPU::PipelineBuilderCPU(LdcMemoryAllocator* allocator)

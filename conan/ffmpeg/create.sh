@@ -12,14 +12,14 @@ if [[ "${profile}" == "" ]]; then
   profile=default
 fi
 
-ffmpeg_version=8.0
+ffmpeg_version=9.0
 
 case $choice in
     1)
         conan create conan/ffmpeg/conanfile.py ffmpeg/${ffmpeg_version}@ --profile:host ${profile} --profile:build=default --build=missing -o shared=True -o with_asm=False -o with_zlib=False -o with_bzip2=False -o with_lzma=False -o with_libiconv=False -o with_freetype=False -o with_openjpeg=False -o with_openh264=False -o with_opus=False -o with_vorbis=False -o with_zeromq=False -o with_sdl=False -o with_libx264=False -o with_libx265=False -o with_libvpx=False -o with_libmp3lame=False -o with_libfdk_aac=False -o with_libwebp=False -o with_ssl=False -o with_programs=False -o with_libalsa=False -o with_pulse=False -o with_vaapi=False -o with_vdpau=False -o with_vulkan=False -o with_xcb=False
         ;;
     2)
-        conan create conan/ffmpeg/conanfile.py ffmpeg/${ffmpeg_version}@ --profile:host ${profile} --profile:build=default --build=missing -o shared=True -o with_asm=False -o with_zlib=False -o with_bzip2=False -o with_lzma=False -o with_libiconv=False -o with_freetype=False -o with_openjpeg=False -o with_openh264=False -o with_opus=False -o with_vorbis=False -o with_zeromq=False -o with_sdl=False -o with_libx264=False -o with_libx265=False -o with_libvpx=False -o with_libmp3lame=False -o with_libfdk_aac=False -o with_libwebp=False -o with_ssl=False -o with_programs=False -o with_coreimage=False -o with_audiotoolbox=False -o with_videotoolbox=False
+        conan create conan/ffmpeg/conanfile.py ffmpeg/${ffmpeg_version}@ --profile:host ${profile} --profile:build=default --build=missing -o shared=True -o with_asm=False -o with_zlib=False -o with_bzip2=False -o with_lzma=False -o with_libiconv=False -o with_freetype=False -o with_openjpeg=False -o with_openh264=False -o with_opus=False -o with_vorbis=False -o with_zeromq=False -o with_sdl=False -o with_libx264=False -o with_libx265=False -o with_libvpx=False -o with_libmp3lame=False -o with_libfdk_aac=False -o with_libwebp=False -o with_ssl=False -o with_programs=False -o with_coreimage=False -o with_audiotoolbox=False -o with_metal=False -o with_videotoolbox=True
         ;;
     3)
         conan create conan/ffmpeg/conanfile.py ffmpeg/${ffmpeg_version}@ --profile:host ${profile} --profile:build=default --build=missing -o shared=True -o with_asm=False -o with_zlib=False -o with_bzip2=False -o with_lzma=False -o with_libiconv=False -o with_freetype=False -o with_openjpeg=False -o with_openh264=False -o with_opus=False -o with_vorbis=False -o with_zeromq=False -o with_sdl=False -o with_libx264=False -o with_libx265=False -o with_libvpx=False -o with_libmp3lame=False -o with_libfdk_aac=False -o with_libwebp=False -o with_ssl=False -o with_programs=False

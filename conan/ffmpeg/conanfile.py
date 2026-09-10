@@ -69,6 +69,10 @@ class FFMpegConan(ConanFile):
         "with_coreimage": [True, False],
         "with_audiotoolbox": [True, False],
         "with_videotoolbox": [True, False],
+        "with_metal": [True, False],
+        "with_libvpl": [True, False],
+        "with_jni": [True, False],
+        "with_mediacodec": [True, False],
         "with_programs": [True, False],
         "disable_everything": [True, False],
         "disable_all_encoders": [True, False],
@@ -146,6 +150,10 @@ class FFMpegConan(ConanFile):
         "with_coreimage": True,
         "with_audiotoolbox": True,
         "with_videotoolbox": True,
+        "with_metal": False,
+        "with_libvpl": False,
+        "with_jni": False,
+        "with_mediacodec": False,
         "with_programs": True,
         "disable_everything": False,
         "disable_all_encoders": False,
@@ -216,6 +224,8 @@ class FFMpegConan(ConanFile):
             "with_libmp3lame": ["avcodec"],
             "with_libfdk_aac": ["avcodec"],
             "with_libwebp": ["avcodec"],
+            "with_libvpl": ["avcodec"],
+            "with_metal": ["avfilter"],
             "with_freetype": ["avfilter"],
             "with_zeromq": ["avfilter", "avformat"],
             "with_libalsa": ["avdevice"],
@@ -251,6 +261,10 @@ class FFMpegConan(ConanFile):
             del self.options.with_coreimage
             del self.options.with_audiotoolbox
             del self.options.with_videotoolbox
+        if not is_apple_os(self):
+            del self.options.with_metal
+        if self.settings.os not in ["Linux", "Windows"] or self.settings.arch not in ["x86", "x86_64"]:
+            del self.options.with_libvpl
         if not is_apple_os(self):
             del self.options.with_avfoundation
         if not self._version_supports_vulkan:
@@ -299,6 +313,8 @@ class FFMpegConan(ConanFile):
             self.requires("libfdk_aac/2.0.2")
         if self.options.with_libwebp:
             self.requires("libwebp/1.3.0")
+        if self.options.get_safe("with_libvpl"):
+            self.requires("libvpl/2.17.0")
         if self.options.with_ssl == "openssl":
             self.requires("openssl/1.1.1t")
         if self.options.get_safe("with_libalsa"):
@@ -318,6 +334,18 @@ class FFMpegConan(ConanFile):
         if self.options.with_ssl == "securetransport" and not is_apple_os(self):
             raise ConanInvalidConfiguration(
                 "securetransport is only available on Apple")
+
+        if self.options.with_mediacodec and self.settings.os != "Android":
+            raise ConanInvalidConfiguration(
+                "MediaCodec is only available on Android")
+
+        if self.options.with_mediacodec and not self.options.with_jni:
+            raise ConanInvalidConfiguration(
+                "MediaCodec requires JNI support")
+
+        if self.options.get_safe("with_libvpl") and self.settings.os not in ["Linux", "Windows"]:
+            raise ConanInvalidConfiguration(
+                "Intel oneVPL is supported only on Linux and Windows")
 
         for dependency, features in self._dependencies.items():
             if not self.options.get_safe(dependency):
@@ -462,6 +490,10 @@ class FFMpegConan(ConanFile):
                 "audiotoolbox", self.options.get_safe("with_audiotoolbox")),
             opt_enable_disable(
                 "videotoolbox", self.options.get_safe("with_videotoolbox")),
+            opt_enable_disable("metal", self.options.get_safe("with_metal")),
+            opt_enable_disable("libvpl", self.options.get_safe("with_libvpl")),
+            opt_enable_disable("jni", self.options.with_jni),
+            opt_enable_disable("mediacodec", self.options.with_mediacodec),
             opt_enable_disable("securetransport",
                                self.options.with_ssl == "securetransport"),
             "--disable-cuda",  # FIXME: CUDA support
@@ -883,6 +915,9 @@ class FFMpegConan(ConanFile):
             if self.options.with_libwebp:
                 self.cpp_info.components["avcodec"].requires.append(
                     "libwebp::libwebp")
+            if self.options.get_safe("with_libvpl"):
+                self.cpp_info.components["avcodec"].requires.append(
+                    "libvpl::libvpl")
             if self.options.get_safe("with_audiotoolbox"):
                 self.cpp_info.components["avcodec"].frameworks.append(
                     "AudioToolbox")
@@ -917,7 +952,8 @@ class FFMpegConan(ConanFile):
             if self.options.get_safe("with_coreimage"):
                 self.cpp_info.components["avfilter"].frameworks.append(
                     "CoreImage")
-            if Version(self.version) >= "5.0" and is_apple_os(self):
+            if (Version(self.version) >= "5.0" and is_apple_os(self) and
+                    self.options.get_safe("with_metal")):
                 self.cpp_info.components["avfilter"].frameworks.append("Metal")
 
         if self.options.get_safe("with_vaapi"):

@@ -114,8 +114,12 @@ bool BufferVulkanAhbImage::importAsImage(const AHardwareBuffer_Desc& desc,
     dedicatedInfo.image = m_image;
     dedicatedInfo.pNext = &importInfo;
 
-    const uint32_t memoryTypeIndex =
-        m_backend.findMemoryType(ahbProps.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    uint32_t memoryTypeIndex{};
+    if (!m_backend.findMemoryType(ahbProps.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                  memoryTypeIndex)) {
+        VNLogError("BufferVulkanAhbImage: no suitable memory type");
+        return false;
+    }
 
     VkMemoryAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;

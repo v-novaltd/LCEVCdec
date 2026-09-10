@@ -124,7 +124,7 @@ int ldcDiagnosticFormatJson(char* dstStart, uint32_t dstSize, const LdcDiagSite*
 {
     VNUnused(valuesCount);
     static const char* valueName[] = {"value"};
-    static const char* memoryNames[] = {"size", "address", "prevAdress"};
+    static const char* memoryNames[] = {"size", "address", "prevAddress"};
 
     // Optional things that can go into final record
     const char* phase = NULL;

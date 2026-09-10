@@ -158,6 +158,7 @@ class ADBRunner(Runner):
         self.run_adb(['shell', f'chmod +x {self.BUILD_DIR}/*'])
 
     def run(self, **kwargs):
+        self._set_android_threads()
         ret = self.run_adb(['shell', f'cd {self.workdir} '
                             f'&& export LD_LIBRARY_PATH={self.BUILD_DIR}/lib/:{self.BUILD_DIR}/bin/:{self.BUILD_DIR}/:{self.BUILD_DIR}/3rdparty/FFmpeg '
                             f'&& {" ".join(self.get_command_line(as_string=False))}'])
@@ -191,9 +192,17 @@ class ADBRunner(Runner):
         return super().set_param(param, value)
 
     def set_json_param(self, param, value: dict, **kwargs):
-        if 'VIM' in self.PLATFORM and 'threads' not in value:
-            value['threads'] = 4  # VIMs run much faster with more threads, Android default is 1
         self.set_param(param, f"'{json.dumps(value, separators=(',', ':'))}'", **kwargs)
+
+    # Most Android phones run much faster with threads=1 for CLI applications
+    def _set_android_threads(self):
+        if 'VIM' not in self.PLATFORM and self._executable.endswith('lcevc_dec_test_harness'):
+            if '--configuration' in self._config and 'threads' not in self._config.get('--configuration', {}):
+                existing = json.loads(self._config['--configuration'])
+                existing['threads'] = 1
+                self.set_json_param('--configuration', existing)
+            else:
+                self.set_json_param('--configuration', {'threads': 1})
 
     def _translate_path(self, host_path):
         asset_cache = os.path.abspath(os.path.join(config.get('CACHE_PATH'), 'assets'))

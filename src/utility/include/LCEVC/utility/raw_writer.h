@@ -58,7 +58,7 @@ private:
 
 /*!
  * \brief Create a YUVWriter, given a filename.
- * The picture description will be takedn from the first written picture
+ * The picture description will be taken from the first written picture
  *
  * @param[in]       name            Filename of raw output file
  * @return                          Unique pointer to the new YuvWriter, or nullptr if failed

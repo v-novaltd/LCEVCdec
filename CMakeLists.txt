@@ -30,7 +30,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/CMakeSetup.cmake")
 project(
     LCEVCdec_SDK
     DESCRIPTION "The Open Source LCEVC Decoder SDK"
-    VERSION 4.2.1
+    VERSION 4.2.2
     LANGUAGES CXX C)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
@@ -178,6 +178,7 @@ endif ()
 
 # LCEVC NALU Extract
 lcevc_add_subdirectory(src/extract)
+lcevc_add_subdirectory_if(src/extract/test/unit VN_SDK_UNIT_TESTS)
 
 # API Layer
 if (VN_SDK_API_LAYER)

@@ -104,8 +104,20 @@ uint32_t FrameVulkan::getTotalGpuCommandBufferSize(LdeLOQIndex loq) const
     return totalBufferSize;
 }
 
+bool FrameVulkan::setComputeOutcome(VulkanComputeOutcome outcome)
+{
+    VulkanComputeOutcome expected = VulkanComputeOutcome::Pending;
+    const bool transitioned = m_computeOutcome.compare_exchange_strong(
+        expected, outcome, std::memory_order_release, std::memory_order_relaxed);
+    if (!transitioned) {
+        VNLogError("setComputeOutcome: compare_exchange_strong failed - state was not pending");
+    }
+    return transitioned;
+}
+
 void FrameVulkan::signalComputeTaskDone()
 {
+    assert(computeOutcome() != VulkanComputeOutcome::Pending);
     ldcTaskDependencyMet(&m_taskGroup, m_computeTaskDone, nullptr);
 }
 
@@ -122,7 +134,9 @@ void FrameVulkan::computeTaskFinish(PipelineVulkan* pipeline)
 
     freeIntermediatePictures(pipeline);
 
-    ldcTaskDependencyMet(&m_taskGroup, m_computeTaskDone, nullptr);
+    if (setComputeOutcome(VulkanComputeOutcome::Succeeded)) {
+        signalComputeTaskDone();
+    }
 }
 
 void FrameVulkan::generateTasks(pipeline::PipelineBase* pipeline, uint64_t previousTimestamp)

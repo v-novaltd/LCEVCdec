@@ -29,28 +29,25 @@ static double referenceLn(int32_t stepWidth)
     return integerLogSw + fractionalLogSw;
 }
 
-class lnFpScaled_Fixture : public testing::TestWithParam<std::tuple<int32_t, int32_t>>
-{};
-
-TEST_P(lnFpScaled_Fixture, Test)
+TEST(lnFpScaled, Test)
 {
-    const int32_t x = std::get<0>(GetParam());
-    const int32_t scale = std::get<1>(GetParam());
-    const int32_t got = lnFpScaled(x, scale, true);
-    const int32_t ref = (int32_t)(referenceLn(x) * scale);
-    EXPECT_EQ(got, ref) << "mismatched with input " << x << " and scale factor " << scale;
-
-    // Additional unit tests for the specific use-case in dequant.c. In order to match the reference
-    // code, you can't round towards zero; you have to strictly round down. You also you can't
-    // subtract the multiplication; you have to add the negated-multiplication.
+    // Arbitrary example scaling constants based on values in dequant.c
+    static const int32_t kCValues[] = {5242, -5242, 39};
     static const int32_t kD = 99614;
-    const int64_t gotLogByLayerSW = (int64_t)(kD + lnFpScaled(x, -scale, false));
-    const int64_t refLogByLayerSW = (int64_t)(kD - (double)scale * referenceLn(x));
-    EXPECT_EQ(gotLogByLayerSW, refLogByLayerSW)
-        << "mismatched logByLayerSw with input " << x << " and scale factor " << scale;
-}
 
-// Arbitrary example scaling constants based on values in dequant.c
-static const auto kCValues = testing::Values(5242, -5242, 39);
-INSTANTIATE_TEST_SUITE_P(lnFpScaled, lnFpScaled_Fixture,
-                         testing::Combine(testing::Range(1, 32767), kCValues));
+    for (const int32_t scale : kCValues) {
+        for (int32_t x = 1; x < 32767; ++x) {
+            const int32_t got = lnFpScaled(x, scale, true);
+            const int32_t ref = (int32_t)(referenceLn(x) * scale);
+            EXPECT_EQ(got, ref) << "mismatched with input " << x << " and scale factor " << scale;
+
+            // Additional unit tests for the specific use-case in dequant.c. In order to match the
+            // reference code, you can't round towards zero; you have to strictly round down. You
+            // also can't subtract the multiplication; you have to add the negated-multiplication.
+            const int64_t gotLogByLayerSW = (int64_t)(kD + lnFpScaled(x, -scale, false));
+            const int64_t refLogByLayerSW = (int64_t)(kD - (double)scale * referenceLn(x));
+            EXPECT_EQ(gotLogByLayerSW, refLogByLayerSW)
+                << "mismatched logByLayerSw with input " << x << " and scale factor " << scale;
+        }
+    }
+}

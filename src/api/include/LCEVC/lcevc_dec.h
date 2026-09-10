@@ -787,9 +787,13 @@ LCEVC_ReturnCode LCEVC_SendDecoderBase( LCEVC_DecoderHandle decHandle,
  * using.
  *
  * @param[in]    decHandle           LCEVC Decoder instance
- * @param[out]   output              Pointer to LCEVC base picture
- * @return                           LCEVC_Again if the decoder has no base pictures that are free
- *                                   to recycle.
+ * @param[out]   output              Pointer to LCEVC base picture. Populated whenever a base
+ *                                   picture is returned, including with an error status so it can
+ *                                   be reclaimed. Otherwise left unchanged.
+ * @return                           LCEVC_InvalidParam for an invalid decHandle or output;
+ *                                   LCEVC_Again if the decoder has no base pictures that are free
+ *                                   to recycle; an appropriate error status if receiving fails;
+ *                                   otherwise LCEVC_Success.
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_ReceiveDecoderBase( LCEVC_DecoderHandle decHandle,
@@ -820,15 +824,19 @@ LCEVC_ReturnCode LCEVC_SendDecoderPicture( LCEVC_DecoderHandle decHandle,
  * Get the next decoded picture if available.
  *
  * @param[in]    decHandle           LCEVC Decoder instance
- * @param[out]   output              pointer to LCEVC enhanced output picture
+ * @param[out]   output              pointer to LCEVC enhanced output picture. Populated whenever
+ *                                   a picture is returned, including with an error status so the
+ *                                   client can reclaim it. Otherwise left unchanged. Its contents
+ *                                   must only be used when LCEVC_Success is returned.
  * @param[out]   decodeInformation   pointer to decoder information structure that the LCEVC
-                                     Decoder will fill
- * @return                           LCEVC_InvalidParam for an invalid decHandle or output;
- *                                   LCEVC_Flushed if the next picture got flushed during/after it
- *                                   was decoded; LCEVC_Timeout if the picture took too long to
- *                                   decode (set by timeoutUs in LCEVC_SendDecoderBase) or
- *                                   LCEVC_Error for a failed decode. Otherwise returns
- *                                   LCEVC_Success.
+                                     Decoder fills whenever a picture is returned
+ * @return                           LCEVC_InvalidParam for an invalid decHandle, output, or
+ *                                   decodeInformation; LCEVC_Flushed if the next picture got
+ *                                   flushed during/after it was decoded; LCEVC_Timeout if the
+ *                                   picture took too long to decode (set by timeoutUs in
+ *                                   LCEVC_SendDecoderBase); LCEVC_Again if the decoder has no
+ *                                   decoded picture available; or LCEVC_Error for a failed decode.
+ *                                   Otherwise returns LCEVC_Success.
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_ReceiveDecoderPicture( LCEVC_DecoderHandle decHandle,

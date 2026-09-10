@@ -162,7 +162,7 @@ bool RenderVulkan::init()
     }
 
     for (int i = 0; i < NUM_PLANES; ++i) {
-        if (!transitionImageLayout(textureImage[i], (VkFormat)0, VK_IMAGE_LAYOUT_UNDEFINED,
+        if (!transitionImageLayout(m_textureImage[i], (VkFormat)0, VK_IMAGE_LAYOUT_UNDEFINED,
                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
             return false;
         }
@@ -225,19 +225,20 @@ bool RenderVulkan::initWindow(bool create)
 void RenderVulkan::framebufferResizeCallback(GLFWwindow* window, int width, int height)
 {
     auto app = reinterpret_cast<RenderVulkan*>(glfwGetWindowUserPointer(window));
-    app->framebufferResized = true;
+    app->m_framebufferResized = true;
 }
 #endif
 
 void RenderVulkan::destroy()
 {
-    vkDeviceWaitIdle(m_backend.getDevice());
+    m_backend.waitDeviceIdle();
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroySemaphore(m_backend.getDevice(), m_renderFinishedSemaphores[i], nullptr);
         vkDestroySemaphore(m_backend.getDevice(), m_imageAvailableSemaphores[i], nullptr);
         vkDestroyFence(m_backend.getDevice(), m_inFlightFences[i], nullptr);
     }
+    m_textureInFlightFence = VK_NULL_HANDLE;
 
     vkFreeCommandBuffers(m_backend.getDevice(), m_graphicsCommandPool,
                          static_cast<uint32_t>(m_graphicsCommandBuffers.size()),
@@ -418,7 +419,7 @@ void RenderVulkan::recreateSwapChain()
         glfwWaitEvents();
     }
 #endif
-    vkDeviceWaitIdle(m_backend.getDevice());
+    m_backend.waitDeviceIdle();
     cleanupSwapChain();
     createSwapChainAndGetImages();
     createSwapChainImageViews();
@@ -834,7 +835,7 @@ bool RenderVulkan::recordRenderCommandBuffer(VkCommandBuffer commandBuffer, uint
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineLayout,
-                            0, 1, &m_graphicsDescriptorSets[currentFrame], 0, nullptr);
+                            0, 1, &m_graphicsDescriptorSets[m_currentFrame], 0, nullptr);
 
     vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(g_indices.size()), 1, 0, 0, 0);
 
@@ -1163,9 +1164,11 @@ bool RenderVulkan::createGraphicsDescriptorSets()
         allocInfo.pSetLayouts = layouts.data();
 
         m_graphicsDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-        if (vkAllocateDescriptorSets(m_backend.getDevice(), &allocInfo,
-                                     m_graphicsDescriptorSets.data()) != VK_SUCCESS) {
-            VNLogError("failed to allocate descriptor sets!");
+        const VkResult result = vkAllocateDescriptorSets(m_backend.getDevice(), &allocInfo,
+                                                         m_graphicsDescriptorSets.data());
+        if (result != VK_SUCCESS) {
+            VNLogError("failed to allocate descriptor sets: %d", static_cast<int32_t>(result));
+            m_graphicsDescriptorSets.clear();
             return false;
         }
     }
@@ -1329,6 +1332,7 @@ bool RenderVulkan::populateDitherBuffers(const LdppDitherGlobal* global, const L
 
 bool RenderVulkan::createTextureImages(int width, int height)
 {
+    const VkFormat textureFormat = m_renderBit8 ? VK_FORMAT_R8_UNORM : VK_FORMAT_R16_UNORM;
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -1337,63 +1341,73 @@ bool RenderVulkan::createTextureImages(int width, int height)
     imageInfo.extent.depth = 1;
     imageInfo.mipLevels = 1;
     imageInfo.arrayLayers = 1;
-    imageInfo.format = VK_FORMAT_R8_UNORM; // TODO m_renderBit8 ? VK_FORMAT_R8_UNORM : VK_FORMAT_R16_UNORM;
+    imageInfo.format = textureFormat;
     imageInfo.tiling = VK_IMAGE_TILING_LINEAR;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 
-    if (vkCreateImage(m_backend.getDevice(), &imageInfo, nullptr, &textureImage[0]) != VK_SUCCESS) {
+    if (vkCreateImage(m_backend.getDevice(), &imageInfo, nullptr, &m_textureImage[0]) != VK_SUCCESS) {
         VNLogError("failed to create Y image!");
         return false;
     }
 
     imageInfo.extent.width = static_cast<uint32_t>(width / 2);
     imageInfo.extent.height = static_cast<uint32_t>(height / 2);
-    if (vkCreateImage(m_backend.getDevice(), &imageInfo, nullptr, &textureImage[1]) != VK_SUCCESS) {
+    if (vkCreateImage(m_backend.getDevice(), &imageInfo, nullptr, &m_textureImage[1]) != VK_SUCCESS) {
         VNLogError("failed to create U image!");
         return false;
     }
 
-    if (vkCreateImage(m_backend.getDevice(), &imageInfo, nullptr, &textureImage[2]) != VK_SUCCESS) {
+    if (vkCreateImage(m_backend.getDevice(), &imageInfo, nullptr, &m_textureImage[2]) != VK_SUCCESS) {
         VNLogError("failed to create V image!");
         return false;
     }
 
     for (int i = 0; i < NUM_PLANES; ++i) {
         VkMemoryRequirements memRequirements;
-        vkGetImageMemoryRequirements(m_backend.getDevice(), textureImage[i], &memRequirements);
+        vkGetImageMemoryRequirements(m_backend.getDevice(), m_textureImage[i], &memRequirements);
 
         VkMemoryAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         allocInfo.allocationSize = memRequirements.size;
-        allocInfo.memoryTypeIndex = m_backend.findMemoryType(memRequirements.memoryTypeBits,
-                                                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (!m_backend.findMemoryType(memRequirements.memoryTypeBits,
+                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                      allocInfo.memoryTypeIndex)) {
+            VNLogError("failed to find host-visible memory for render plane %d", i);
+            return false;
+        }
 
-        if (vkAllocateMemory(m_backend.getDevice(), &allocInfo, nullptr, &textureImageMemory[i]) !=
+        if (vkAllocateMemory(m_backend.getDevice(), &allocInfo, nullptr, &m_textureImageMemory[i]) !=
             VK_SUCCESS) {
             VNLogError("failed to allocate image memory!");
             return false;
         }
 
-        vkBindImageMemory(m_backend.getDevice(), textureImage[i], textureImageMemory[i], 0);
+        const VkResult bindResult =
+            vkBindImageMemory(m_backend.getDevice(), m_textureImage[i], m_textureImageMemory[i], 0);
+        if (bindResult != VK_SUCCESS) {
+            VNLogError("failed to bind image memory for plane %d: %d", i, static_cast<int32_t>(bindResult));
+            return false;
+        }
     }
 
     m_textureWidth = static_cast<uint32_t>(width);
     m_textureHeight = static_cast<uint32_t>(height);
+    m_textureBit8 = m_renderBit8 != 0;
 
     return true;
 }
 
 bool RenderVulkan::createTextureImageViews()
 {
+    const VkFormat textureFormat = m_renderBit8 ? VK_FORMAT_R8_UNORM : VK_FORMAT_R16_UNORM;
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = textureImage[0];
+    viewInfo.image = m_textureImage[0];
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R8_UNORM; // TODO m_renderBit8 ? VK_FORMAT_R8_UNORM : VK_FORMAT_R16_UNORM;
+    viewInfo.format = textureFormat;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = 1;
@@ -1405,13 +1419,13 @@ bool RenderVulkan::createTextureImageViews()
         return false;
     }
 
-    viewInfo.image = textureImage[1];
+    viewInfo.image = m_textureImage[1];
     if (vkCreateImageView(m_backend.getDevice(), &viewInfo, nullptr, &m_textureImageView[1]) != VK_SUCCESS) {
         VNLogError("failed to create U texture image view!");
         return false;
     }
 
-    viewInfo.image = textureImage[2];
+    viewInfo.image = m_textureImage[2];
     if (vkCreateImageView(m_backend.getDevice(), &viewInfo, nullptr, &m_textureImageView[2]) != VK_SUCCESS) {
         VNLogError("failed to create V texture image view!");
         return false;
@@ -1427,18 +1441,19 @@ void RenderVulkan::destroyTextureResources()
             vkDestroyImageView(m_backend.getDevice(), m_textureImageView[i], nullptr);
             m_textureImageView[i] = VK_NULL_HANDLE;
         }
-        if (textureImage[i] != VK_NULL_HANDLE) {
-            vkDestroyImage(m_backend.getDevice(), textureImage[i], nullptr);
-            textureImage[i] = VK_NULL_HANDLE;
+        if (m_textureImage[i] != VK_NULL_HANDLE) {
+            vkDestroyImage(m_backend.getDevice(), m_textureImage[i], nullptr);
+            m_textureImage[i] = VK_NULL_HANDLE;
         }
-        if (textureImageMemory[i] != VK_NULL_HANDLE) {
-            vkFreeMemory(m_backend.getDevice(), textureImageMemory[i], nullptr);
-            textureImageMemory[i] = VK_NULL_HANDLE;
+        if (m_textureImageMemory[i] != VK_NULL_HANDLE) {
+            vkFreeMemory(m_backend.getDevice(), m_textureImageMemory[i], nullptr);
+            m_textureImageMemory[i] = VK_NULL_HANDLE;
         }
     }
 
     m_textureWidth = 0;
     m_textureHeight = 0;
+    m_textureBit8 = true;
 }
 
 bool RenderVulkan::createTextureSamplers()
@@ -1485,15 +1500,18 @@ bool RenderVulkan::createTextureSamplers()
 bool RenderVulkan::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout,
                                          VkImageLayout newLayout)
 {
+    VNUnused(format);
+
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandPool = m_graphicsCommandPool;
     allocInfo.commandBufferCount = 1;
 
-    VkCommandBuffer commandBuffer;
-    if (vkAllocateCommandBuffers(m_backend.getDevice(), &allocInfo, &commandBuffer) != VK_SUCCESS) {
-        VNLogError("failed to allocate command buffer!");
+    VkCommandBuffer commandBuffer{VK_NULL_HANDLE};
+    VkResult result = vkAllocateCommandBuffers(m_backend.getDevice(), &allocInfo, &commandBuffer);
+    if (result != VK_SUCCESS) {
+        VNLogError("failed to allocate command buffer: %d", static_cast<int32_t>(result));
         return false;
     }
 
@@ -1501,7 +1519,12 @@ bool RenderVulkan::transitionImageLayout(VkImage image, VkFormat format, VkImage
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    result = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    if (result != VK_SUCCESS) {
+        VNLogError("failed to begin layout transition command buffer: %d", static_cast<int32_t>(result));
+        vkFreeCommandBuffers(m_backend.getDevice(), m_graphicsCommandPool, 1, &commandBuffer);
+        return false;
+    }
 
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1541,26 +1564,56 @@ bool RenderVulkan::transitionImageLayout(VkImage image, VkFormat format, VkImage
         destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     } else {
         VNLogError("unsupported layout transition!");
+        vkFreeCommandBuffers(m_backend.getDevice(), m_graphicsCommandPool, 1, &commandBuffer);
+        return false;
     }
 
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1,
                          &barrier);
 
-    vkEndCommandBuffer(commandBuffer);
+    result = vkEndCommandBuffer(commandBuffer);
+    if (result != VK_SUCCESS) {
+        VNLogError("failed to end layout transition command buffer: %d", static_cast<int32_t>(result));
+        vkFreeCommandBuffers(m_backend.getDevice(), m_graphicsCommandPool, 1, &commandBuffer);
+        return false;
+    }
 
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 
-    VkFence fence;
-    vkCreateFence(m_backend.getDevice(), &fenceInfo, nullptr, &fence);
+    VkFence fence{VK_NULL_HANDLE};
+    result = vkCreateFence(m_backend.getDevice(), &fenceInfo, nullptr, &fence);
+    if (result != VK_SUCCESS) {
+        VNLogError("failed to create layout transition fence: %d", static_cast<int32_t>(result));
+        vkFreeCommandBuffers(m_backend.getDevice(), m_graphicsCommandPool, 1, &commandBuffer);
+        return false;
+    }
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    vkQueueSubmit(m_backend.getGraphicsQueue(), 1, &submitInfo, fence);
-    vkWaitForFences(m_backend.getDevice(), 1, &fence, VK_TRUE, UINT64_MAX);
+    result = m_backend.submitQueue(m_backend.getGraphicsQueue(), 1, &submitInfo, fence);
+    if (result != VK_SUCCESS) {
+        VNLogError("failed to submit layout transition: %d", static_cast<int32_t>(result));
+        vkDestroyFence(m_backend.getDevice(), fence, nullptr);
+        vkFreeCommandBuffers(m_backend.getDevice(), m_graphicsCommandPool, 1, &commandBuffer);
+        return false;
+    }
+
+    result = vkWaitForFences(m_backend.getDevice(), 1, &fence, VK_TRUE, UINT64_MAX);
+    if (result != VK_SUCCESS) {
+        VNLogError("failed to wait for layout transition: %d", static_cast<int32_t>(result));
+        const VkResult idleResult = m_backend.waitQueueIdle(m_backend.getGraphicsQueue());
+        if (idleResult != VK_SUCCESS) {
+            VNLogError("failed to idle graphics queue after layout transition error: %d",
+                       static_cast<int32_t>(idleResult));
+        }
+        vkDestroyFence(m_backend.getDevice(), fence, nullptr);
+        vkFreeCommandBuffers(m_backend.getDevice(), m_graphicsCommandPool, 1, &commandBuffer);
+        return false;
+    }
 
     vkFreeCommandBuffers(m_backend.getDevice(), m_graphicsCommandPool, 1, &commandBuffer);
     vkDestroyFence(m_backend.getDevice(), fence, nullptr);
@@ -1593,11 +1646,11 @@ bool RenderVulkan::copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDevice
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    if (vkQueueSubmit(m_backend.getComputeQueue(), 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+    if (m_backend.submitQueue(m_backend.getComputeQueue(), 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
         VNLogError("failed to submit command buffer to queue");
         return false;
     }
-    vkQueueWaitIdle(m_backend.getComputeQueue());
+    m_backend.waitQueueIdle(m_backend.getComputeQueue());
 
     vkResetCommandBuffer(commandBuffer, 0);
 
@@ -1641,11 +1694,11 @@ bool RenderVulkan::copyBuffer(VkBuffer& srcBuffer, VkBuffer& dstBuffer, VkDevice
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    if (vkQueueSubmit(m_backend.getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+    if (m_backend.submitQueue(m_backend.getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
         VNLogError("failed to submit command buffer to queue");
         return false;
     }
-    vkQueueWaitIdle(m_backend.getGraphicsQueue());
+    m_backend.waitQueueIdle(m_backend.getGraphicsQueue());
 
     vkFreeCommandBuffers(m_backend.getDevice(), m_graphicsCommandPool, 1, &commandBuffer);
 
@@ -1701,7 +1754,7 @@ VkExtent2D RenderVulkan::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabi
 void RenderVulkan::drawFrame()
 {
     if (!m_isInitialised) {
-        if (!m_backend.initRemaningRender()) {
+        if (!m_backend.initRemainingRender()) {
             return;
         }
     }
@@ -1719,15 +1772,15 @@ void RenderVulkan::drawFrame()
     if (winWidth != m_lastWindowWidth || winHeight != m_lastWindowHeight) {
         m_lastWindowWidth = winWidth;
         m_lastWindowHeight = winHeight;
-        framebufferResized = true;
+        m_framebufferResized = true;
     }
 #endif
-    vkWaitForFences(m_backend.getDevice(), 1, &m_inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+    vkWaitForFences(m_backend.getDevice(), 1, &m_inFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
-    VkResult result =
-        vkAcquireNextImageKHR(m_backend.getDevice(), m_swapChain, UINT64_MAX,
-                              m_imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+    VkResult result = vkAcquireNextImageKHR(m_backend.getDevice(), m_swapChain, UINT64_MAX,
+                                            m_imageAvailableSemaphores[m_currentFrame],
+                                            VK_NULL_HANDLE, &imageIndex);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         recreateSwapChain();
@@ -1743,41 +1796,40 @@ void RenderVulkan::drawFrame()
         return;
     }
 
-    vkResetFences(m_backend.getDevice(), 1, &m_inFlightFences[currentFrame]);
+    vkResetFences(m_backend.getDevice(), 1, &m_inFlightFences[m_currentFrame]);
 
-    updateUniformBuffer(currentFrame);
+    updateUniformBuffer(m_currentFrame);
 
-    vkResetCommandBuffer(m_graphicsCommandBuffers[currentFrame], 0);
-    recordRenderCommandBuffer(m_graphicsCommandBuffers[currentFrame], imageIndex);
+    vkResetCommandBuffer(m_graphicsCommandBuffers[m_currentFrame], 0);
+    recordRenderCommandBuffer(m_graphicsCommandBuffers[m_currentFrame], imageIndex);
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore waitSemaphores[] = {m_imageAvailableSemaphores[currentFrame]};
+    VkSemaphore waitSemaphores[] = {m_imageAvailableSemaphores[m_currentFrame]};
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT};
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &m_graphicsCommandBuffers[currentFrame];
+    submitInfo.pCommandBuffers = &m_graphicsCommandBuffers[m_currentFrame];
 
-    VkSemaphore signalSemaphores[] = {m_renderFinishedSemaphores[currentFrame]};
+    VkSemaphore signalSemaphores[] = {m_renderFinishedSemaphores[m_currentFrame]};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    {
-        common::ScopedLock lock(m_backend.compute().submitMutex());
-        result = vkQueueSubmit(m_backend.getGraphicsQueue(), 1, &submitInfo,
-                               m_inFlightFences[currentFrame]);
+    result = m_backend.submitQueue(m_backend.getGraphicsQueue(), 1, &submitInfo,
+                                   m_inFlightFences[m_currentFrame]);
 
-        if (result != VK_SUCCESS) {
-            // Presenting after a failed submit would wait on a semaphore that will never
-            // signal.
-            VNLogError("failed to submit draw command buffer! (%d)", static_cast<int>(result));
-            return;
-        }
+    if (result != VK_SUCCESS) {
+        // Presenting after a failed submit would wait on a semaphore that will never
+        // signal.
+        VNLogError("failed to submit draw command buffer! (%d)", static_cast<int>(result));
+        return;
     }
+
+    m_textureInFlightFence = m_inFlightFences[m_currentFrame];
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1789,10 +1841,10 @@ void RenderVulkan::drawFrame()
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
 
-    result = vkQueuePresentKHR(m_backend.getPresentQueue(), &presentInfo);
+    result = m_backend.presentQueue(m_backend.getPresentQueue(), &presentInfo);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
-        framebufferResized = false;
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebufferResized) {
+        m_framebufferResized = false;
         recreateSwapChain();
     } else if (result == VK_ERROR_SURFACE_LOST_KHR) {
         VNLogWarning("vkQueuePresentKHR: surface lost, releasing surface and swap chain");
@@ -1801,7 +1853,7 @@ void RenderVulkan::drawFrame()
         VNLogError("failed to present swap chain image! (%d)", static_cast<int>(result));
     }
 
-    currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 bool RenderVulkan::resetSurfaceAndSwapChain()
@@ -1809,7 +1861,7 @@ bool RenderVulkan::resetSurfaceAndSwapChain()
     if (!windowReady()) {
         return false;
     }
-    vkDeviceWaitIdle(m_backend.getDevice());
+    m_backend.waitDeviceIdle();
     cleanupSwapChain();
     if (m_surface != VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(m_backend.getInstance(), m_surface, nullptr);
@@ -1833,7 +1885,7 @@ void RenderVulkan::closeWindow()
         m_window = nullptr;
     }
     m_pendingSurfaceRecreate = true;
-    framebufferResized = true;
+    m_framebufferResized = true;
 #endif
 }
 
@@ -1842,7 +1894,7 @@ void RenderVulkan::releaseSurfaceAndSwapChain()
     if (m_surface == VK_NULL_HANDLE && m_swapChain == VK_NULL_HANDLE) {
         return;
     }
-    vkDeviceWaitIdle(m_backend.getDevice());
+    m_backend.waitDeviceIdle();
     cleanupSwapChain();
     if (m_surface != VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(m_backend.getInstance(), m_surface, nullptr);
@@ -1850,31 +1902,173 @@ void RenderVulkan::releaseSurfaceAndSwapChain()
     }
     m_swapChain = VK_NULL_HANDLE;
     m_pendingSurfaceRecreate = true;
-    framebufferResized = true;
+    m_framebufferResized = true;
 }
 
-void RenderVulkan::ensureTextureResources(uint32_t width, uint32_t height)
+bool RenderVulkan::mapTexturePlanes(const uint8_t* source, const LdpPictureLayout& sourceLayout,
+                                    uint32_t width, uint32_t height)
+{
+    if (source == nullptr) {
+        VNLogError("Cannot upload render texture planes from a null pointer");
+        return false;
+    }
+
+    VkImageSubresource subresource{};
+    subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+    const VkDevice device = m_backend.getDevice();
+    std::array<VkDeviceMemory, NUM_PLANES> memories{};
+    std::array<VkSubresourceLayout, NUM_PLANES> layouts{};
+    std::array<void*, NUM_PLANES> data{};
+    uint8_t mappedPlaneCount = 0;
+
+    for (uint8_t plane = 0; plane < NUM_PLANES; ++plane) {
+        vkGetImageSubresourceLayout(device, m_textureImage[plane], &subresource, &layouts[plane]);
+
+        const VkDeviceMemory memory = m_textureImageMemory[plane];
+        const VkDeviceSize size = layouts[plane].size;
+        if (memory == VK_NULL_HANDLE || size == 0) {
+            VNLogError("Invalid memory for render plane %u: isNull=%d size=%" PRIu64, plane,
+                       memory == VK_NULL_HANDLE, static_cast<uint64_t>(size));
+            break;
+        }
+
+        const VkResult result = vkMapMemory(device, memory, 0, size, 0, &data[plane]);
+        if (result != VK_SUCCESS) {
+            VNLogError("vkMapMemory failed for render plane %u: result=%d size=%" PRIu64, plane,
+                       static_cast<int32_t>(result), static_cast<uint64_t>(size));
+            break;
+        }
+
+        if (data[plane] == nullptr) {
+            VNLogError("vkMapMemory returned a null pointer for render plane %u", plane);
+            vkUnmapMemory(device, memory);
+            break;
+        }
+
+        memories[plane] = memory;
+        ++mappedPlaneCount;
+    }
+
+    const bool allPlanesMapped = mappedPlaneCount == NUM_PLANES;
+    if (allPlanesMapped) {
+        const uint32_t bytesPerSample = m_renderBit8 ? 1u : 2u;
+        const uint32_t lumaRowBytes = m_renderBit8 ? width : width << 1;
+        const uint32_t chromaWidth = width >> 1;
+        const uint32_t chromaHeight = height >> 1;
+        const uint32_t chromaRowBytes = m_renderBit8 ? chromaWidth : chromaWidth << 1;
+        const uint8_t* srcY = source + sourceLayout.planeOffsets[0];
+        auto* dstY = static_cast<uint8_t*>(data[0]);
+
+        for (uint32_t y = 0; y < height; ++y) {
+            memcpy(dstY, srcY, lumaRowBytes);
+            dstY += layouts[0].rowPitch;
+            srcY += sourceLayout.rowStrides[0];
+        }
+
+        if (m_renderNv12 != 0) {
+            const uint8_t* uvSrc = source + sourceLayout.planeOffsets[1];
+            auto* dstU = static_cast<uint8_t*>(data[1]);
+            auto* dstV = static_cast<uint8_t*>(data[2]);
+            for (uint32_t y = 0; y < chromaHeight; ++y) {
+                for (uint32_t x = 0; x < chromaWidth; ++x) {
+                    memcpy(dstU, uvSrc, bytesPerSample);
+                    memcpy(dstV, uvSrc + bytesPerSample, bytesPerSample);
+                    dstU += bytesPerSample;
+                    dstV += bytesPerSample;
+                    uvSrc += bytesPerSample << 1;
+                }
+                dstU += layouts[1].rowPitch - chromaRowBytes;
+                dstV += layouts[2].rowPitch - chromaRowBytes;
+                uvSrc += sourceLayout.rowStrides[1] - (chromaRowBytes << 1);
+            }
+        } else {
+            const uint8_t* srcU = source + sourceLayout.planeOffsets[1];
+            const uint8_t* srcV = source + sourceLayout.planeOffsets[2];
+            auto* dstU = static_cast<uint8_t*>(data[1]);
+            auto* dstV = static_cast<uint8_t*>(data[2]);
+            for (uint32_t y = 0; y < chromaHeight; ++y) {
+                memcpy(dstU, srcU, chromaRowBytes);
+                memcpy(dstV, srcV, chromaRowBytes);
+                dstU += layouts[1].rowPitch;
+                dstV += layouts[2].rowPitch;
+                srcU += sourceLayout.rowStrides[1];
+                srcV += sourceLayout.rowStrides[2];
+            }
+        }
+    }
+
+    while (mappedPlaneCount > 0) {
+        --mappedPlaneCount;
+        vkUnmapMemory(device, memories[mappedPlaneCount]);
+    }
+
+    return allPlanesMapped;
+}
+
+bool RenderVulkan::ensureTextureResources(uint32_t width, uint32_t height)
 {
     if (width == 0 || height == 0) {
-        return;
+        VNLogError("Cannot create zero-sized render textures");
+        return false;
     }
 
-    if (m_textureWidth == width && m_textureHeight == height && textureImage[0] != VK_NULL_HANDLE) {
-        return;
+    bool resourcesValid = true;
+    for (int i = 0; i < NUM_PLANES; ++i) {
+        resourcesValid = resourcesValid && m_textureImage[i] != VK_NULL_HANDLE &&
+                         m_textureImageMemory[i] != VK_NULL_HANDLE &&
+                         m_textureImageView[i] != VK_NULL_HANDLE;
+    }
+    if (m_textureWidth == width && m_textureHeight == height &&
+        m_textureBit8 == (m_renderBit8 != 0) && resourcesValid) {
+        return true;
     }
 
-    vkDeviceWaitIdle(m_backend.getDevice());
+    const VkResult waitResult = m_backend.waitDeviceIdle();
+    if (waitResult != VK_SUCCESS) {
+        VNLogError("vkDeviceWaitIdle failed before recreating render textures: %d",
+                   static_cast<int32_t>(waitResult));
+        return false;
+    }
 
     destroyTextureResources();
-    createTextureImages(static_cast<int>(width), static_cast<int>(height));
-    createTextureImageViews();
-
-    for (int i = 0; i < NUM_PLANES; ++i) {
-        transitionImageLayout(textureImage[i], (VkFormat)0, VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (!createTextureImages(static_cast<int>(width), static_cast<int>(height)) ||
+        !createTextureImageViews()) {
+        destroyTextureResources();
+        return false;
     }
 
-    createGraphicsDescriptorSets();
+    for (int i = 0; i < NUM_PLANES; ++i) {
+        if (!transitionImageLayout(m_textureImage[i], (VkFormat)0, VK_IMAGE_LAYOUT_UNDEFINED,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
+            destroyTextureResources();
+            return false;
+        }
+    }
+
+    if (!createGraphicsDescriptorSets()) {
+        destroyTextureResources();
+        return false;
+    }
+
+    return true;
+}
+
+bool RenderVulkan::waitForTextureUpload()
+{
+    if (m_textureInFlightFence == VK_NULL_HANDLE) {
+        return true;
+    }
+
+    const VkResult result =
+        vkWaitForFences(m_backend.getDevice(), 1, &m_textureInFlightFence, VK_TRUE, UINT64_MAX);
+    if (result != VK_SUCCESS) {
+        VNLogError("Failed to wait for render texture access: %d", static_cast<int32_t>(result));
+        return false;
+    }
+
+    m_textureInFlightFence = VK_NULL_HANDLE;
+    return true;
 }
 
 } // namespace lcevc_dec::pipeline_vulkan
