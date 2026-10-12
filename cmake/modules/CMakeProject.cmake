@@ -37,6 +37,8 @@ if (NOT DEFINED TARGET_ARCH)
         OR CMAKE_SYSTEM_PROCESSOR MATCHES "^aarch64"
         OR CMAKE_SYSTEM_PROCESSOR MATCHES "^arm64")
         set(TARGET_ARCH "armv8")
+    elseif (CMAKE_SYSTEM_PROCESSOR STREQUAL "riscv64")
+        set(TARGET_ARCH "riscv64")
     else ()
         message(WARNING "Unknown target processor: [${CMAKE_SYSTEM_PROCESSOR}],
                          this is an untested and unsupported target")
