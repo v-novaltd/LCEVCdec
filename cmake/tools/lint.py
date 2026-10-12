@@ -18,6 +18,7 @@ import glob
 import argparse
 import datetime
 import platform
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -508,7 +509,8 @@ def main():
             errors += 1
 
     for path in get_paths(WORKFLOW_TYPES, changed_files, global_dirs=['.github/workflows/**'], excluded_dirs=None):
-        cmd = ['uvx', 'zizmor', path]
+        cmd = ['zizmor', path] if shutil.which('zizmor') else ['uvx', 'zizmor', path]
+
         process = run_cmd(cmd)
         if process.returncode != 0:
             print_fail('zizmor', f"on {process.stdout.decode('utf-8')}")
