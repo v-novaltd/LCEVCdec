@@ -43,7 +43,7 @@ class PictureVulkan;
 class PipelineBuilderVulkan;
 struct VulkanApplyCommonArgs;
 struct VulkanApplyTileArgs;
-struct VulkanAddArgs;
+
 struct VulkanConversionArgs;
 struct VulkanUpscaleArgs;
 
@@ -106,7 +106,6 @@ public:
 
     VNNoCopyNoMove(PipelineVulkan);
 
-    PictureVulkan* m_intermediateUpscalePicture[LOQEnhancedCount]{};
     PictureVulkan* m_temporalPicture{};
 
 private:

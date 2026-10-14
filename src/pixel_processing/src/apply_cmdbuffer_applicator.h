@@ -47,8 +47,7 @@
     int32_t cmdOffset = entryPoint->commandOffset;                                                     \
     int32_t dataOffset = entryPoint->dataOffset;                                                       \
     uint8_t* dataPtr = NULL;                                                                           \
-    uint16_t rowPixelStride = (bitdepthFromFixedPoint(fixedPoint) > 8) ? plane->rowByteStride >> 1     \
-                                                                       : plane->rowByteStride;         \
+    uint16_t rowPixelStride = plane->rowByteStride / fixedPointByteSize(fixedPoint);                   \
                                                                                                        \
     ApplyCmdBufferArgs args = {                                                                        \
         .firstSample = (int16_t*)VN_PLANE_GETLINE(plane, 0),                                           \

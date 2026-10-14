@@ -1,0 +1,175 @@
+/* Copyright (c) V-Nova International Limited 2026. All rights reserved.
+ * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
+ * No patent licenses are granted under this license. For enquiries about patent licenses,
+ * please contact legal@v-nova.com.
+ * The LCEVCdec software is a stand-alone project and is NOT A CONTRIBUTION to any other project.
+ * If the software is incorporated into another project, THE TERMS OF THE BSD-3-CLAUSE-CLEAR LICENSE
+ * AND THE ADDITIONAL LICENSING INFORMATION CONTAINED IN THIS FILE MUST BE MAINTAINED, AND THE
+ * SOFTWARE DOES NOT AND MUST NOT ADOPT THE LICENSE OF THE INCORPORATING PROJECT. However, the
+ * software may be incorporated into a project under a compatible license provided the requirements
+ * of the BSD-3-Clause-Clear license are respected, and V-Nova Limited remains
+ * licensor of the software ONLY UNDER the BSD-3-Clause-Clear license (not the compatible license).
+ * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
+ * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
+
+// Shared-memory fused 2D upscale. Rounded and clamped vertical phases are packed into
+// shared memory for horizontal reuse, preserving the two-pass arithmetic order.
+
+#version 450
+
+#include "specialization_ids.h"
+
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
+       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+       local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
+
+layout(std430, set = 0, binding = 0) buffer readonly SrcImageBuffer {
+    uint samples[];
+} src;
+
+layout(std430, set = 0, binding = 1) buffer restrict writeonly DstImageBuffer {
+    uint samples[];
+} dst;
+
+layout(std430, set = 0, binding = 2) buffer readonly BaseImageBuffer {
+    uint samples[];
+} base;
+
+layout(constant_id = SPECID_PA) const int pa = 0;
+
+#include "common.glsl"
+#include "upscale_constants.glsl"
+
+const int workgroupHeight = 8;
+const int verticalTileWidth = 36;
+
+shared uint verticalTile[workgroupHeight][verticalTileWidth];
+
+int readSrcSample(int x, int y)
+{
+    const int clampedX = clamp(x, 0, srcWidth - 1);
+    const int clampedY = clamp(y, 0, srcHeight - 1);
+    const ivec2 pels = unpack16bitInternals(
+        src.samples[containerOffsetIn + clampedY * containerStrideIn + (clampedX >> 1)]);
+    return ((clampedX & 1) == 0) ? pels.x : pels.y;
+}
+
+int readBaseSample(int x, int y)
+{
+    const ivec2 pels = unpack16bitInternals(
+        base.samples[containerOffsetBase + y * containerStrideBase + (x >> 1)]);
+    return ((x & 1) == 0) ? pels.x : pels.y;
+}
+
+ivec2 readSrcPair(int x, int y)
+{
+    const int clampedY = clamp(y, 0, srcHeight - 1);
+    if (x >= 0 && x + 1 < srcWidth) {
+        return unpack16bitInternals(
+            src.samples[containerOffsetIn + clampedY * containerStrideIn + (x >> 1)]);
+    }
+    return ivec2(readSrcSample(x, clampedY), readSrcSample(x + 1, clampedY));
+}
+
+void filterVerticalTile(int groupSourceX, int groupSourceY, uint localIndex)
+{
+    const uint workgroupSize = gl_WorkGroupSize.x * gl_WorkGroupSize.y;
+    const int verticalTilePackedWidth = int(gl_WorkGroupSize.x) + 2;
+    const uint verticalPairCount = uint(verticalTilePackedWidth) * gl_WorkGroupSize.y;
+
+    for (uint index = localIndex; index < verticalPairCount; index += workgroupSize) {
+        const int tileY = int(index) / verticalTilePackedWidth;
+        const int tilePairX = int(index) - tileY * verticalTilePackedWidth;
+        const int sourceX = groupSourceX - 2 + tilePairX * 2;
+        const int sourceY = groupSourceY + tileY;
+
+        const ivec2 row0 = readSrcPair(sourceX, sourceY - 2);
+        const ivec2 row1 = readSrcPair(sourceX, sourceY - 1);
+        const ivec2 row2 = readSrcPair(sourceX, sourceY);
+        const ivec2 row3 = readSrcPair(sourceX, sourceY + 1);
+        const ivec2 row4 = readSrcPair(sourceX, sourceY + 2);
+
+        const ivec2 phase0 = ivec2(
+            clamp_s15(ds + kernel[3] * row0.x + kernel[2] * row1.x +
+                      kernel[1] * row2.x + kernel[0] * row3.x),
+            clamp_s15(ds + kernel[0] * row1.x + kernel[1] * row2.x +
+                      kernel[2] * row3.x + kernel[3] * row4.x));
+        const ivec2 phase1 = ivec2(
+            clamp_s15(ds + kernel[3] * row0.y + kernel[2] * row1.y +
+                      kernel[1] * row2.y + kernel[0] * row3.y),
+            clamp_s15(ds + kernel[0] * row1.y + kernel[1] * row2.y +
+                      kernel[2] * row3.y + kernel[3] * row4.y));
+
+        verticalTile[tileY][tilePairX * 2] = pack16bitInternals(phase0);
+        verticalTile[tileY][tilePairX * 2 + 1] = pack16bitInternals(phase1);
+    }
+}
+
+void main()
+{
+    const uint localIndex = gl_LocalInvocationID.y * gl_WorkGroupSize.x + gl_LocalInvocationID.x;
+    const int groupSourceX = int(gl_WorkGroupID.x * gl_WorkGroupSize.x) * 2;
+    const int groupSourceY = int(gl_WorkGroupID.y * gl_WorkGroupSize.y);
+
+    filterVerticalTile(groupSourceX, groupSourceY, localIndex);
+    barrier();
+
+    const int sourceX = groupSourceX + int(gl_LocalInvocationID.x) * 2;
+    const int sourceY = groupSourceY + int(gl_LocalInvocationID.y);
+    if (sourceX >= srcWidth || sourceY >= srcHeight) {
+        return;
+    }
+
+    const int tileX = int(gl_LocalInvocationID.x) * 2;
+    const int tileY = int(gl_LocalInvocationID.y);
+    ivec2 vertical[6];
+    for (int i = 0; i < 6; ++i) {
+        vertical[i] = unpack16bitInternals(verticalTile[tileY][tileX + i]);
+    }
+
+    ivec4 outputRow0;
+    ivec4 outputRow1;
+    outputRow0.x = clamp_s15(ds + kernel[3] * vertical[0].x + kernel[2] * vertical[1].x +
+                             kernel[1] * vertical[2].x + kernel[0] * vertical[3].x);
+    outputRow0.y = clamp_s15(ds + kernel[0] * vertical[1].x + kernel[1] * vertical[2].x +
+                             kernel[2] * vertical[3].x + kernel[3] * vertical[4].x);
+    outputRow0.z = clamp_s15(ds + kernel[3] * vertical[1].x + kernel[2] * vertical[2].x +
+                             kernel[1] * vertical[3].x + kernel[0] * vertical[4].x);
+    outputRow0.w = clamp_s15(ds + kernel[0] * vertical[2].x + kernel[1] * vertical[3].x +
+                             kernel[2] * vertical[4].x + kernel[3] * vertical[5].x);
+
+    outputRow1.x = clamp_s15(ds + kernel[3] * vertical[0].y + kernel[2] * vertical[1].y +
+                             kernel[1] * vertical[2].y + kernel[0] * vertical[3].y);
+    outputRow1.y = clamp_s15(ds + kernel[0] * vertical[1].y + kernel[1] * vertical[2].y +
+                             kernel[2] * vertical[3].y + kernel[3] * vertical[4].y);
+    outputRow1.z = clamp_s15(ds + kernel[3] * vertical[1].y + kernel[2] * vertical[2].y +
+                             kernel[1] * vertical[3].y + kernel[0] * vertical[4].y);
+    outputRow1.w = clamp_s15(ds + kernel[0] * vertical[2].y + kernel[1] * vertical[3].y +
+                             kernel[2] * vertical[4].y + kernel[3] * vertical[5].y);
+
+    if (pa == 2) {
+        const int base0 = readBaseSample(sourceX, sourceY);
+        const int adjust0 = base0 -
+            ((outputRow0.x + outputRow0.y + outputRow1.x + outputRow1.y + 2) >> 2);
+        outputRow0.xy = saturateS16(outputRow0.xy + adjust0);
+        outputRow1.xy = saturateS16(outputRow1.xy + adjust0);
+
+        if (sourceX + 1 < srcWidth) {
+            const int base1 = readBaseSample(sourceX + 1, sourceY);
+            const int adjust1 = base1 -
+                ((outputRow0.z + outputRow0.w + outputRow1.z + outputRow1.w + 2) >> 2);
+            outputRow0.zw = saturateS16(outputRow0.zw + adjust1);
+            outputRow1.zw = saturateS16(outputRow1.zw + adjust1);
+        }
+    }
+
+    const int outputRow0Offset = containerOffsetOut + (2 * sourceY) * containerStrideOut;
+    const int outputRow1Offset = outputRow0Offset + containerStrideOut;
+    dst.samples[outputRow0Offset + sourceX] = pack16bitInternals(outputRow0.xy);
+    dst.samples[outputRow1Offset + sourceX] = pack16bitInternals(outputRow1.xy);
+
+    if (sourceX + 1 < srcWidth) {
+        dst.samples[outputRow0Offset + sourceX + 1] = pack16bitInternals(outputRow0.zw);
+        dst.samples[outputRow1Offset + sourceX + 1] = pack16bitInternals(outputRow1.zw);
+    }
+}

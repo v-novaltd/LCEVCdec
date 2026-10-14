@@ -66,6 +66,9 @@ bool PipelineBuilderVulkan::configure(std::string_view name, bool val)
 
 bool PipelineBuilderVulkan::configure(std::string_view name, int32_t val)
 {
+    if (name == "vulkan_contexts" && val < 1) {
+        return false;
+    }
     return m_configurableMembers.configure(name, val) || PipelineBuilderBase::configure(name, val);
 }
 bool PipelineBuilderVulkan::configure(std::string_view name, float val)

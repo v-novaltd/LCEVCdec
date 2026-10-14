@@ -18,7 +18,7 @@
 #include <LCEVC/common/stdlib.h>
 #include <LCEVC/enhancement/bitstream_types.h>
 #include <LCEVC/enhancement/config_parser.h>
-#include <LCEVC/enhancement/dimensions.h>
+#include <LCEVC/enhancement/utilities.h>
 //
 #include "bitstream.h"
 #include "bytestream.h"

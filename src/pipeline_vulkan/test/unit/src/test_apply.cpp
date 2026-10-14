@@ -578,25 +578,12 @@ protected:
             m_vulkanPipeline->waitCompletionContextIdle();
         }
 
-        // For temporal: add temporal buffer to picture
+        const std::string hash = vulkan_test_util::hashMd5Buffer(
+            static_cast<BufferVulkan*>(temporal ? temporalPic->buffer : picture->buffer));
         if (temporal) {
-            VulkanFrameContext* ctx = compute.acquireFrameContext(nullptr);
-            EXPECT_NE(ctx, nullptr);
-            compute.beginCompute(ctx);
-            VulkanAddArgs addArgs{};
-            addArgs.src = temporalPic;
-            addArgs.dst = picture;
-            addArgs.numEnhancedPlanes = 3;
-            addArgs.chroma = LdeChroma::CT420;
-            addArgs.context = ctx;
-            EXPECT_TRUE(m_vulkanPipeline->backend().add(&addArgs));
-            compute.endCompute(ctx);
-            m_vulkanPipeline->addCompletionContext(ctx);
-            m_vulkanPipeline->waitCompletionContextIdle();
             m_vulkanPipeline->freePicture(temporalPic);
         }
-
-        return vulkan_test_util::hashMd5Buffer(static_cast<BufferVulkan*>(picture->buffer));
+        return hash;
     }
 
     // Apply two tiles in a single compute session (merged buffer) and return
@@ -613,7 +600,7 @@ protected:
 
         VulkanFrameContext* ctx = compute.acquireFrameContext(nullptr);
         EXPECT_NE(ctx, nullptr);
-        compute.beginCompute(ctx, 2);
+        compute.beginCompute(ctx);
         if (!ctx->prepareCommandBuffer(LOQ0, mergedBufferSize({&m_cmdBuf1, &m_cmdBuf2})) ||
             !ctx->prepareCommandBuffer(LOQ1, 0)) {
             return "";
@@ -659,28 +646,16 @@ protected:
         }
         EXPECT_TRUE(m_vulkanPipeline->backend().applyTile(&tile2));
 
-        ctx->insertComputeBarrier();
-
-        // For temporal: add temporal buffer to picture in the same session
-        if (temporal) {
-            VulkanAddArgs addArgs{};
-            addArgs.src = temporalPic;
-            addArgs.dst = picture;
-            addArgs.numEnhancedPlanes = 3;
-            addArgs.chroma = LdeChroma::CT420;
-            addArgs.context = ctx;
-            EXPECT_TRUE(m_vulkanPipeline->backend().add(&addArgs));
-        }
-
         compute.endCompute(ctx);
         m_vulkanPipeline->addCompletionContext(ctx);
         m_vulkanPipeline->waitCompletionContextIdle();
 
+        const std::string hash = vulkan_test_util::hashMd5Buffer(
+            static_cast<BufferVulkan*>(temporal ? temporalPic->buffer : picture->buffer));
         if (temporal) {
             m_vulkanPipeline->freePicture(temporalPic);
         }
-
-        return vulkan_test_util::hashMd5Buffer(static_cast<BufferVulkan*>(picture->buffer));
+        return hash;
     }
 
     static constexpr uint32_t kWidth = 256;
@@ -715,7 +690,7 @@ TEST_F(MultiTileApplyFixture, DirectMergedMatchesSequential)
 }
 
 // Apply two tiles via a temporal buffer in a single compute session.  The
-// result (temporal + add) must match applying them in separate sessions.
+// temporal result must match applying them in separate sessions.
 // The temporal path uses ClearAndSet (temporal-cleared blocks with residuals)
 // and Add (non-cleared blocks) as the decoder would produce.
 TEST_F(MultiTileApplyFixture, TemporalMergedMatchesSequential)

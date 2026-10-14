@@ -19,6 +19,7 @@
 #include <LCEVC/enhancement/cmdbuffer_gpu.h>
 #include <LCEVC/enhancement/config_parser.h>
 #include <LCEVC/enhancement/decode.h>
+#include <LCEVC/enhancement/utilities.h>
 #include <LCEVC/utility/bin_reader.h>
 #include <LCEVC/utility/md5.h>
 
@@ -115,6 +116,72 @@ class DecodeTemporalOff : public Decode
         }
     }
 };
+
+TEST(ResidualChunks, ChecksAllTilesAndExcludesTemporal)
+{
+    LdeGlobalConfig global{};
+    global.initialized = true;
+    global.numPlanes = 1;
+    global.numLayers = 4;
+    global.numTiles[0][LOQ0] = 2;
+    LdeFrameConfig frame{};
+    frame.frameConfigSet = true;
+    frame.entropyEnabled = true;
+    frame.loqEnabled[LOQ0] = true;
+    LdeChunk chunks[10]{};
+    frame.chunks = chunks;
+    frame.numChunks = 10;
+    frame.tileChunkResidualIndex[0][LOQ0] = 1;
+    chunks[0].entropyEnabled = true;
+    chunks[9].entropyEnabled = true; // Non-residual chunks must not affect the result.
+    EXPECT_FALSE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+    chunks[8].entropyEnabled = true; // Last layer of the second tile.
+    EXPECT_TRUE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+    frame.entropyEnabled = false;
+    EXPECT_FALSE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+    frame.entropyEnabled = true;
+    frame.loqEnabled[LOQ0] = false;
+    EXPECT_FALSE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+    frame.loqEnabled[LOQ0] = true;
+    frame.numChunks = 8;
+    EXPECT_TRUE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+    frame.chunks = nullptr;
+    EXPECT_TRUE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+}
+
+TEST(ResidualChunks, WholeTileZeroRun)
+{
+    LdeGlobalConfig global{};
+    global.initialized = true;
+    global.numPlanes = 1;
+    global.numLayers = 1;
+    global.numTiles[0][LOQ0] = 1;
+    global.width = global.tileWidth[0] = 32;
+    global.height = global.tileHeight[0] = 32;
+    global.transform = TransformDDS;
+    LdeFrameConfig frame{};
+    frame.frameConfigSet = frame.entropyEnabled = frame.loqEnabled[LOQ0] = true;
+    uint8_t data[] = {0xc0, 63}; // One zero coefficient and 63 following zero TUs.
+    LdeChunk chunk{};
+    chunk.entropyEnabled = true;
+    chunk.rleOnly = true;
+    chunk.data = data;
+    chunk.size = sizeof(data);
+    frame.chunks = &chunk;
+    frame.numChunks = 1;
+    EXPECT_FALSE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+    data[1] = 62;
+    EXPECT_TRUE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+    data[1] = 63;
+    data[0] = 0xc2; // Nonzero first coefficient.
+    EXPECT_TRUE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+    data[0] = 0xc0;
+    chunk.size = 1; // Truncated run.
+    EXPECT_TRUE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+    chunk.size = sizeof(data);
+    chunk.rleOnly = false;
+    EXPECT_TRUE(ldeHasResiduals(&global, &frame, LOQ0, 0));
+}
 
 TEST_F(DecodeTemporalOn, DecodeToCpuCmdBuffer)
 {

@@ -44,8 +44,10 @@ void TemporalBufferCPU::update(const pipeline::TemporalBufferDesc& newDesc)
 
         // Clear new buffer to zero
         memset(planeDesc.firstSample, 0, bufferSize);
+        temporalBufferEmpty = true;
     } else if (newDesc.clear) {
         memset(planeDesc.firstSample, 0, bufferSize);
+        temporalBufferEmpty = true;
     }
 
     // Update description

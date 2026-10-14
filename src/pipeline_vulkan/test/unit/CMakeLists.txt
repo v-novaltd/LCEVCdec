@@ -23,8 +23,10 @@ target_sources(lcevc_dec_pipeline_vulkan_test_unit PRIVATE ${SOURCES} ${HEADERS}
 lcevc_set_properties(lcevc_dec_pipeline_vulkan_test_unit)
 
 target_include_directories(
-    lcevc_dec_pipeline_vulkan_test_unit PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../include"
-                                                "${CMAKE_CURRENT_LIST_DIR}/../../src")
+    lcevc_dec_pipeline_vulkan_test_unit
+    PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../include" "${CMAKE_CURRENT_LIST_DIR}/../../src"
+            "${CMAKE_CURRENT_LIST_DIR}/../../../enhancement/src"
+            "${CMAKE_CURRENT_LIST_DIR}/../../../enhancement/test/unit/src")
 
 target_link_libraries(
     lcevc_dec_pipeline_vulkan_test_unit

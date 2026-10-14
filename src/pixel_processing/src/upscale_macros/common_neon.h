@@ -103,8 +103,10 @@ static inline uint8x8_t neonDemoteU8x8(int16x8_t values)
 static inline uint16x8_t neonDemoteU16x8(int16x8_t values, uint16_t offset, uint16_t shift, uint16_t midpoint)
 {
     const int16x8_t shifted =
-        vshlq_s16(vaddq_s16(values, vdupq_n_s16((int16_t)offset)), vdupq_n_s16(-(int16_t)shift));
-    return vreinterpretq_u16_s16(vaddq_s16(shifted, vdupq_n_s16((int16_t)midpoint)));
+        vshlq_s16(vqaddq_s16(values, vdupq_n_s16((int16_t)offset)), vdupq_n_s16(-(int16_t)shift));
+    const int16x8_t converted = vaddq_s16(shifted, vdupq_n_s16((int16_t)midpoint));
+    return vreinterpretq_u16_s16(
+        vminq_s16(vmaxq_s16(converted, vdupq_n_s16(0)), vdupq_n_s16((int16_t)(2 * midpoint - 1))));
 }
 
 // Vertical filter pair: 5 input rows -> both filter phases (even = dest row 0,

@@ -48,6 +48,9 @@ struct TemporalBufferBase
     // Description of this buffer
     TemporalBufferDesc desc;
 
+    // Conservative CPU state: only a cleared buffer is known to contain no residuals.
+    bool temporalBufferEmpty = false;
+
     // Timestamp upper limit that this buffer could fulfil
     uint64_t timestampLimit;
 

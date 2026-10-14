@@ -17,12 +17,44 @@
 #include <LCEVC/pipeline/pipeline_base.h>
 #include <LCEVC/pipeline/types.h>
 //
+#include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/log.h>
+#include <LCEVC/enhancement/utilities.h>
 #include <LCEVC/pipeline/frame_base.h>
 #include <LCEVC/pipeline/picture_base.h>
 
 namespace lcevc_dec::pipeline {
+
+bool PipelineBase::directUpscaleEligible(const FrameBase& frame, uint32_t plane)
+{
+    const LdeGlobalConfig* const globalConfig = frame.globalConfig;
+    if (!globalConfig || plane >= RCMaxPlanes) {
+        return false;
+    }
+
+    bool temporalEmpty = true;
+    if (plane < globalConfig->numPlanes && globalConfig->temporalEnabled && !frame.isPassthrough()) {
+        bool& empty = m_temporalPlaneEmpty[plane];
+        if (isFlushed(&frame)) {
+            empty = false;
+        } else {
+            if (frame.config.temporalRefresh || frame.config.nalType == NTIDR) {
+                empty = true;
+            }
+            if (ldeHasResiduals(globalConfig, &frame.config, LOQ0, plane)) {
+                empty = false;
+            }
+        }
+        temporalEmpty = empty;
+    }
+
+    return temporalEmpty && !frame.isPassthrough() &&
+           globalConfig->baseDepth == globalConfig->enhancedDepth &&
+           ((globalConfig->scalingModes[LOQ0] != Scale0D) != (globalConfig->scalingModes[LOQ1] != Scale0D)) &&
+           !ldeHasResiduals(globalConfig, &frame.config, LOQ0, plane) &&
+           !ldeHasResiduals(globalConfig, &frame.config, LOQ1, plane);
+}
 
 // Utility functions for finding and sorting things in Vectors
 //
@@ -1011,6 +1043,7 @@ void PipelineBase::transferTemporalBuffer(FrameBase* frame, uint32_t plane)
 void PipelineBase::baseDone(LdpPicture* picture)
 {
     assert(picture);
+    VNTraceAsyncEnd("base.pictureLifetime", reinterpret_cast<uintptr_t>(picture));
 
     // Generate event
     m_eventSink->generate(pipeline::EventBasePictureDone, picture);
@@ -1021,6 +1054,9 @@ void PipelineBase::baseDone(LdpPicture* picture)
 
 void PipelineBase::outputDone(FrameBase* frame)
 {
+    if (frame->outputPicture) {
+        VNTraceAsyncEnd("output.pictureLifetime", reinterpret_cast<uintptr_t>(frame->outputPicture));
+    }
     common::ScopedLock lock(m_interTaskMutex);
 
     // Remove from processing index

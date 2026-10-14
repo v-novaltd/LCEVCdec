@@ -1,4 +1,4 @@
-# Copyright (c) V-Nova International Limited 2023-2025. All rights reserved.
+# Copyright (c) V-Nova International Limited 2023-2026. All rights reserved.
 # This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
 # No patent licenses are granted under this license. For enquiries about patent licenses,
 # please contact legal@v-nova.com.
@@ -42,6 +42,10 @@ if (VN_SDK_BASE_DECODER)
 endif ()
 if (VN_SDK_JSON_CONFIG)
     list(APPEND SOURCES "src/configure.cpp")
+endif ()
+if (VN_SDK_TRACING_SYSTEM_SINK)
+    list(APPEND SOURCES "src/perfetto_sdk.cpp")
+    list(APPEND INTERFACES "include/LCEVC/utility/perfetto_sdk.h")
 endif ()
 
 list(APPEND HEADERS "src/bin_writer.h" "src/enum_map.h" "src/parse_raw_name.h"

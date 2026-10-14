@@ -1,4 +1,4 @@
-/* Copyright (c) V-Nova International Limited 2022-2025. All rights reserved.
+/* Copyright (c) V-Nova International Limited 2022-2026. All rights reserved.
  * This software is licensed under the BSD-3-Clause-Clear License by V-Nova Limited.
  * No patent licenses are granted under this license. For enquiries about patent licenses,
  * please contact legal@v-nova.com.
@@ -45,7 +45,7 @@
 
 /** Define API versioning */
 #define LCEVC_DEC_VERSION_MAJOR 4
-#define LCEVC_DEC_VERSION_MINOR 2
-#define LCEVC_DEC_VERSION_PATCH 2
+#define LCEVC_DEC_VERSION_MINOR 3
+#define LCEVC_DEC_VERSION_PATCH 0
 
 #endif // API_DEFS_H

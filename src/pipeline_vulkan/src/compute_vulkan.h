@@ -39,29 +39,25 @@ class VulkanFrameContext;
 
 struct VulkanApplyCommonArgs;
 struct VulkanApplyTileArgs;
-struct VulkanAddArgs;
+
 struct VulkanConvertInArgs;
 struct PushConstantsConversion;
 struct VulkanConvertOutArgs;
 struct VulkanUpscaleArgs;
 
-// The various Vulkan compute steps for decoding
-//
-// Each step will use one of the pipeline layouts, and
-// an appropriate specialised pipeline.
-//
-enum ComputeStep
+struct VulkanDequantTransformArgs
 {
-    ComputeStepConversionTo,
-    ComputeStepSrcMidLoq1,
-    ComputeStepMidDstLoq1,
-    ComputeStepApplyLoq1,
-    ComputeStepSrcMidLoq0,
-    ComputeStepMidDstLoq0,
-    ComputeStepApplyLoq0,
-    ComputeStepAdd,
-    ComputeStepConversionFrom,
-    ComputeStep_Count
+    BufferVulkan* coefficients{};
+    BufferVulkan* dequantParameters{};
+    BufferVulkan* residuals{};
+    VulkanFrameContext* context{};
+    uint32_t transformUnitCount{};
+    uint32_t layerCount{};
+    uint32_t temporalSignal{};
+    LdeScalingMode scalingMode{};
+    bool deblockEnabled{};
+    uint32_t deblockCorner{};
+    uint32_t deblockSide{};
 };
 
 // Arguments for creating a compute pipeline - workgroup dimensions and shader specialization
@@ -95,12 +91,11 @@ struct ComputePipeline
 
 struct DescriptorSetLayouts
 {
-    VkDescriptorSetLayout vertical{};
-    VkDescriptorSetLayout horizontal{};
+    VkDescriptorSetLayout upscale{};
     VkDescriptorSetLayout apply{};
     VkDescriptorSetLayout conversion{};
     VkDescriptorSetLayout convertOutImage{};
-    VkDescriptorSetLayout add{};
+    VkDescriptorSetLayout dequantTransform{};
 };
 
 class ComputeVulkan
@@ -112,9 +107,10 @@ public:
     // API
     bool applyCommon(VulkanApplyCommonArgs* params);
     bool applyTile(VulkanApplyTileArgs* params);
-    bool add(VulkanAddArgs* params);
+
     bool convertIn(VulkanConvertInArgs* params);
     bool convertOut(VulkanConvertOutArgs* params);
+    bool dequantTransform(VulkanDequantTransformArgs* params);
 
 private:
     // Per-flavour helpers for convertOut(). The common preamble in
@@ -125,15 +121,16 @@ private:
     bool convertOutToBuffer(VulkanConvertOutArgs* params, PushConstantsConversion& constants);
 
 public:
-    bool upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs* params);
-    bool upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArgs* params);
+    bool upscale1D(const LdeKernel* kernel, VulkanUpscaleArgs* params);
+    bool upscale2D(const LdeKernel* kernel, VulkanUpscaleArgs* params);
     bool upscaleFrame(const LdeKernel* kernel, VulkanUpscaleArgs* params);
 
-    bool beginCompute(VulkanFrameContext* context, uint32_t numTiles = 6);
+    bool beginCompute(VulkanFrameContext* context);
     bool endCompute(VulkanFrameContext* context);
 
     bool updateConfig(uint8_t loq, const LdpPictureDesc& desc);
-    std::vector<VulkanFrameContext>& getFrameContexts() { return m_frameContexts; }
+    uint32_t frameContextCount() const { return static_cast<uint32_t>(m_frameContexts.size()); }
+
     VulkanFrameContext* acquireFrameContext(FrameVulkan* frame);
     void releaseFrameContext(VulkanFrameContext* context);
 
@@ -147,7 +144,8 @@ public:
 private:
     // Compute
     bool createComputeBindingsAndPipelineLayout(ComputePipelineLayout& computePipelineLayout,
-                                                uint32_t numBuffers, uint32_t pushConstantsSize);
+                                                const std::vector<VkDescriptorType>& descriptorTypes,
+                                                uint32_t pushConstantsSize);
     bool createConvertOutImageBindingsAndPipelineLayout(ComputePipelineLayout& computePipelineLayout,
                                                         uint32_t pushConstantsSize);
     bool createComputePipeline(ComputePipeline& computePipeline,
@@ -165,7 +163,8 @@ private:
     bool updateComputeImageDescriptorSets(BufferVulkan* src, BufferVulkan* dst,
                                           BufferVulkan* temporal, VkDescriptorSet descriptorSet);
     bool updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst1, BufferVulkan* dst2,
-                                     VkDescriptorSet descriptorSet);
+                                     VkDescriptorSet descriptorSet,
+                                     const std::vector<VkDescriptorType>& descriptorTypes);
 
     BackendVulkan& m_backend;
 
@@ -178,43 +177,54 @@ private:
     common::RingBuffer<uint32_t> m_freeContexts;
 
     // Shared pipeline layouts for various decode steps
-    ComputePipelineLayout m_pipelineLayoutVertical{};
-    ComputePipelineLayout m_pipelineLayoutHorizontal{};
+    ComputePipelineLayout m_pipelineLayoutUpscale{};
     ComputePipelineLayout m_pipelineLayoutApply{};
     ComputePipelineLayout m_pipelineLayoutConversion{};
     ComputePipelineLayout m_pipelineLayoutConvertOutImage{};
-    ComputePipelineLayout m_pipelineLayoutAdd{};
+    ComputePipelineLayout m_pipelineLayoutDequantTransform{};
 
     // THe various compute pipelines with per step specializations for
     // various global options
-    ComputePipeline m_pipelineVertical{};
-    ComputePipeline m_pipelineHorizontalPA0{};
-    ComputePipeline m_pipelineHorizontalPA1{};
-    ComputePipeline m_pipelineHorizontalPA2{};
+    ComputePipeline m_pipelineUpscale1DPA0{};
+    ComputePipeline m_pipelineUpscale1DPA1{};
+    ComputePipeline m_pipelineUpscale2DPA0{};
+    ComputePipeline m_pipelineUpscale2DPA2{};
     ComputePipeline m_pipelineApplyDd{};
     ComputePipeline m_pipelineApplyDds{};
     ComputePipeline m_pipelineApplyDdRaster{};
     ComputePipeline m_pipelineApplyDdsRaster{};
     ComputePipeline m_pipelineConversionToInternal8Bit{};
-    ComputePipeline m_pipelineConversionFromInternal8Bit{};
     ComputePipeline m_pipelineConversionToInternal8BitNV12{};
-    ComputePipeline m_pipelineConversionFromInternal8BitNV12{};
     ComputePipeline m_pipelineConversionToInternal16Bit{};
-    ComputePipeline m_pipelineConversionFromInternal16Bit{};
-    ComputePipeline m_pipelineConversionFromInternal16BitP010{};
+    ComputePipeline m_pipelineConversionFromInternalPlanar8{};
+    ComputePipeline m_pipelineConversionFromInternalPlanar8Sharpen{};
+    ComputePipeline m_pipelineConversionFromInternalPlanar16{};
+    ComputePipeline m_pipelineConversionFromInternalPlanar16Sharpen{};
+    ComputePipeline m_pipelineConversionFromInternalNv12{};
+    ComputePipeline m_pipelineConversionFromInternalNv12Sharpen{};
+    ComputePipeline m_pipelineConversionFromInternalP010{};
+    ComputePipeline m_pipelineConversionFromInternalP010Sharpen{};
     ComputePipeline m_pipelineConversionFromInternalRgba8Image{};
+    ComputePipeline m_pipelineConversionFromInternalRgba8ImageGeneric{};
     ComputePipeline m_pipelineConversionFromInternalRgba10Image{};
+    ComputePipeline m_pipelineConversionFromInternalRgba10ImageGeneric{};
     ComputePipeline m_pipelineConversionFromInternalP010Image{};
     ComputePipeline m_pipelineConversionFromInternalNv12Image{};
-    ComputePipeline m_pipelineConversionFromInternal8BitAddTemporal{};
-    ComputePipeline m_pipelineConversionFromInternal8BitNV12AddTemporal{};
-    ComputePipeline m_pipelineConversionFromInternal16BitAddTemporal{};
-    ComputePipeline m_pipelineConversionFromInternal16BitP010AddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalPlanar8AddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalPlanar8SharpenAddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalPlanar16AddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalPlanar16SharpenAddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalNv12AddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalNv12SharpenAddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalP010AddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalP010SharpenAddTemporal{};
     ComputePipeline m_pipelineConversionFromInternalRgba8ImageAddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalRgba8ImageGenericAddTemporal{};
     ComputePipeline m_pipelineConversionFromInternalRgba10ImageAddTemporal{};
+    ComputePipeline m_pipelineConversionFromInternalRgba10ImageGenericAddTemporal{};
     ComputePipeline m_pipelineConversionFromInternalP010ImageAddTemporal{};
     ComputePipeline m_pipelineConversionFromInternalNv12ImageAddTemporal{};
-    ComputePipeline m_pipelineAdd{};
+    ComputePipeline m_pipelineDequantTransform{};
 
     DescriptorSetLayouts m_descriptorSetLayouts{};
 };

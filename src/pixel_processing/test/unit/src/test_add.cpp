@@ -13,6 +13,7 @@
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
 #include "add_common.h"
+#include "convert_common.h"
 #include "fp_types.h"
 #include "test_plane.h"
 
@@ -29,6 +30,8 @@
 extern "C"
 {
 PlaneAddFunction planeAddGetFunction(LdpFixedPoint dstFP);
+PlaneConvertFunction planeConvertGetFunction(LdpFixedPoint srcFP, LdpFixedPoint dstFP,
+                                             uint32_t planeIndex, bool isNV12);
 }
 
 namespace rg = ranges;
@@ -93,6 +96,34 @@ TEST_P(AddTest, CompareSIMD)
 }
 
 // -----------------------------------------------------------------------------
+
+TEST_P(AddTest, ZeroResidualMatchesConversion)
+{
+    // Exercise every signed 16-bit input, including clipping and rounding boundaries.
+    auto* samples = reinterpret_cast<int16_t*>(m_src2.planeDesc.firstSample);
+    for (uint32_t y = 0; y < kHeight; ++y) {
+        for (uint32_t x = 0; x < kWidth; ++x) {
+            samples[y * kStride + x] =
+                static_cast<int16_t>(static_cast<int32_t>((y * kWidth + x) % 65536) - 32768);
+        }
+    }
+    const LdppAddArgs addArgs{
+        &m_src1.planeDesc, &m_src2.planeDesc, &m_dstScalar.planeDesc, kWidth, 0, kHeight};
+    const LdppConvertArgs convertArgs{&m_src2.planeDesc, &m_dstSIMD.planeDesc, kWidth, 0, kHeight};
+    for (const bool simd : {false, true}) {
+        ldcAccelerationInitialize(simd);
+        auto add = planeAddGetFunction(GetParam());
+        auto convert = planeConvertGetFunction(fixedPointHighPrecision(GetParam()), GetParam(), 0, false);
+        ASSERT_NE(add, nullptr);
+        ASSERT_NE(convert, nullptr);
+        add(&addArgs);
+        convert(&convertArgs);
+        EXPECT_EQ(memcmp(m_dstScalar.planeDesc.firstSample, m_dstSIMD.planeDesc.firstSample,
+                         m_dstScalar.size()),
+                  0);
+    }
+    ldcAccelerationInitialize(true);
+}
 
 std::string AddToString(const testing::TestParamInfo<LdpFixedPoint>& value)
 {

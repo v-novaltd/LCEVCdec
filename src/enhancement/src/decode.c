@@ -20,8 +20,8 @@
 #include <LCEVC/enhancement/cmdbuffer_cpu.h>
 #include <LCEVC/enhancement/cmdbuffer_gpu.h>
 #include <LCEVC/enhancement/decode.h>
-#include <LCEVC/enhancement/dimensions.h>
 #include <LCEVC/enhancement/transform_unit.h>
+#include <LCEVC/enhancement/utilities.h>
 //
 #include "chunk.h"
 #include "config_parser_types.h"

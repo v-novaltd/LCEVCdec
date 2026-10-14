@@ -14,10 +14,12 @@
 
 #include "timestamp_vulkan.h"
 
+#include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/log.h>
 #include <LCEVC/common/printf_macros.h>
 
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 
 namespace lcevc_dec::pipeline_vulkan {
@@ -27,7 +29,7 @@ TimestampVulkan::TimestampVulkan(VkDevice device, VkPhysicalDevice physicalDevic
     : m_device(device)
     , m_maxCount(count)
 {
-    if (count == 0) {
+    if (m_maxCount == 0) {
         return;
     }
 
@@ -83,7 +85,7 @@ TimestampVulkan::TimestampVulkan(VkDevice device, VkPhysicalDevice physicalDevic
     VkQueryPoolCreateInfo queryPoolInfo{};
     queryPoolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
     queryPoolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-    queryPoolInfo.queryCount = static_cast<uint32_t>(count);
+    queryPoolInfo.queryCount = static_cast<uint32_t>(m_maxCount);
 
     if (vkCreateQueryPool(device, &queryPoolInfo, nullptr, &m_queryPool) != VK_SUCCESS) {
         VNLogError("TimestampVulkan: failed to create query pool");
@@ -217,15 +219,24 @@ void TimestampVulkan::report() const
         return;
     }
 
+    // Anchor GPU timestamp events to a known reference.
+    const uint64_t completionTimestampNs = ldcDiagnosticGetTimestamp();
+
     // Fetch results: each query returns a 64-bit timestamp + 64-bit availability
     const uint32_t queryCount = m_nextQuery;
-    std::vector<uint64_t> results(queryCount * 2);
+    const size_t resultCount = static_cast<size_t>(queryCount) * 2;
+    if (resultCount == 0) {
+        return;
+    }
+
+    std::vector<uint64_t> results(resultCount);
     VkResult r = vkGetQueryPoolResults(
-        m_device, m_queryPool, 0, queryCount, queryCount * 2 * sizeof(uint64_t), results.data(),
+        m_device, m_queryPool, 0, queryCount, resultCount * sizeof(uint64_t), results.data(),
         2 * sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
 
-    if (r != VK_SUCCESS) {
+    if (r != VK_SUCCESS && r != VK_NOT_READY) {
         VNLogError("TimestampVulkan: failed to query results");
+        return;
     }
 
     // If using calibrated timestamps, obtain a calibration point to convert device
@@ -233,6 +244,7 @@ void TimestampVulkan::report() const
     uint64_t deviceCalibration = 0;
     uint64_t hostCalibration = 0;
     uint64_t maxDeviation = 0;
+    bool calibrated = false;
 
     if (m_getCalibratedTimestamps) {
         VkCalibratedTimestampInfoEXT infos[2]{};
@@ -246,21 +258,40 @@ void TimestampVulkan::report() const
         if (cr == VK_SUCCESS) {
             deviceCalibration = calibrationValues[0];
             hostCalibration = calibrationValues[1];
+            calibrated = true;
         } else {
             VNLogWarning("TimestampVulkan: vkGetCalibratedTimestampsEXT failed, "
-                         "reporting raw device timestamps");
+                         "approximately aligning device timestamps");
         }
     }
 
-    // Helper to convert a device timestamp to the calibrated domain (nanoseconds).
-    [[maybe_unused]] auto toCalibratedNs = [&](uint64_t deviceTs) -> double {
-        const auto delta = static_cast<int64_t>(deviceTs - deviceCalibration);
-        return static_cast<double>(hostCalibration) +
-               static_cast<double>(delta) * static_cast<double>(m_timestampPeriod);
+    uint64_t finalDeviceTimestamp = 0;
+    bool haveFinalDeviceTimestamp = false;
+    for (uint32_t query = 0; query < queryCount; ++query) {
+        if (results[query * 2 + 1] != 0) {
+            finalDeviceTimestamp = results[query * 2];
+            haveFinalDeviceTimestamp = true;
+        }
+    }
+
+    // Convert a device timestamp into the monotonic clock used by LCEVC diagnostics and
+    // Perfetto. Prefer the Vulkan calibrated-timestamps extension. The fallback anchors the last
+    // GPU timestamp to the time at which its completed fence was observed.
+    const auto toMonotonicNs = [&](uint64_t deviceTs) -> uint64_t {
+        double monotonicNs = static_cast<double>(completionTimestampNs);
+        if (calibrated) {
+            const auto delta = static_cast<int64_t>(deviceTs - deviceCalibration);
+            monotonicNs = static_cast<double>(hostCalibration) +
+                          static_cast<double>(delta) * static_cast<double>(m_timestampPeriod);
+        } else if (haveFinalDeviceTimestamp) {
+            const auto delta = static_cast<int64_t>(finalDeviceTimestamp - deviceTs);
+            monotonicNs -= static_cast<double>(delta) * static_cast<double>(m_timestampPeriod);
+        }
+        return monotonicNs > 0.0 ? static_cast<uint64_t>(std::llround(monotonicNs)) : 0;
     };
 
     VNLogInfo("Timestamps: period:%g count:%d %s", m_timestampPeriod, queryCount,
-              m_getCalibratedTimestamps ? "Calibrated" : "");
+              calibrated ? "Calibrated" : "Approximately aligned");
 
     [[maybe_unused]] float total = 0.0f;
     for (size_t i = 0; i < m_events.size(); ++i) {
@@ -268,7 +299,8 @@ void TimestampVulkan::report() const
         const uint64_t timestamp = results[evt.queryIndex * 2];
 
         if (results[evt.queryIndex * 2 + 1] == 0) {
-            VNLogInfo("%3d    : %32s not available", evt.label);
+            VNLogInfo("%3zu    : %32s not available", i, evt.label);
+            continue;
         }
 
         // For 'end' events, compute duration from the preceding 'begin'
@@ -276,20 +308,28 @@ void TimestampVulkan::report() const
             // Find matching begin by scanning backwards for a begin with the same label
             for (size_t j = i; j-- > 0;) {
                 if (m_events[j].type == EventType::Begin && m_events[j].label == evt.label) {
+                    if (results[m_events[j].queryIndex * 2 + 1] == 0) {
+                        continue;
+                    }
                     const uint64_t beginTs = results[m_events[j].queryIndex * 2];
                     const float ms = static_cast<float>(timestamp - beginTs) / 1e6f * m_timestampPeriod;
+                    const uint64_t endTimestampNs = toMonotonicNs(timestamp);
 
-                    VNLogInfo("%3d,%3d: %8.3gms %-32s %" PRIu64 "%s", j, i, ms, evt.label,
-                              static_cast<uint64_t>(toCalibratedNs(timestamp)),
-                              m_getCalibratedTimestamps ? "ns" : "");
+                    VNLogInfo("%3zu,%3zu: %8.3gms %-32s %" PRIu64 "%s", j, i, ms, evt.label,
+                              endTimestampNs, calibrated ? "ns" : "ns (approximately aligned)");
+                    // The Android Perfetto handler recognizes this diagnostic and emits a real
+                    // duration slice on the Vulkan GPU track. Other handlers can retain it as an
+                    // instant event with enough information to reconstruct the interval.
+                    VNTraceInstantArgs("vulkan:gpu.timestamp", "label", evt.label, "startTimestampNs",
+                                       toMonotonicNs(beginTs), "endTimestampNs", endTimestampNs,
+                                       "durationMs", ms, "clockAlignmentApproximate", !calibrated);
                     total += ms;
                     goto next;
                 }
             }
         } else if (evt.type == EventType::Instant) {
-            VNLogInfo("%3d    : %32s %" PRIu64 "%s", i, evt.label,
-                      static_cast<uint64_t>(toCalibratedNs(timestamp)),
-                      m_getCalibratedTimestamps ? "ns" : "");
+            VNLogInfo("%3zu    : %32s %" PRIu64 "%s", i, evt.label, toMonotonicNs(timestamp),
+                      calibrated ? "ns" : "ns (approximately aligned)");
         }
 
     next:;

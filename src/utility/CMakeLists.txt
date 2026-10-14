@@ -21,6 +21,9 @@ endif ()
 if (VN_SDK_BASE_DECODER)
     find_package(ffmpeg-libs REQUIRED)
 endif ()
+if (VN_SDK_TRACING_SYSTEM_SINK)
+    find_package(perfetto CONFIG REQUIRED)
+endif ()
 
 add_library(lcevc_dec_utility ${VN_SDK_STATIC_LIB_TYPE} ${SOURCES} ${HEADERS} ${INTERFACES})
 lcevc_set_properties(lcevc_dec_utility)
@@ -33,6 +36,17 @@ target_link_libraries(
     PUBLIC lcevc_dec::platform lcevc_dec::compiler $<TARGET_NAME_IF_EXISTS:ffmpeg-libs::ffmpeg-libs>
     PRIVATE lcevc_dec::api_utility lcevc_dec::extract fmt::fmt
             $<TARGET_NAME_IF_EXISTS:nlohmann_json::nlohmann_json>)
+
+if (VN_SDK_TRACING_SYSTEM_SINK)
+    target_include_directories(
+        lcevc_dec_utility PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../common/include"
+                                  "${PROJECT_BINARY_DIR}/generated")
+    target_link_libraries(lcevc_dec_utility PUBLIC perfetto::perfetto)
+    if (ANDROID)
+        # Perfetto's Android SDK backend calls __android_log_print.
+        target_link_libraries(lcevc_dec_utility PUBLIC log)
+    endif ()
+endif ()
 
 add_library(lcevc_dec::utility ALIAS lcevc_dec_utility)
 

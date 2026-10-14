@@ -12,7 +12,7 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-// Vulkan Horizontal Upscale shader. Specialised for a 4 tap kernel.
+// Vulkan 1D upscale shader. Specialised for a four-tap kernel.
 
 #version 450
 
@@ -23,7 +23,7 @@ layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
        local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
-layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
+layout(std430, set = 0, binding = 0) buffer readonly SrcImageBuffer {
     uint samples[];
 } src;
 
@@ -31,7 +31,7 @@ layout(std430, set = 0, binding = 1) buffer restrict writeonly DstImageBuffer {
     uint samples[];
 } dst;
 
-layout(std430, set = 0, binding = 2) buffer restrict writeonly BaseImageBuffer {
+layout(std430, set = 0, binding = 2) buffer readonly BaseImageBuffer {
     uint samples[];
 } base;
 

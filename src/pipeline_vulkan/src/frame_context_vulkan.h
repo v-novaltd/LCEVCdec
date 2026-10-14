@@ -48,7 +48,7 @@ public:
     void destroy();
 
     // Lifecycle
-    bool begin(const DescriptorSetLayouts& layouts, uint32_t numTiles);
+    bool begin(const DescriptorSetLayouts& layouts);
     bool end(VkQueue computeQueue);
     void abort();
 
@@ -62,12 +62,11 @@ public:
     // Dispatch
     void dispatch(uint32_t width, uint32_t height, const char* label);
 
-    // Events - used to sequence the temporal apply stage - there is a single temporal
-    // buffer that is evolved by each frame.
+    // Events sequence access to the temporal buffer between frames.
     void waitEvent();
     void setEvent();
 
-    void insertComputeBarrier();
+    void insertComputeBarrier(const char* label);
 
     void freeTmpCmdBuffers();
 
@@ -81,7 +80,7 @@ public:
 private:
     friend class ComputeVulkan;
 
-    bool allocateDescriptorSets(const DescriptorSetLayouts& layouts, uint32_t totalNumTiles);
+    bool allocateDescriptorSets(const DescriptorSetLayouts& layouts);
 
     BackendVulkan* m_backend{};
 
@@ -93,15 +92,13 @@ private:
     bool m_descriptorSetsAllocated{};
     VkDescriptorPool m_descriptorPool{};
 
-    //    VkDescriptorSet m_descriptorSets[];
-    VkDescriptorSet m_descriptorSetSrcMidLoq1{}; // 2 buffers: 1.base -> VERTICAL -> 2.output
-    VkDescriptorSet m_descriptorSetMidDstLoq1{}; // 3 buffers: 1.vertical + 2.base -> HORIZONTAL -> 3.output
-    VkDescriptorSet m_descriptorSetSrcMidLoq0{}; // 2 buffers: 1.base -> VERTICAL -> 2.output
-    VkDescriptorSet m_descriptorSetMidDstLoq0{}; // 3 buffers: 1.vertical + 2.base -> HORIZONTAL -> 3.output
+    VkDescriptorSet m_descriptorSetUpscaleLoq1{}; // 3 buffers: source, destination, and PA base
+    VkDescriptorSet m_descriptorSetUpscaleLoq0{}; // 3 buffers: source, destination, and PA base
     VkDescriptorSet m_descriptorSetConversionTo{}; // 2 buffers: 1.input -> CONVERSION -> 2.output plane
     VkDescriptorSet m_descriptorSetConversionFrom{}; // 2 buffers: 1.input -> CONVERSION -> 2.output plane
     VkDescriptorSet m_descriptorSetConversionFromImage{}; // 1 buffer + 1 storage image output
-    VkDescriptorSet m_descriptorSetAdd{}; // 2 buffers: 1.input -> ADD -> 2.output plane
+    VkDescriptorSet m_descriptorSetDequantTransform{}; // coefficients + dequant params -> residuals
+
     VkDescriptorSet m_descriptorSetApply[LOQEnhancedCount]{}; // LOQ0: 1.merged commands -> APPLY -> 2.output plane
 
     BufferVulkan* m_gpuCommandBuffer[LOQEnhancedCount] = {}; // merged command buffers for LOQ apply tiles
@@ -116,7 +113,7 @@ private:
     const ComputePipelineLayout* m_computePipelineLayout{};
     const ComputePipeline* m_computePipeline{};
 
-    // shader profiling
+    // Shader profiling
     TimestampVulkan m_timestamps;
 };
 

@@ -36,6 +36,7 @@ extern "C"
 #include <libavformat/avformat.h>
 #include <libavutil/dict.h>
 #include <libavutil/error.h>
+#include <libavutil/ffversion.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/log.h>
@@ -834,6 +835,11 @@ std::unique_ptr<BaseDecoder> createBaseDecoderLibAV(std::string_view input, std:
                                                     LCEVC_ColorFormat baseFormat, bool verbose,
                                                     bool extract, bool hardware)
 {
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(59, 18, 100)
+    fmt::print("Warning: Some harness features are not available with libav below {} - "
+               "please upgrade to 5.0 or later\n",
+               FFMPEG_VERSION);
+#endif
     auto decoder = std::make_unique<BaseDecoderLibAV>();
 
     decoder->m_extractEnhanced = extract;

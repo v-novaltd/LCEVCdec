@@ -16,6 +16,7 @@
 
 #include "buffer_vulkan.h"
 #include "compute_vulkan.h"
+#include "frame_context_vulkan.h"
 #include "frame_vulkan.h"
 #include "from_base.h"
 #include "picture_vulkan.h"
@@ -23,6 +24,7 @@
 #include "temporal_buffer_vulkan.h"
 
 #include <LCEVC/common/check.h>
+#include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/log.h>
 #include <LCEVC/common/memory.h>
@@ -71,11 +73,6 @@ PipelineVulkan::PipelineVulkan(const PipelineBuilderVulkan& builder, pipeline::E
         m_temporalBuffers.append(buf);
     }
 
-    // NB:this assumes that the vulkan shaders will be serialized 'enough' to
-    // allow a single intermediate buffer to be used.
-    //
-    m_intermediateUpscalePicture[LOQ1] = allocatePicture();
-    m_intermediateUpscalePicture[LOQ0] = allocatePicture();
     m_temporalPicture = allocatePicture();
 
     if (m_backend.initVulkan()) {
@@ -94,15 +91,6 @@ PipelineVulkan::~PipelineVulkan()
 
     delete m_completionThread;
     m_completionThread = nullptr;
-
-    if (m_intermediateUpscalePicture[LOQ1]) {
-        releasePicture(m_intermediateUpscalePicture[LOQ1]);
-        m_intermediateUpscalePicture[LOQ1] = nullptr;
-    }
-    if (m_intermediateUpscalePicture[LOQ0]) {
-        releasePicture(m_intermediateUpscalePicture[LOQ0]);
-        m_intermediateUpscalePicture[LOQ0] = nullptr;
-    }
 
     if (m_temporalPicture) {
         releasePicture(m_temporalPicture);
@@ -144,6 +132,8 @@ PipelineVulkan::~PipelineVulkan()
 
 BufferVulkan* PipelineVulkan::allocateBuffer(uint32_t requiredSize, pipeline::BufferUsage usage)
 {
+    VNTraceScopedNamedArgs("vulkan:PipelineVulkan::allocateBuffer", "bytes", requiredSize, "usage",
+                           static_cast<uint32_t>(usage));
     BufferVulkanVma* buffer = nullptr;
     {
         common::ScopedLock lock(m_allocationBuffersMutex);
@@ -167,14 +157,14 @@ BufferVulkan* PipelineVulkan::allocateBuffer(uint32_t requiredSize, pipeline::Bu
             *selected = m_cachedBuffers.back();
             m_cachedBuffers.pop_back();
         } else {
-            buffer = m_buffersPool.make(m_backend, 0, usage);
+            buffer = m_buffersPool.make(m_backend, 0, usage, BufferVulkanBinding::Storage);
 
             // A resolution or usage change can leave every pool slot in the cache. Discard one
             // stale allocation so the fixed-size object pool can adapt to the new workload.
             if (buffer == nullptr && !m_cachedBuffers.empty()) {
                 m_buffersPool.destroy(m_cachedBuffers.back());
                 m_cachedBuffers.pop_back();
-                buffer = m_buffersPool.make(m_backend, 0, usage);
+                buffer = m_buffersPool.make(m_backend, 0, usage, BufferVulkanBinding::Storage);
             }
         }
     }
@@ -207,6 +197,7 @@ BufferVulkan* PipelineVulkan::allocateBuffer(uint32_t requiredSize, pipeline::Bu
 
 void PipelineVulkan::releaseBuffer(pipeline::BufferBase* buffer)
 {
+    VNTraceScopedNamedArgs("vulkan:PipelineVulkan::releaseBuffer", "bytes", buffer ? buffer->size() : 0);
     common::ScopedLock lock(m_allocationBuffersMutex);
     assert(buffer);
 
@@ -342,6 +333,7 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
                                                 const LdpRenderSendInformation* renderSendInformation,
                                                 uint64_t delayUs)
 {
+    VNTraceScopedNamedArgs("vulkan:PipelineVulkan::renderSendPicture", "timestamp", timestamp);
     VNUnused(timestamp);
     VNUnused(delayUs);
 
@@ -401,7 +393,9 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
         VNLogError("Failed to prepare render texture resources");
         return LdcReturnCodeError;
     }
-    if (!backend().getRenderer().waitForTextureUpload()) {
+    const bool textureReady = VNTraceFuncNamed("vulkan:render.waitForTextureUpload",
+                                               backend().getRenderer().waitForTextureUpload());
+    if (!textureReady) {
         VNLogError("Failed to wait for render textures");
         return LdcReturnCodeError;
     }
@@ -414,7 +408,9 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
     }
 
     LdpBufferMapping mapping{};
-    if (!buffer->map(&mapping, 0, buffer->size(), LdpAccessRead)) {
+    const bool bufferMapped = VNTraceFuncNamed(
+        "vulkan:render.mapOutputBuffer", buffer->map(&mapping, 0, buffer->size(), LdpAccessRead));
+    if (!bufferMapped) {
         VNLogError("Mapping failed");
         return LdcReturnCodeError;
     }
@@ -425,7 +421,7 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
     }
     const bool texturePlanesMapped = backend().getRenderer().mapTexturePlanes(
         mapping.ptr, picture->layout, pictureWidth, pictureHeight);
-    buffer->unmap(&mapping);
+    VNTraceFuncNamed("vulkan:render.unmapOutputBuffer", buffer->unmap(&mapping));
 
     if (!texturePlanesMapped) {
         VNLogError("Failed to map texture planes");
@@ -540,14 +536,13 @@ void PipelineVulkan::frameCompletionThread()
 
 void PipelineVulkan::finishCompletionContext(VulkanFrameContext* context)
 {
+    context->getTimestamps().report();
+
     // Frame finishing
     //
     if (FrameVulkan* frame = context->getFrame()) {
         frame->computeTaskFinish(this);
     }
-
-    // Debugging shader timing
-    context->getTimestamps().report();
 
     m_backend.compute().releaseFrameContext(context);
 }

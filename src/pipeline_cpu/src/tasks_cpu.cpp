@@ -43,6 +43,11 @@ namespace {
 
         uint32_t enhancementTileIdx = 0;
 
+        bool directUpscale[kLdpPictureMaxNumPlanes] = {};
+        for (uint8_t plane = 0; plane < numEnhancedPlanes; ++plane) {
+            directUpscale[plane] = pipeline->directUpscaleEligible(*frame, plane);
+        }
+
         //// LoQ 1
         //
         LdcTaskDependency basePlanes[kLdpPictureMaxNumPlanes] = {};
@@ -55,6 +60,13 @@ namespace {
         // Upscale and residuals
         for (uint8_t plane = 0; plane < numEnhancedPlanes; ++plane) {
             const bool planeEnhanced = frame->isPlaneEnhanced(LOQ1, plane);
+
+            if (directUpscale[plane]) {
+                if (planeEnhanced) {
+                    enhancementTileIdx += globalConfig.numTiles[plane][LOQ1];
+                }
+                continue;
+            }
 
             //// Input conversion
             //
@@ -110,6 +122,15 @@ namespace {
         LdcTaskDependency outputPlanes[kLdpPictureMaxNumPlanes] = {};
 
         for (uint8_t plane = 0; plane < numEnhancedPlanes; ++plane) {
+            if (directUpscale[plane]) {
+                const LdeLOQIndex fromLoq = scalingModes[LOQ0] != Scale0D ? LOQ1 : LOQ2;
+                outputPlanes[plane] = addTaskUpscaleDirect(
+                    pipeline, frame, fromLoq, plane, basePlanes[plane], frame->depOutputPicture());
+                if (plane == 0 && sharpeningEnabled) {
+                    outputPlanes[plane] = addTaskSharpen(pipeline, frame, plane, outputPlanes[plane]);
+                }
+                continue;
+            }
             if (scalingModes[LOQ0] != Scale0D) {
                 upscaledPlanes[plane] = addTaskUpscale(pipeline, frame, LOQ1, plane, basePlanes[plane]);
             } else {
@@ -153,6 +174,23 @@ namespace {
         for (uint8_t plane = 0; plane < numImagePlanes; ++plane) {
             const bool planeEnhanced = frame->isPlaneEnhanced(LOQ0, plane);
 
+            if (directUpscale[plane]) {
+                if (planeEnhanced) {
+                    enhancementTileIdx += globalConfig.numTiles[plane][LOQ0];
+                }
+                if (globalConfig.temporalEnabled) {
+                    const LdcTaskDependency temporal =
+                        frame->needsTemporalBuffer(previousTimestamp, plane);
+                    pipeline->findTemporalBuffer(frame, plane);
+                    // Preserve temporal clear/transfer even though no residual commands are needed.
+                    const LdcTaskDependency deps[] = {temporal, outputPlanes[plane]};
+                    const LdcTaskDependency ready = addTaskWaitForMany(pipeline, frame, deps, 2);
+                    addTaskTemporalTransfer(pipeline, frame, ready, plane);
+                    outputPlanes[plane] = ready;
+                }
+                continue;
+            }
+
             LdcTaskDependency recon{upscaledPlanes[plane]};
 
             if (globalConfig.temporalEnabled && !frame->isPassthrough()) {
@@ -193,10 +231,10 @@ namespace {
                     }
                 }
 
-                // Always add temporal buffer, even if no enhancement this frame
+                // Resolve temporal state at execution time; empty buffers only require output conversion.
                 if (plane < numEnhancedPlanes) {
-                    LdcTaskDependency converted = addTaskApplyAddTemporal(
-                        pipeline, frame, plane, temporal, recon, frame->depOutputPicture());
+                    LdcTaskDependency converted = addTaskAddTemporal(pipeline, frame, plane, temporal,
+                                                                     recon, frame->depOutputPicture());
                     addTaskTemporalTransfer(pipeline, frame, converted, plane);
                     if ((plane == 0 && sharpeningEnabled) ||
                         (scalingModes[LOQ0] == Scale0D && scalingModes[LOQ1] == Scale0D && frame->dither())) {

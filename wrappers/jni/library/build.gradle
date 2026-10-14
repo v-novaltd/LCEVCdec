@@ -14,9 +14,28 @@
 
 apply plugin: 'com.android.library'
 
+def propertyBool = { propertyName ->
+    def value = project.findProperty(propertyName)
+    value != null && !['OFF', 'FALSE', '0', 'NO'].contains(value.toString().toUpperCase())
+}
+
 def ANDROID_COMPILE_SDK = Integer.parseInt(project.property('ANDROID_COMPILE_SDK'))
 def ANDROID_TARGET_SDK = Integer.parseInt(project.property('ANDROID_TARGET_SDK'))
 def ANDROID_NDK_VERSION = project.property('ANDROID_NDK_VERSION')
+def ABI_ARCHES = [
+    'armeabi-v7a': 'armv7',
+    'arm64-v8a'  : 'armv8',
+    'x86'        : 'x86',
+    'x86_64'     : 'x86_64',
+]
+
+def TRACING_ENABLED = propertyBool('TRACING_SYSTEM_SINK')
+
+def CONAN_ENABLED = propertyBool('CONAN_ENABLED')
+def CONAN_CLANG_VERSION = project.findProperty('CONAN_CLANG_VERSION') ?: '18'
+def CONAN_RECIPE = rootProject.file('../../conanfile.py')
+def WRAPPER_BUILD_DIR = rootProject.findProperty('customBuildDir') ?: rootProject.buildDir
+def CONAN_DEPS_ROOT = project.findProperty('CONAN_DEPS_ROOT') ?: file("${WRAPPER_BUILD_DIR}/conan")
 
 def BUILD_TYPE = { ->
     if (gradle.getStartParameter().taskNames.find({ it.contains('Debug') }) != null) {
@@ -24,6 +43,7 @@ def BUILD_TYPE = { ->
     }
     return 'Release'
 }()
+
 
 ext {
     artifactName = "${PROJECT_ARTIFACT_NAME}"
@@ -87,11 +107,14 @@ android {
 
         externalNativeBuild {
             cmake {
-                abiFilters = ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64']
+                abiFilters = ABI_ARCHES.keySet()
                 arguments = ['-DANDROID_ARM_NEON=TRUE',
                              '-DANDROID_TOOLCHAIN=clang',
                              "-DANDROID_PLATFORM=android-${ANDROID_MIN_SDK}",
-                             "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}"]
+                             "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}",
+                             "-DVN_SDK_TRACING_SYSTEM_SINK=${TRACING_ENABLED}",
+                            ] +
+                    (CONAN_ENABLED ? ["-DCONAN_DEPS_ROOT=${CONAN_DEPS_ROOT}"] : [])
             }
         }
     }
@@ -102,6 +125,62 @@ android {
         }
         singleVariant('release') {
             withSourcesJar()
+        }
+    }
+}
+
+def installConanDependencies = tasks.register('installConanDependencies') {
+    description = 'Install Android JNI dependencies using Conan'
+    group = 'build setup'
+
+    inputs.file(CONAN_RECIPE)
+    inputs.property('ndkVersion', ANDROID_NDK_VERSION)
+    inputs.property('clangVersion', CONAN_CLANG_VERSION)
+    inputs.property('androidApiLevel', ANDROID_MIN_SDK)
+
+    onlyIf { CONAN_ENABLED }
+    mustRunAfter(tasks.named('clean'))
+
+    doLast {
+        def configurations = gradle.taskGraph.allTasks.collect { configuredTask ->
+            def match = configuredTask.name =~ /^configureCMake(Debug|Release)\[([^]]+)]$/
+            match.matches() ? [buildType: match.group(1), abi: match.group(2)] : null
+        }.findAll().unique()
+
+        configurations.each { configuration ->
+            def buildType = configuration.buildType
+            def abi = configuration.abi
+            def conanArch = ABI_ARCHES[abi]
+            def outputDir = file("${CONAN_DEPS_ROOT}/${buildType}/${abi}")
+            outputDir.mkdirs()
+            providers.exec {
+                commandLine(
+                    'conan', 'install', CONAN_RECIPE,
+                    "--install-folder=${outputDir}",
+                    '--build=missing',
+                    '--profile:build=default',
+                    '--settings:host=os=Android',
+                    "--settings:host=os.api_level=${ANDROID_MIN_SDK}",
+                    "--settings:host=arch=${conanArch}",
+                    '--settings:host=compiler=clang',
+                    "--settings:host=compiler.version=${CONAN_CLANG_VERSION}",
+                    '--settings:host=compiler.libcxx=c++_static',
+                    "--settings:host=build_type=${buildType}",
+                    '--options=base_decoder=none',
+                    '--options=vulkan=True',
+                    "--options=tracing=${TRACING_ENABLED ? 'True' : 'False'}",
+                    '--options=json_config=False',
+                    "--conf:host=tools.android:ndk_path=${android.ndkDirectory}"
+                )
+            }.result.get().assertNormalExitValue()
+        }
+    }
+}
+
+if (CONAN_ENABLED) {
+    tasks.configureEach { task ->
+        if (task.name.startsWith('configureCMake')) {
+            task.dependsOn(installConanDependencies)
         }
     }
 }

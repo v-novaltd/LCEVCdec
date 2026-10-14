@@ -77,6 +77,7 @@ private:
     VkQueryPool m_queryPool{};
     size_t m_maxCount{0};
     uint32_t m_nextQuery{0};
+
     float m_timestampPeriod{0.0f};
     bool m_exhausted{false};
     std::vector<Event> m_events;

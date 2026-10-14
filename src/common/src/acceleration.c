@@ -21,8 +21,29 @@ static LdcAcceleration defaultAcceleration = {0};
 static const LdcAcceleration* currentAcceleration = &defaultAcceleration;
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
-#if (VN_SDK_FEATURE(SSE) || (VN_SDK_FEATURE(SIMD) && (VN_ARCH(X86) || VN_ARCH(X64)))) && !VN_ARCH(WASM)
-#include <stdint.h>
+#if VN_ARCH(WASM) && VN_SDK_FEATURE(SSE)
+
+// WebAssembly SIMD support is fixed at build time.
+static bool detectSSE(void) { return true; }
+// WASM is neither x86 nor x64, so the AVX2 detection call is compiled out.
+
+#elif defined(__KERNEL__) && (VN_ARCH(X86) || VN_ARCH(X64))
+
+// The x86 Linux kernel exposes its detected CPU features directly.
+#include <asm/cpufeature.h>
+
+#if VN_SDK_FEATURE(SSE)
+static bool detectSSE(void) { return boot_cpu_has(X86_FEATURE_XMM4_1); }
+#endif
+
+#if VN_SDK_FEATURE(SIMD)
+static bool detectAVX2(void) { return boot_cpu_has(X86_FEATURE_AVX2); }
+#endif
+
+#elif VN_ARCH(X86) || VN_ARCH(X64)
+
+// User-space x86 builds detect CPU features with CPUID.
+#if VN_SDK_FEATURE(SSE) || VN_SDK_FEATURE(SIMD)
 #if !VN_COMPILER(MSVC)
 #include <cpuid.h>
 #endif
@@ -63,7 +84,7 @@ static bool detectSSE(void)
 }
 #endif
 
-#if VN_SDK_FEATURE(SIMD) && (VN_ARCH(X86) || VN_ARCH(X64))
+#if VN_SDK_FEATURE(SIMD)
 /*! \brief Returns true if AVX2 is detected at runtime. */
 static bool detectAVX2(void)
 {
@@ -101,11 +122,9 @@ static bool detectAVX2(void)
     return false;
 #endif
 }
-#endif
-#elif VN_ARCH(WASM)
-static bool detectSSE(void) { return true; }
-static bool detectAVX2(void) { return false; }
-#endif
+#endif // VN_SDK_FEATURE(SIMD)
+#endif // VN_SDK_FEATURE(SSE) || VN_SDK_FEATURE(SIMD)
+#endif // Architecture and execution environment
 
 void ldcAccelerationInitialize(bool enable)
 {

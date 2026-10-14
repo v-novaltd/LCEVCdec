@@ -44,7 +44,8 @@ static inline uint8_t scalarS16ToU8(int16_t value)
 
 static inline int16_t scalarS16ToU16(int16_t value, int16_t offset, int16_t shift, int16_t midpoint)
 {
-    return (int16_t)((((int32_t)value + offset) >> shift) + midpoint);
+    const int32_t converted = (((int32_t)value + offset) >> shift) + midpoint;
+    return (int16_t)clampInt(converted, 0, 2 * midpoint - 1);
 }
 
 static inline void scalarNV12LoadDeinterleaved8(const uint8_t* srcRow, int32_t srcWidth,

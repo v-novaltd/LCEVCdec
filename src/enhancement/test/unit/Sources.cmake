@@ -25,7 +25,7 @@ set(SOURCES
     "src/test_transform.cpp"
     "src/test_transform_unit.cpp")
 
-set(HEADERS)
+set(HEADERS "src/test_transform.h")
 
 # Convenience
 set(ALL_FILES "CMakeLists.txt" "Sources.cmake" ${HEADERS} ${SOURCES} ${CONFIG})

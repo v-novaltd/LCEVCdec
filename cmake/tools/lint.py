@@ -458,7 +458,7 @@ def main():
             errors += format_include_guard(path, args.check_only)
 
     for path in get_paths(CMAKE_TYPES, changed_files):
-        cmake_format_exe = find_formatter('cmake-format', '0.6.')
+        cmake_format_exe = find_formatter('cmake-format', '0.6.13')
         cmd = [cmake_format_exe, path]
         if args.check_only:
             cmd.insert(1, '--check')
@@ -467,6 +467,8 @@ def main():
         process = run_cmd(cmd)
         if process.returncode != 0:
             print_fail('cmake-format', f'on {path}')
+            if process.stderr:
+                print_normal(process.stderr.decode('utf-8'))
             errors += 1
 
     python_files = get_paths(PYTHON_TYPES, changed_files)

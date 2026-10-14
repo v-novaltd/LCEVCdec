@@ -89,6 +89,8 @@ typedef enum LdpColorFormat
 
     LdpColorFormatNV12_8 = 2001,
     LdpColorFormatNV21_8 = 2002,
+    LdpColorFormatP010_10 = 2101,
+    LdpColorFormatP016_16 = 2102,
 
     LdpColorFormatRGB_8 = 3001,
     LdpColorFormatBGR_8 = 3002,
@@ -104,9 +106,6 @@ typedef enum LdpColorFormat
     LdpColorFormatGRAY_12_LE = 5003,
     LdpColorFormatGRAY_14_LE = 5004,
     LdpColorFormatGRAY_16_LE = 5005,
-
-    LdpColorFormatP010_10 = 6001,
-    LdpColorFormatP016_16 = 6002,
 
     LdpColorFormatForceInt32 = 0x7fffffff,
 } LdpColorFormat;

@@ -53,9 +53,9 @@ LdcTaskDependency addTaskApplyCmdBufferTemporal(PipelineBase* pipeline, FrameBas
                                                 LdcTaskDependency temporalBuffer,
                                                 LdcTaskDependency cmdBuffer);
 
-LdcTaskDependency addTaskApplyAddTemporal(PipelineBase* pipeline, FrameBase* frame,
-                                          uint32_t planeIndex, LdcTaskDependency temporalDep,
-                                          LdcTaskDependency sourceDep, LdcTaskDependency outputDep);
+LdcTaskDependency addTaskAddTemporal(PipelineBase* pipeline, FrameBase* frame, uint32_t planeIndex,
+                                     LdcTaskDependency temporalDep, LdcTaskDependency sourceDep,
+                                     LdcTaskDependency outputDep);
 
 LdcTaskDependency addTaskPassthrough(PipelineBase* pipeline, FrameBase* frame, uint32_t planeIndex,
                                      LdcTaskDependency dest, LdcTaskDependency src);

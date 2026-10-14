@@ -14,10 +14,10 @@
 set(SOURCES
     "src/test_apply.cpp"
     "src/test_apply_cross_validation.cpp"
-    "src/test_add.cpp"
     "src/test_buffer_ahb.cpp"
     "src/test_conversion.cpp"
     "src/test_conversion_add.cpp"
+    "src/test_dequant_transform.cpp"
     "src/test_dither.cpp"
     "src/test_pipeline.cpp"
     "src/test_upscale.cpp")

@@ -331,6 +331,8 @@ typedef enum LCEVC_ColorFormat
 
     LCEVC_NV12_8                = 2001, /**< 8 bit 4:2:0 YUV SemiPlanar color format: Y plane and UV interleaved plane */
     LCEVC_NV21_8                = 2002, /**< 8 bit 4:2:0 YUV SemiPlanar color format: Y plane and VU interleaved plane */
+    LCEVC_P010_10               = 2101, /**< 10 bit 4:2:0 YUV SemiPlanar color format: Y plane and UV interleaved plane, each 10-bit sample in the high bits of a 16-bit word */
+    LCEVC_P016_16               = 2102, /**< 16 bit 4:2:0 YUV SemiPlanar color format: Y plane and UV interleaved plane, 16-bit samples */
 
     LCEVC_RGB_8                 = 3001, /**< 8 bit Interleaved R, G, B planes 24 bit per sample */
     LCEVC_BGR_8                 = 3002, /**< 8 bit Interleaved R, G, B planes 24 bit per sample */

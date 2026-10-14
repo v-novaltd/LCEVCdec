@@ -12,52 +12,34 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-// Vulkan add shader
+// Generic Vulkan output conversion shader for 4:2:2/4:4:4 RGBA8 VkImage destinations.
 
 #version 450
 
 #include "specialization_ids.h"
 
-// Specialized workgropup size
 layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
        local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
-layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
-    uint samples[];
-} src;
+layout(rgba8, set = 0, binding = 1) uniform restrict writeonly image2D dstImage;
 
-layout(std430, set = 0, binding = 1) buffer restrict writeonly DstImageBuffer {
-    uint samples[];
-} dst;
-
-layout(push_constant) uniform consts {
-    int width;
-    int height;
-    int containerStride;
-    int containerOffset;
-};
-
-#include "common.glsl"
+#include "convert_out_image_common.glsl"
 
 void main()
 {
-    const uint x = gl_GlobalInvocationID.x;
-    const uint y = gl_GlobalInvocationID.y;
+    const int x = int(gl_GlobalInvocationID.x);
+    const int y = int(gl_GlobalInvocationID.y);
 
-    if(y >= height) {
-        return;
-    }
-    if(x*2 >= width) {
+    if (x >= width || y >= height) {
         return;
     }
 
-    const uint index = containerOffset + x + containerStride * y;
-
-    const ivec2 srcPixels = unpack16bitInternals(src.samples[index]);
-    ivec2 dstPixels = unpack16bitInternals(dst.samples[index]);
-    ivec2 sum;
-    sum.x = saturateS16(dstPixels.x + srcPixels.x);
-    sum.y = saturateS16(dstPixels.y + srcPixels.y);
-    dst.samples[index] = pack16bitInternals(sum);
+    const int cx = x >> chromaWidthShift;
+    const int cy = y >> chromaHeightShift;
+    const float yf = internalToUnorm(loadInternalValue(x, y, containerStrideY, containerOffsetY,
+                                                        containerStrideTemporalY, containerOffsetTemporalY),
+                                     7, 255);
+    const vec2 uv = loadChroma(cx, cy, 7, 255);
+    imageStore(dstImage, ivec2(x, y), vec4(yuvToRgb601(yf, uv.x, uv.y), 1.0));
 }

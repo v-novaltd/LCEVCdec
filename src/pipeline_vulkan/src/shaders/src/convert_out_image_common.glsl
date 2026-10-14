@@ -34,12 +34,11 @@ layout(std430, set = 0, binding = 3) buffer restrict readonly TemporalBuffer {
     uint samples[];
 } temporal;
 
-// Push constants are shared by every image-output shader.  The image variants
-// reuse the slots `shift` and `sharpenStrength` (used by convert_out.comp) as
-// chromaWidthShift / chromaHeightShift, so the host can use a single
-// PushConstantsConversion struct across all conversion pipelines.  `nv21Swap`
-// is declared only to keep the temporal fields at the same byte offsets as the
-// buffer shader / host struct; it is not read here.
+// Push constants are shared by every image-output shader. The generic RGBA
+// variants reuse the slots `shift` and `sharpenStrength` (used by planar buffer conversion)
+// as chromaWidthShift / chromaHeightShift. Fixed 4:2:0 image shaders do not read
+// those fields. `nv21Swap` is retained for host-struct
+// layout parity; NV21 image output is selected by swapping source chroma planes.
 layout(push_constant) uniform consts {
     int width;
     int height;
@@ -51,7 +50,7 @@ layout(push_constant) uniform consts {
     int containerOffsetV;
     int chromaWidthShift;
     int chromaHeightShift;
-    int nv21Swap; // unused here; present for struct parity with convert_out.comp
+    int nv21Swap; // unused by image shaders; present for struct layout parity
     int containerStrideTemporalY;
     int containerOffsetTemporalY;
     int containerStrideTemporalU;
@@ -60,17 +59,23 @@ layout(push_constant) uniform consts {
     int containerOffsetTemporalV;
 };
 
-// Read one signed internal sample from the source SSBO at (px,py) inside the
-// plane described by (stride,offset), folding in the co-located temporal
-// residual (saturating, exactly as add.comp) when enabled for this plane.
-int loadInternalValue(int px, int py, int stride, int offset, int tStride, int tOffset)
+// Read two adjacent signed internal samples from the source SSBO, folding in
+// co-located temporal residuals with signed-16 saturation when enabled.
+ivec2 loadInternalPair(int packedX, int py, int stride, int offset, int tStride, int tOffset)
 {
-    const uint index = uint(offset + (px >> 1) + py * stride);
+    const uint index = uint(offset + packedX + py * stride);
     ivec2 vals = unpack16bitInternals(src.samples[index]);
     if (addTemporal && tStride != 0) {
-        const uint tIndex = uint(tOffset + (px >> 1) + py * tStride);
+        const uint tIndex = uint(tOffset + packedX + py * tStride);
         vals = saturateS16(vals + unpack16bitInternals(temporal.samples[tIndex]));
     }
+    return vals;
+}
+
+// Read one signed internal sample from a packed pair.
+int loadInternalValue(int px, int py, int stride, int offset, int tStride, int tOffset)
+{
+    const ivec2 vals = loadInternalPair(px >> 1, py, stride, offset, tStride, tOffset);
     return ((px & 1) == 0) ? vals.x : vals.y;
 }
 
@@ -86,6 +91,20 @@ float internalToUnorm(int internalVal, int shift, int maxVal)
     const int v = clamp(((internalVal + 0x4000 + halfv) >> shift), 0, maxVal);
     return float(v) / float(maxVal);
 }
+
+// Load one U/V pair for the RGBA image shaders. The returned components are
+// centred around zero for YUV-to-RGB conversion.
+vec2 loadChroma(int px, int py, int shift, int maxVal)
+{
+    const float u = internalToUnorm(loadInternalValue(px, py, containerStrideU, containerOffsetU,
+                                                       containerStrideTemporalU, containerOffsetTemporalU),
+                                    shift, maxVal);
+    const float v = internalToUnorm(loadInternalValue(px, py, containerStrideV, containerOffsetV,
+                                                       containerStrideTemporalV, containerOffsetTemporalV),
+                                    shift, maxVal);
+    return vec2(u, v) - vec2(0.5);
+}
+
 
 // BT.601 limited-range YUV -> RGB.  uf/vf must already have 0.5 subtracted.
 vec3 yuvToRgb601(float yf, float uf, float vf)

@@ -12,7 +12,6 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include "buffer_vulkan.h"
 #include "picture_vulkan.h"
 #include "pipeline_vulkan.h"
 #include "test_utility.h"
@@ -29,11 +28,39 @@
 #include <fmt/core.h>
 #include <gtest/gtest.h>
 //
+#include <algorithm>
 #include <memory>
-#include <vector>
 
 using namespace lcevc_dec::pipeline;
 using namespace lcevc_dec::pipeline_vulkan;
+
+TEST(PipelineVulkanConfiguration, ContextCountDefaultsToOne)
+{
+    PipelineBuilderVulkan builder(ldcMemoryAllocatorMalloc());
+    EXPECT_EQ(1, builder.configuration().contexts);
+}
+
+TEST(PipelineVulkanConfiguration, ContextCountMustBePositive)
+{
+    PipelineBuilderVulkan builder(ldcMemoryAllocatorMalloc());
+    EXPECT_FALSE(builder.configure("vulkan_contexts", int32_t{0}));
+    EXPECT_FALSE(builder.configure("vulkan_contexts", int32_t{-1}));
+    EXPECT_EQ(1, builder.configuration().contexts);
+}
+
+TEST(PipelineVulkanConfiguration, CreatesConfiguredFrameContexts)
+{
+    PipelineBuilderVulkan builder(ldcMemoryAllocatorMalloc());
+    ASSERT_TRUE(builder.configure("vulkan_contexts", int32_t{4}));
+
+    std::unique_ptr<Pipeline> pipeline = builder.finish(nullptr);
+    if (!pipeline) {
+        GTEST_SKIP() << "Skipping test due to lack of Vulkan support";
+    }
+
+    auto* vulkanPipeline = static_cast<PipelineVulkan*>(pipeline.get());
+    EXPECT_EQ(4u, vulkanPipeline->backend().compute().frameContextCount());
+}
 
 class PipelineVulkanFixture : public testing::Test
 {
@@ -66,6 +93,56 @@ public:
         delete pipelineBuilder;
     }
 };
+
+TEST_F(PipelineVulkanFixture, MappedBufferWindowsSupportAccessModes)
+{
+    auto* pipeline = static_cast<PipelineVulkan*>(mPipeline.get());
+    ASSERT_NE(nullptr, pipeline);
+
+    constexpr uint32_t kBufferSize = 64;
+    BufferVulkan* buffer = pipeline->allocateBuffer(kBufferSize, BufferUsageIn);
+    ASSERT_NE(nullptr, buffer);
+
+    std::vector<uint8_t> initial(kBufferSize, 0);
+    buffer->copyIn(0, initial.data(), static_cast<uint32_t>(initial.size()));
+
+    LdpBufferMapping mapping{};
+    ASSERT_TRUE(buffer->map(&mapping, 8, 16, LdpAccessWrite));
+    ASSERT_EQ(16u, mapping.size);
+    std::fill_n(mapping.ptr, mapping.size, uint8_t{0x11});
+    buffer->unmap(&mapping);
+
+    ASSERT_TRUE(buffer->map(&mapping, 12, 4, LdpAccessModify));
+    EXPECT_EQ(uint8_t{0x11}, mapping.ptr[0]);
+    std::fill_n(mapping.ptr, mapping.size, uint8_t{0x22});
+
+    const std::vector<uint8_t> mixedWrite{0x33, 0x44, 0x55, 0x66};
+    buffer->copyIn(32, mixedWrite.data(), static_cast<uint32_t>(mixedWrite.size()));
+    std::vector<uint8_t> mixedRead(mixedWrite.size(), 0);
+    buffer->copyOut(mixedRead.data(), 32, static_cast<uint32_t>(mixedRead.size()));
+    EXPECT_EQ(mixedWrite, mixedRead);
+    buffer->unmap(&mapping);
+
+    ASSERT_TRUE(buffer->map(&mapping, 8, 16, LdpAccessRead));
+    for (uint32_t i = 0; i < mapping.size; ++i) {
+        EXPECT_EQ(i >= 4 && i < 8 ? uint8_t{0x22} : uint8_t{0x11}, mapping.ptr[i]);
+    }
+    buffer->unmap(&mapping);
+
+    std::vector<uint8_t> output(16, 0);
+    buffer->copyOut(output.data(), 8, static_cast<uint32_t>(output.size()));
+    std::vector<uint8_t> expected(16, 0x11);
+    std::fill(expected.begin() + 4, expected.begin() + 8, uint8_t{0x22});
+    EXPECT_EQ(expected, output);
+
+    ASSERT_TRUE(buffer->map(&mapping, 8, 16, LdpAccessRead));
+    buffer->clear();
+    buffer->unmap(&mapping);
+    buffer->copyOut(output.data(), 8, static_cast<uint32_t>(output.size()));
+    EXPECT_EQ(std::vector<uint8_t>(output.size(), 0), output);
+
+    pipeline->releaseBuffer(buffer);
+}
 
 TEST_F(PipelineVulkanFixture, AllocatePicturesManaged)
 {

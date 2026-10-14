@@ -17,6 +17,9 @@
 #ifndef VN_LCEVC_EXTRACT_EXTRACT_H
 #define VN_LCEVC_EXTRACT_EXTRACT_H
 
+/*! \brief Version of the LCEVC extract API. */
+#define LCEVC_EXTRACT_VERSION 1
+
 #ifdef __cplusplus
 #include <cstdint>
 extern "C"

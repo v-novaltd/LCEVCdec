@@ -56,6 +56,9 @@
         {LdpColorFormatNV12_8,         LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 0, 1},    BITS(8),  LdpFP##prefix##8,  ".nv12"},           \
         {LdpColorFormatNV21_8,         LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 1, 0},    BITS(8),  LdpFP##prefix##8,  ".nv21"},           \
                                                                                                                                                                                                     \
+        {LdpColorFormatP010_10,        LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 0, 1},    BITS(10), LdpFP##prefix##10,  ".p010"},          \
+        {LdpColorFormatP016_16,        LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 0, 1},    BITS(16), LdpFP##prefix##14,  ".p016"},          \
+                                                                                                                                                                                                    \
         {LdpColorFormatRGB_8,          LdpColorSpaceRGB,       CTMonochrome, 3, 0, 0, {0},       {0},       {0},       {3, 3, 3},    {0, 1, 2},    BITS(8),  LdpFP##prefix##8,  ".rgb"},            \
         {LdpColorFormatBGR_8,          LdpColorSpaceRGB,       CTMonochrome, 3, 0, 0, {0},       {0},       {0},       {3, 3, 3},    {2, 1, 0},    BITS(8),  LdpFP##prefix##8,  ".bgr"},            \
         {LdpColorFormatRGBA_8,         LdpColorSpaceRGB,       CTMonochrome, 4, 0, 0, {0},       {0},       {0},       {4, 4, 4, 4}, {0, 1, 2, 3}, BITS(8),  LdpFP##prefix##8,  ".rgba"},           \
@@ -70,9 +73,6 @@
         {LdpColorFormatGRAY_12_LE,     LdpColorSpaceGreyscale, CTMonochrome, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(12), LdpFP##prefix##12, "_12bit.y"},        \
         {LdpColorFormatGRAY_14_LE,     LdpColorSpaceGreyscale, CTMonochrome, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(14), LdpFP##prefix##14, "_14bit.y"},        \
         {LdpColorFormatGRAY_16_LE,     LdpColorSpaceGreyscale, CTMonochrome, 1, 0, 0, {0},       {0},       {0},       {1},          {0},          BITS(16), LdpFP##prefix##14, "_16bit.y"},        \
-                                                                                                                                                                                                    \
-        {LdpColorFormatP010_10,        LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 0, 1},    BITS(10), LdpFP##prefix##10,  ".p010"},          \
-        {LdpColorFormatP016_16,        LdpColorSpaceYUV,       CT420,        3, 1, 1, {0, 1},    {0, 1},    {0, 0},    {1, 2, 2},    {0, 1, 0},    BITS(16), LdpFP##prefix##14,  ".p016"},          \
     };                                                                                                                                                                                              \
 // clang-format on
 

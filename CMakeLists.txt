@@ -30,10 +30,10 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/CMakeSetup.cmake")
 project(
     LCEVCdec_SDK
     DESCRIPTION "The Open Source LCEVC Decoder SDK"
-    VERSION 4.2.2
+    VERSION 4.3.0
     LANGUAGES CXX C)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
+list(APPEND CMAKE_MODULE_PATH "${LCEVC_ROOT_DIR}/cmake/modules")
 
 # Build configuration
 option(VN_SDK_EXECUTABLES "Include samples and test harness executables in SDK installations" OFF)
@@ -49,6 +49,8 @@ option(VN_SDK_DOCS "Build Doxygen and Sphinx documentation" OFF)
 option(VN_SDK_COVERAGE "Generate gcov statistics for coverage" OFF)
 option(VN_SDK_TRACING
        "Configurable tracing information recorder for function entry/exit in perfetto format" ON)
+option(VN_SDK_TRACING_SYSTEM_SINK
+       "Send tracing information to system Perfetto sink, requires VN_SDK_TRACING" OFF)
 option(VN_SDK_METRICS "Configurable metrics recording" ON)
 option(VN_SDK_MEMORY_DIAGNOSTICS "Record memory allocation and free events in diagnostics" OFF)
 option(VN_SDK_STD_FILE "Allow use of the C standard library's FILE struct" ON)
@@ -82,6 +84,7 @@ if (VN_SDK_MINIMUM_LIB_SIZE)
     set(VN_SDK_JSON_CONFIG OFF)
     set(VN_SDK_METRICS OFF)
     set(VN_SDK_TRACING OFF)
+    set(VN_SDK_TRACING_SYSTEM_SINK OFF)
     set(VN_SDK_DIAGNOSTICS_ASYNC OFF)
     set(VN_SDK_MAXIMUM_LOG_LEVEL "FATAL")
 endif ()
@@ -146,6 +149,15 @@ if (VN_SDK_FUZZER AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "VN_SDK_FUZZER requires Clang (got ${CMAKE_CXX_COMPILER_ID})")
 endif ()
 
+if (VN_SDK_TRACING_SYSTEM_SINK AND NOT VN_SDK_TRACING)
+    message(STATUS "VN_SDK_TRACING_SYSTEM_SINK is enabled but VN_SDK_TRACING is not, disabling")
+    set(VN_SDK_TRACING_SYSTEM_SINK OFF)
+endif ()
+
+if (VN_SDK_TRACING_SYSTEM_SINK AND NOT ANDROID)
+    message(FATAL_ERROR "VN_SDK_TRACING_SYSTEM_SINK is currently only available for Android builds")
+endif ()
+
 # Module Versions
 set(PIPELINE_CPU_VERSION 1)
 set(PIPELINE_VULKAN_VERSION 1)
@@ -205,7 +217,9 @@ if (EMSCRIPTEN)
 endif ()
 
 # Utility
-if (VN_SDK_EXECUTABLES OR VN_SDK_UNIT_TESTS)
+if (VN_SDK_EXECUTABLES
+    OR VN_SDK_UNIT_TESTS
+    OR VN_SDK_TRACING_SYSTEM_SINK)
     lcevc_add_subdirectory(src/utility)
     lcevc_add_subdirectory_if(src/utility/test/unit VN_SDK_UNIT_TESTS)
     lcevc_add_subdirectory_if(src/utility/test/utilities VN_SDK_UNIT_TESTS)

@@ -53,6 +53,8 @@ static const EnumMap<LCEVC_ColorFormat> kColorFormatTable{
     {LCEVC_GRAY_12_LE, "GRAY_12_LE"},
     {LCEVC_GRAY_14_LE, "GRAY_14_LE"},
     {LCEVC_GRAY_16_LE, "GRAY_16_LE"},
+    {LCEVC_P010_10, "P010_10"},
+    {LCEVC_P016_16, "P016_16"},
 
     // Synonyms for 8 bit
     {LCEVC_I420_8, "P420"},

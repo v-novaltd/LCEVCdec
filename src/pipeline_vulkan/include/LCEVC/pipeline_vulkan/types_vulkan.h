@@ -45,29 +45,15 @@ struct VulkanConvertOutArgs
     VulkanFrameContext* context{};
 };
 
-struct VulkanAddArgs
-{
-    PictureVulkan* src;
-    PictureVulkan* dst;
-    uint8_t numEnhancedPlanes;
-    LdeChroma chroma;
-    VulkanFrameContext* context{};
-};
-
 struct VulkanUpscaleArgs
 {
     PictureVulkan* src;
     PictureVulkan* dst;
-    PictureVulkan* base;     /**< base picture only used for PA */
-    uint8_t applyPA;         /**< Indicates that predicted-average should be off, 1D, or 2D */
-    LdppDitherFrame* dither; /**< Indicates that dithering should be applied  */
-    LdeScalingMode mode;     /**< The type of scaling to perform (1D or 2D). */
-    bool vertical; /**< Not part of the standard but if the scaling mode is 1D we can optionally do vertical instead of horizontal. Required for unit tests */
-    bool loq1;     /**< Allows separate intermediate states for LOQ1/0 */
-    uint8_t numImagePlanes;
+    PictureVulkan* base; /**< Base picture used for predicted-average correction. */
+    uint8_t applyPA;     /**< Indicates that predicted-average should be off, 1D, or 2D. */
+    LdeScalingMode mode; /**< The type of scaling to perform (1D or 2D). */
+    bool loq1;           /**< Selects the descriptor state for LOQ1 or LOQ0. */
     LdeChroma chroma;
-    PictureVulkan* intermediateUpscalePicture[LOQEnhancedCount] = {};
-    PipelineVulkan* pipeline{};
     VulkanFrameContext* context{};
 };
 

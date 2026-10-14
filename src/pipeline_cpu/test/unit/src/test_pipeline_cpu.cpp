@@ -14,7 +14,9 @@
 
 #include <LCEVC/common/acceleration.h>
 #include <LCEVC/common/diagnostics.h>
+#include <LCEVC/pipeline/frame_base.h>
 #include <LCEVC/pipeline/pipeline.h>
+#include <LCEVC/pipeline/pipeline_base.h>
 #include <LCEVC/pipeline/types.h>
 #include <LCEVC/pipeline_cpu/create_pipeline.h>
 //
@@ -61,4 +63,32 @@ TEST_F(PipelineCPUFixture, AllocatePicturesManaged)
     LdpPicture* picture = nullptr;
     ASSERT_EQ(LdcReturnCodeSuccess, mPipeline->allocPicture(pictureDesc, picture));
     ASSERT_TRUE(picture);
+}
+
+TEST_F(PipelineCPUFixture, LumaDirectUpscaleWithoutTemporal)
+{
+    auto* pipeline = static_cast<PipelineBase*>(mPipeline.get());
+    FrameBase* frame = pipeline->allocateFrame(0);
+    ASSERT_NE(frame, nullptr);
+    LdeGlobalConfig global{};
+    global.initialized = true;
+    global.numPlanes = 3;
+    global.baseDepth = Depth10;
+    global.enhancedDepth = Depth10;
+    global.scalingModes[LOQ0] = Scale2D;
+    global.scalingModes[LOQ1] = Scale0D;
+    frame->globalConfig = &global;
+    frame->config.frameConfigSet = true;
+
+    EXPECT_TRUE(pipeline->directUpscaleEligible(*frame, 0));
+
+    global.temporalEnabled = true;
+    frame->config.temporalRefresh = true;
+    EXPECT_TRUE(pipeline->directUpscaleEligible(*frame, 0));
+
+    frame->config.temporalRefresh = false;
+    frame->config.entropyEnabled = true;
+    frame->config.loqEnabled[LOQ0] = true;
+    EXPECT_FALSE(pipeline->directUpscaleEligible(*frame, 0));
+    pipeline->freeFrame(frame);
 }

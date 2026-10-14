@@ -12,8 +12,6 @@
 # ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
-include(ExternalProject)
-
 # ~~~
 # Root project config
 # ~~~
@@ -27,6 +25,9 @@ project(LCEVCdec_JNI)
 # C++17 until there is a reason not to.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+option(VN_SDK_TRACING_SYSTEM_SINK "Build tracing support, including Android system Perfetto sink"
+       OFF)
 
 # Path to where the core dec library can be included from
 set(PROJECT_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../..)
@@ -66,88 +67,50 @@ message(
 )
 set(LCEVCDEC_BUILD_DIR "${CMAKE_BINARY_DIR}/lcevcdec-${ANDROID_ABI}-${CMAKE_BUILD_TYPE}")
 
-set(LCEVCDEC_CMAKE_ARGS
-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-    -DBUILD_SHARED_LIBS=OFF
-    -DANDROID_ABI=${ANDROID_ABI}
-    -DANDROID_NDK=${ANDROID_NDK}
-    -DANDROID_PLATFORM=${ANDROID_PLATFORM}
-    -DVN_SDK_PIPELINE_VULKAN=ON
-    -DVN_SDK_PIPELINE_CPU=ON
-    -DVN_SDK_SIMD=${ANDROID_ARM_NEON}
-    -DVN_SDK_MINIMUM_LIB_SIZE=OFF)
+if (CONAN_DEPS_ROOT)
+    set(CONAN_DEPS_DIR "${CONAN_DEPS_ROOT}/${CMAKE_BUILD_TYPE}/${ANDROID_ABI}")
+    set(VN_SDK_CONAN_DEPS_DIR
+        "${CONAN_DEPS_DIR}"
+        CACHE PATH "" FORCE)
+endif ()
+
+if (VN_SDK_TRACING_SYSTEM_SINK)
+    if (NOT CONAN_DEPS_DIR)
+        message(FATAL_ERROR "The system tracing sink requires -PCONAN_ENABLED=TRUE")
+    endif ()
+    set(fmt_DIR "${CONAN_DEPS_DIR}")
+    set(perfetto_DIR "${CONAN_DEPS_DIR}")
+endif ()
 
 # VN_SDK_MINIMUM_LIB_SIZE can be enabled to reduce library size at the expense of logs, consider
 # reducing built ABIs to further reduce size.
 
-set(LCEVCDEC_MODULES
-    api
-    api_utility
-    extract
-    pipeline_cpu
-    pipeline_vulkan
-    pipeline
-    enhancement
-    pixel_processing
-    common)
+set(BUILD_SHARED_LIBS OFF)
+set(VN_SDK_PIPELINE_VULKAN ON)
+set(VN_SDK_PIPELINE_CPU ON)
+set(VN_SDK_SIMD ${ANDROID_ARM_NEON})
+set(VN_SDK_TRACING ${VN_SDK_TRACING_SYSTEM_SINK})
+set(VN_SDK_TRACING_SYSTEM_SINK ${VN_SDK_TRACING_SYSTEM_SINK})
+set(VN_SDK_MINIMUM_LIB_SIZE OFF)
 
-set(LCEVCDEC_LIB_DIR "${LCEVCDEC_BUILD_DIR}/lib")
-
-set(LCEVCDEC_STATIC_BYPRODUCTS)
-foreach (MODULE IN LISTS LCEVCDEC_MODULES)
-    set(MODULE_LIB_PATH "${LCEVCDEC_LIB_DIR}/liblcevc_dec_${MODULE}.a")
-    list(APPEND LCEVCDEC_STATIC_BYPRODUCTS "${MODULE_LIB_PATH}")
-endforeach ()
-
-ExternalProject_Add(
-    LCEVCdec_build
-    SOURCE_DIR ${PROJECT_ROOT}
-    BINARY_DIR ${LCEVCDEC_BUILD_DIR}
-    CMAKE_GENERATOR ${CMAKE_GENERATOR}
-    CMAKE_ARGS ${LCEVCDEC_CMAKE_ARGS}
-    BUILD_BYPRODUCTS ${LCEVCDEC_STATIC_BYPRODUCTS}
-    BUILD_ALWAYS TRUE
-    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
-    INSTALL_COMMAND "")
-
-# ExternalProject's configure step is normally stamped as complete forever. Re-run it before each
-# incremental build so changes to LCEVCDEC_CMAKE_ARGS (such as enabling another pipeline) are
-# applied to existing Android Studio build trees.
-ExternalProject_Add_Step(
-    LCEVCdec_build reconfigure
-    COMMAND ${CMAKE_COMMAND} -S ${PROJECT_ROOT} -B <BINARY_DIR> -G ${CMAKE_GENERATOR}
-            ${LCEVCDEC_CMAKE_ARGS}
-    DEPENDEES configure
-    DEPENDERS build
-    ALWAYS TRUE)
-
-set(LCEVCDEC_LIBS)
-foreach (MODULE IN LISTS LCEVCDEC_MODULES)
-    set(MODULE_TARGET "lcevc_dec_${MODULE}")
-    set(MODULE_LIB_PATH "${LCEVCDEC_LIB_DIR}/liblcevc_dec_${MODULE}.a")
-
-    add_library(${MODULE_TARGET} STATIC IMPORTED)
-    set_target_properties(${MODULE_TARGET} PROPERTIES IMPORTED_LOCATION "${MODULE_LIB_PATH}")
-    add_dependencies(${MODULE_TARGET} LCEVCdec_build)
-    list(APPEND LCEVCDEC_LIBS "${MODULE_TARGET}")
-endforeach ()
+add_subdirectory(${PROJECT_ROOT} ${LCEVCDEC_BUILD_DIR} EXCLUDE_FROM_ALL)
 
 # ~~~
 # Dec JNI library
 # ~~~
 
 add_library(lcevc_dec_jni SHARED lcevc_dec_jni.cpp surface_presenter.cpp)
+target_link_libraries(lcevc_dec_jni PRIVATE lcevc_dec::api lcevc_dec::extract lcevc_dec::common
+                                            ${PLATFORM_LIBRARIES})
 
-target_link_libraries(lcevc_dec_jni PRIVATE ${LCEVCDEC_LIBS} ${PLATFORM_LIBRARIES})
+if (VN_SDK_TRACING_SYSTEM_SINK)
+    target_link_libraries(lcevc_dec_jni PRIVATE lcevc_dec::utility)
+    target_compile_definitions(lcevc_dec_jni PRIVATE VN_SDK_TRACING_SYSTEM_SINK=1)
+endif ()
 
 # Make NDK symbols newer than the target API weak imports (SurfaceControl and
 # AHardwareBuffer_lockPlanes are API 29) - call sites gate on the device API level.
 target_compile_definitions(lcevc_dec_jni PRIVATE __ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__)
-target_include_directories(
-    lcevc_dec_jni PRIVATE ${PROJECT_ROOT}/include ${PROJECT_ROOT}/src/api/include
-                          ${PROJECT_ROOT}/src/extract/include)
-add_dependencies(lcevc_dec_jni LCEVCdec_build)
 
 # Library size reduction flags and stubs
 target_compile_options(

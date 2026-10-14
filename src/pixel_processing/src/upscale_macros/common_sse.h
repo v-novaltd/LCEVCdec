@@ -201,14 +201,16 @@ static inline int32_t sseClampRow(int32_t y, uint32_t height)
 #define SSE_LOAD_BASE4(ptr) SSE_JOIN(SSE_LOAD_BASE4_, IN_FIXED_POINT)(ptr)
 
 #define SSE_DEMOTE_U8(value) \
-    _mm_add_epi16(_mm_srai_epi16(_mm_add_epi16((value), outputOffset), 7), outputMidpoint)
+    _mm_add_epi16(_mm_srai_epi16(_mm_adds_epi16((value), outputOffset), 7), outputMidpoint)
 #define SSE_STORE_OUTPUT_1(ptr, value) \
     _mm_storel_epi64((__m128i*)(ptr), _mm_packus_epi16(SSE_DEMOTE_U8(value), _mm_setzero_si128()))
 #define SSE_STORE_OUTPUT_2(ptr, value) SSE_STORE_OUTPUT_1(ptr, value)
-#define SSE_STORE_OUTPUT_3(ptr, value)                                                               \
-    _mm_storeu_si128((__m128i*)(ptr),                                                                \
-                     _mm_add_epi16(_mm_sra_epi16(_mm_add_epi16((value), outputOffset), outputShift), \
-                                   outputMidpoint))
+#define SSE_DEMOTE_U16(value) \
+    _mm_add_epi16(_mm_sra_epi16(_mm_adds_epi16((value), outputOffset), outputShift), outputMidpoint)
+#define SSE_STORE_OUTPUT_3(ptr, value)                                                        \
+    _mm_storeu_si128((__m128i*)(ptr),                                                         \
+                     _mm_min_epi16(_mm_max_epi16(SSE_DEMOTE_U16(value), _mm_setzero_si128()), \
+                                   _mm_set1_epi16((int16_t)(2 * params.midpoint - 1))))
 #define SSE_STORE_OUTPUT_4(ptr, value) _mm_storeu_si128((__m128i*)(ptr), (value))
 #define SSE_STORE_OUTPUT(ptr, value) SSE_JOIN(SSE_STORE_OUTPUT_, OUT_FIXED_POINT)(ptr, value)
 

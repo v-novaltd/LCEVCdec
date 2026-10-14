@@ -12,8 +12,8 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#ifndef VN_LCEVC_ENHANCEMENT_DIMENSIONS_H
-#define VN_LCEVC_ENHANCEMENT_DIMENSIONS_H
+#ifndef VN_LCEVC_ENHANCEMENT_UTILITIES_H
+#define VN_LCEVC_ENHANCEMENT_UTILITIES_H
 
 #include <LCEVC/enhancement/config_types.h>
 
@@ -21,6 +21,19 @@
 extern "C"
 {
 #endif
+
+/*! \brief A lightweight check of frame config chunks to see if a decode will result in any real
+ *         residuals
+ *
+ * \param[in]  globalConfig  Global config to reference
+ * \param[in]  frameConfig   Frame config to reference
+ * \param[in]  loq           The LOQ in calculate for
+ * \param[in]  planeIdx      The plane to calculate for
+ *
+ * \return true if any residuals exist for the specified LOQ and plane otherwise false
+ */
+bool ldeHasResiduals(const LdeGlobalConfig* globalConfig, const LdeFrameConfig* frameConfig,
+                     LdeLOQIndex loq, uint32_t planeIdx);
 
 /*! \brief Get the width and height of a plane from the global config for a given loq and YUV plane
  *
@@ -71,4 +84,4 @@ uint32_t ldeTotalNumTiles(const LdeGlobalConfig* globalConfig);
 }
 #endif
 
-#endif // VN_LCEVC_ENHANCEMENT_DIMENSIONS_H
+#endif // VN_LCEVC_ENHANCEMENT_UTILITIES_H

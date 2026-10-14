@@ -25,7 +25,7 @@ permissions: {}
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -39,8 +39,17 @@ jobs:
       - name: Fetch target repo refs
         run: git remote add target https://github.com/v-novaltd/LCEVCdec.git && git fetch target
 
+      - name: Cache APT Packages
+        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+        with:
+          version: ubuntu-24.04
+          packages: clang-format-14
+
       - name: Install required lib
-        run: pip3 install -r cmake/tools/lint_requirements.txt
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -r cmake/tools/lint_requirements.txt
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Run Lint Check
         env:
@@ -50,7 +59,7 @@ jobs:
   build:
     name: Build
     needs: lint
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -67,12 +76,15 @@ jobs:
       - name: Cache APT Packages
         uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
         with:
-          packages: nlohmann-json3-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev libvulkan-dev libglfw3-dev glslang-tools unzip
+          version: ubuntu-24.04-postinst-v1
+          # BLAS/LAPACK need package setup to register their library links.
+          execute_install_scripts: true
+          packages: nlohmann-json3-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libblas3 liblapack3 libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev libvulkan-dev libglfw3-dev glslang-tools unzip
 
       - name: ccache
         uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
         with:
-          key: ccache-${{ github.ref_name }}
+          key: ccache-ubuntu-24.04-${{ github.ref_name }}
           append-timestamp: false
 
       - name: Cmake Build
@@ -97,7 +109,7 @@ jobs:
   unit_tests:
     name: Unit tests
     needs: build
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -111,7 +123,10 @@ jobs:
       - name: Cache APT Packages
         uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
         with:
-          packages: nlohmann-json3-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev libvulkan-dev libglfw3-dev glslang-tools unzip
+          version: ubuntu-24.04-postinst-v1
+          # BLAS/LAPACK need package setup to register their library links.
+          execute_install_scripts: true
+          packages: nlohmann-json3-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libblas3 liblapack3 libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev libvulkan-dev libglfw3-dev glslang-tools unzip
 
       - name: Download Build Artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -138,7 +153,7 @@ jobs:
   func_tests:
     name: Functional Tests
     needs: unit_tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -152,7 +167,10 @@ jobs:
       - name: Cache APT Packages
         uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
         with:
-          packages: nlohmann-json3-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev libvulkan-dev libglfw3-dev glslang-tools unzip
+          version: ubuntu-24.04-postinst-v1
+          # BLAS/LAPACK need package setup to register their library links.
+          execute_install_scripts: true
+          packages: nlohmann-json3-dev ninja-build libfmt-dev libcli11-dev libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libblas3 liblapack3 libgtest-dev libgmock-dev libxxhash-dev librange-v3-dev libvulkan-dev libglfw3-dev glslang-tools unzip
 
       - name: Download Build Artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -184,7 +202,10 @@ jobs:
         run: unzip test_cache.zip
 
       - name: Install required lib
-        run: pip3 install -r src/func_tests/test_requirements.txt
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -r src/func_tests/test_requirements.txt
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Run Functional Tests
         run: |

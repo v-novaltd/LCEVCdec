@@ -12,8 +12,8 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-// Vulkan output conversion shader for R10G10B10A2 (VK_FORMAT_A2B10G10R10_UNORM_PACK32)
-// VkImage destinations.
+// Fixed-4:2:0 Vulkan output conversion shader for
+// R10G10B10A2 (VK_FORMAT_A2B10G10R10_UNORM_PACK32) VkImage destinations.
 
 #version 450
 
@@ -29,19 +29,27 @@ layout(rgb10_a2, set = 0, binding = 1) uniform restrict writeonly image2D dstIma
 
 void main()
 {
-    const int x = int(gl_GlobalInvocationID.x);
-    const int y = int(gl_GlobalInvocationID.y);
+    const int blockX = int(gl_GlobalInvocationID.x);
+    const int blockY = int(gl_GlobalInvocationID.y);
+    const int x = blockX << 1;
+    const int y = blockY << 1;
 
     if (x >= width || y >= height) {
         return;
     }
 
-    const int cx = x >> chromaWidthShift;
-    const int cy = y >> chromaHeightShift;
+    const ivec2 y0 = loadInternalPair(blockX, y, containerStrideY, containerOffsetY,
+                                      containerStrideTemporalY, containerOffsetTemporalY);
+    const ivec2 y1 = loadInternalPair(blockX, y + 1, containerStrideY, containerOffsetY,
+                                      containerStrideTemporalY, containerOffsetTemporalY);
 
-    const float yf = internalToUnorm(loadInternalValue(x, y, containerStrideY, containerOffsetY, containerStrideTemporalY, containerOffsetTemporalY), 5, 1023);
-    const float uf = internalToUnorm(loadInternalValue(cx, cy, containerStrideU, containerOffsetU, containerStrideTemporalU, containerOffsetTemporalU), 5, 1023) - 0.5;
-    const float vf = internalToUnorm(loadInternalValue(cx, cy, containerStrideV, containerOffsetV, containerStrideTemporalV, containerOffsetTemporalV), 5, 1023) - 0.5;
-
-    imageStore(dstImage, ivec2(x, y), vec4(yuvToRgb601(yf, uf, vf), 1.0));
+    const vec2 uv = loadChroma(blockX, blockY, 5, 1023);
+    imageStore(dstImage, ivec2(x, y),
+               vec4(yuvToRgb601(internalToUnorm(y0.x, 5, 1023), uv.x, uv.y), 1.0));
+    imageStore(dstImage, ivec2(x + 1, y),
+               vec4(yuvToRgb601(internalToUnorm(y0.y, 5, 1023), uv.x, uv.y), 1.0));
+    imageStore(dstImage, ivec2(x, y + 1),
+               vec4(yuvToRgb601(internalToUnorm(y1.x, 5, 1023), uv.x, uv.y), 1.0));
+    imageStore(dstImage, ivec2(x + 1, y + 1),
+               vec4(yuvToRgb601(internalToUnorm(y1.y, 5, 1023), uv.x, uv.y), 1.0));
 }

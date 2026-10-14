@@ -14,28 +14,24 @@
 
 uvec4 unpack8bit(uint packed)
 {
-    uvec4 unpacked;
-    unpacked.x = packed & 0xFF;
-    unpacked.y = (packed >> 8) & 0xFF;
-    unpacked.z = (packed >> 16) & 0xFF;
-    unpacked.w = (packed >> 24) & 0xFF;
-    return unpacked;
+    return uvec4(
+        packed & 0xFF,
+        (packed >> 8) & 0xFF,
+        (packed >> 16) & 0xFF,
+        (packed >> 24) & 0xFF);
 }
 
 uvec2 unpack16bit(uint packed)
 {
-    uvec2 unpacked;
-    unpacked.x = packed & 0xFFFF;
-    unpacked.y = (packed >> 16) & 0xFFFF;
-    return unpacked;
+    return uvec2(
+        packed & 0xFFFF,
+        (packed >> 16) & 0xFFFF);
 }
 
 ivec2 unpack16bitInternals(uint packed)
 {
     const int ab = int(packed);
-    const int a = (ab << 16 ) >> 16;
-    const int b = (ab >> 16 );
-    return ivec2(a,b);
+    return ivec2((ab << 16 ) >> 16, (ab >> 16 ));
 }
 
 uint pack8bit(uvec4 vals) { return vals.x | (vals.y << 8) | (vals.z << 16) | (vals.w << 24); }
@@ -46,21 +42,19 @@ uint pack16bitInternals(ivec2 vals) { return (vals.y << 16) | (vals.x & 0xFFFF);
 
 ivec4 toInternalFrom8bit(uvec4 vals)
 {
-    ivec4 internal;
     const int shift = 7;
-    internal.x = int((vals.x << shift) - 0x4000);
-    internal.y = int((vals.y << shift) - 0x4000);
-    internal.z = int((vals.z << shift) - 0x4000);
-    internal.w = int((vals.w << shift) - 0x4000);
-    return internal;
+    return ivec4(
+        int((vals.x << shift) - 0x4000),
+        int((vals.y << shift) - 0x4000),
+        int((vals.z << shift) - 0x4000),
+        int((vals.w << shift) - 0x4000));
 }
 
 ivec2 toInternalFrom16bit(uvec2 vals, int shift)
 {
-    ivec2 internal;
-    internal.x = int((vals.x << shift) - 0x4000);
-    internal.y = int((vals.y << shift) - 0x4000);
-    return internal;
+    return ivec2(
+        int((vals.x << shift) - 0x4000),
+        int((vals.y << shift) - 0x4000));
 }
 
 int clamp_s15(int v)
@@ -74,31 +68,28 @@ int saturateS16(int v)
 }
 
 ivec2 saturateS16(ivec2 v) {
-    ivec2 s;
-    s.x = saturateS16(v.x);
-    s.y = saturateS16(v.y);
-    return s;
+    return ivec2(
+        saturateS16(v.x),
+        saturateS16(v.y));
 }
 
 uvec4 fromInternalTo8bit(ivec4 vals)
 {
-    uvec4 ext;
     const int shift = 7;
     const int halfv = ((1 << shift) / 2);
-    ext.x = uint(clamp(((vals.x + 0x4000 + halfv) >> shift), 0, 32767 >> shift));
-    ext.y = uint(clamp(((vals.y + 0x4000 + halfv) >> shift), 0, 32767 >> shift));
-    ext.z = uint(clamp(((vals.z + 0x4000 + halfv) >> shift), 0, 32767 >> shift));
-    ext.w = uint(clamp(((vals.w + 0x4000 + halfv) >> shift), 0, 32767 >> shift));
-    return ext;
+    return uvec4(
+        uint(clamp(((vals.x + 0x4000 + halfv) >> shift), 0, 32767 >> shift)),
+        uint(clamp(((vals.y + 0x4000 + halfv) >> shift), 0, 32767 >> shift)),
+        uint(clamp(((vals.z + 0x4000 + halfv) >> shift), 0, 32767 >> shift)),
+        uint(clamp(((vals.w + 0x4000 + halfv) >> shift), 0, 32767 >> shift)));
 }
 
 uvec2 fromInternalTo16bit(ivec2 vals, int shift)
 {
-    uvec2 ext;
     const int halfv = ((1 << shift) / 2);
-    ext.x = uint(clamp(((vals.x + 0x4000 + halfv) >> shift), 0, 32767 >> shift));
-    ext.y = uint(clamp(((vals.y + 0x4000 + halfv) >> shift), 0, 32767 >> shift));
-    return ext;
+    return uvec2(
+        uint(clamp(((vals.x + 0x4000 + halfv) >> shift), 0, 32767 >> shift)),
+        uint(clamp(((vals.y + 0x4000 + halfv) >> shift), 0, 32767 >> shift)));
 }
 
 int clamp_int16(int val) { return clamp(val, -32768, 32767); }

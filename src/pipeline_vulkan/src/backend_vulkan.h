@@ -42,7 +42,7 @@ namespace lcevc_dec::pipeline_vulkan {
 
 class PipelineVulkan;
 struct VulkanApplyCommonArgs;
-struct VulkanAddArgs;
+
 struct VulkanConversionArgs;
 struct VulkanUpscaleArgs;
 
@@ -74,17 +74,9 @@ public:
 
     bool applyCommon(VulkanApplyCommonArgs* params) { return m_compute.applyCommon(params); };
     bool applyTile(VulkanApplyTileArgs* params) { return m_compute.applyTile(params); };
-    bool add(VulkanAddArgs* params) { return m_compute.add(params); };
+
     bool convertIn(VulkanConvertInArgs* params) { return m_compute.convertIn(params); };
     bool convertOut(VulkanConvertOutArgs* params) { return m_compute.convertOut(params); };
-    bool upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs* params)
-    {
-        return m_compute.upscaleVertical(kernel, params);
-    };
-    bool upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArgs* params)
-    {
-        return m_compute.upscaleHorizontal(kernel, params);
-    };
     bool upscaleFrame(const LdeKernel* kernel, VulkanUpscaleArgs* params)
     {
         return m_compute.upscaleFrame(kernel, params);
@@ -116,7 +108,7 @@ public:
 
     VmaAllocator getVmaAllocator() { return m_allocator; }
 
-    int32_t getTimestampsLimit() { return m_timestampsLimit; }
+    int32_t getTimestampsLimit() const { return m_timestampsLimit; }
 
     const VkPhysicalDeviceProperties& physicalDeviceProperties()
     {
@@ -163,6 +155,7 @@ private:
     int32_t m_deviceOverride{};
     bool m_enableValidationLayers{};
     int32_t m_timestampsLimit{};
+
     QueueFamilyIndices m_indices;
     VkInstance m_instance{VK_NULL_HANDLE};
     VkDebugUtilsMessengerEXT m_debugMessenger{VK_NULL_HANDLE};

@@ -14,11 +14,16 @@
 
 #include "surface_presenter.h"
 
+#include <LCEVC/common/diagnostics.h>
+#include <LCEVC/extract/extract.h>
+#include <LCEVC/lcevc_dec.h>
+#if defined(VN_SDK_TRACING_SYSTEM_SINK)
+#include <LCEVC/utility/perfetto_sdk.h>
+#endif
+
 #include <android/hardware_buffer.h>
 #include <android/log.h>
 #include <android/native_window_jni.h>
-#include <LCEVC/extract/extract.h>
-#include <LCEVC/lcevc_dec.h>
 #include <sys/system_properties.h>
 #include <unistd.h>
 
@@ -152,7 +157,6 @@ struct ClientContext
     LCEVC_DecoderHandle decoder = {0};
     jobject client = nullptr;
     ANativeWindow* nativeWindow = nullptr;
-
     // Zero-copy rendering (API 29+)
     SurfacePresenter* presenter = nullptr;
     std::mutex externalOutputsMutex;
@@ -496,6 +500,13 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved)
         return -1;
     }
 
+    ldcDiagnosticsInitialize(nullptr);
+#if defined(VN_SDK_TRACING_SYSTEM_SINK)
+    if (!lcevcPerfettoSdkRegister()) {
+        LOGE("JNI_OnLoad: could not register Perfetto diagnostics handler");
+    }
+#endif
+
     gDecoderInfoClassNameJS =
         reinterpret_cast<jstring>(env->NewGlobalRef(env->NewStringUTF(kDecoderInfoClassName)));
     getClassLoader(env, kDecoderInfoClassName); // setup the global class loader
@@ -509,8 +520,17 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved)
     return JNI_VERSION_1_6;
 }
 
+void JNI_OnUnload(JavaVM*, void*)
+{
+#if defined(VN_SDK_TRACING_SYSTEM_SINK)
+    lcevcPerfettoSdkUnregister();
+#endif
+    ldcDiagnosticsRelease();
+}
+
 NATIVE_FUNC(jlong, lcevcCreateDecoder, jstring pipeline)
 {
+    VNTraceScopedNamed("jni:lcevcCreateDecoder");
     LOGV("lcevcCreateDecoder: entering");
 
     std::string configuredPipeline = "auto";
@@ -555,6 +575,18 @@ NATIVE_FUNC(jlong, lcevcCreateDecoder, jstring pipeline)
 
     LCEVC_ConfigureDecoderInt(context->decoder, "passthrough_mode", 0);
     LCEVC_ConfigureDecoderBool(context->decoder, "will_render", true);
+#if defined(VN_SDK_TRACING_SYSTEM_SINK)
+    if (configuredPipeline != "cpu") {
+        // Two queries per dispatch. Keep enough space for detailed per-frame GPU phase timings.
+        // "auto" has already resolved its builder, so this also enables timings when it picked
+        // Vulkan. A CPU-resolved auto pipeline simply rejects the Vulkan-only option.
+        const LCEVC_ReturnCode timestampRet =
+            LCEVC_ConfigureDecoderInt(context->decoder, "vulkan_timestamps", 256);
+        if (configuredPipeline == "vulkan" && timestampRet != LCEVC_Success) {
+            LOGW("lcevcCreateDecoder: enabling Vulkan timestamps returned %d", timestampRet);
+        }
+    }
+#endif
 
     // logcat logging via event callback
     constexpr std::array<int32_t, 1> enabledEvents = {LCEVC_Log};
@@ -580,6 +612,7 @@ NATIVE_FUNC(jlong, lcevcCreateDecoder, jstring pipeline)
 
 NATIVE_FUNC(jint, lcevcDestroyDecoder, jlong instance)
 {
+    VNTraceScopedNamed("jni:lcevcDestroyDecoder");
     LOGV("lcevcDestroyDecoder: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
@@ -635,6 +668,7 @@ NATIVE_FUNC(jint, lcevcDestroyDecoder, jlong instance)
 NATIVE_FUNC(jint, lcevcSendDecoderBase, jlong instance, jlong timeStamp, jlong inputPictureHandle,
             jlong outputPictureHandle)
 {
+    VNTraceScopedNamed("jni:lcevcSendDecoderBase");
     // Always wait for send call to finish rather than letting it timeout.
     constexpr uint32_t kSendBaseTimeout = std::numeric_limits<uint32_t>::max();
 
@@ -755,6 +789,7 @@ NATIVE_FUNC(jint, lcevcSendDecoderBase, jlong instance, jlong timeStamp, jlong i
 NATIVE_FUNC(jint, lcevcRenderSendPicture, jlong instance, jlong timeStamp, jlong pictureHandle,
             jobject renderInfo, jlong delayUs)
 {
+    VNTraceScopedNamed("jni:lcevcRenderSendPicture");
     LOGV("lcevcRenderSendPicture: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
@@ -831,6 +866,7 @@ NATIVE_FUNC(jint, lcevcRenderSendPicture, jlong instance, jlong timeStamp, jlong
 
 NATIVE_FUNC(jint, lcevcReleaseDecoderPicture, jlong instance, jlong timeStamp, jlong pictureHandle)
 {
+    VNTraceScopedNamed("jni:lcevcReleaseDecoderPicture");
     LOGV("lcevcReleaseDecoderPicture: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
@@ -852,6 +888,7 @@ NATIVE_FUNC(jint, lcevcReleaseDecoderPicture, jlong instance, jlong timeStamp, j
 NATIVE_FUNC(jint, lcevcSendDecoderEnhancementData, jlong instance, jlong timestamp,
             jboolean isKeyFrame, jobject inputData, jint syntaxType, jboolean stripLcevc)
 {
+    VNTraceScopedNamed("jni:lcevcSendDecoderEnhancementData");
     if (instance == 0 || inputData == nullptr) {
         return LCEVC_InvalidParam;
     }
@@ -928,6 +965,7 @@ NATIVE_FUNC(jint, lcevcSendDecoderEnhancementData, jlong instance, jlong timesta
 
 NATIVE_FUNC(jint, lcevcFlushDecoder, jlong instance)
 {
+    VNTraceScopedNamed("jni:lcevcFlushDecoder");
     LOGV("lcevcFlushDecoder: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
@@ -971,6 +1009,7 @@ NATIVE_FUNC(jint, lcevcFlushDecoder, jlong instance)
 
 NATIVE_FUNC(jint, lcevcSynchronizeDecoder, jlong instance, jboolean dropPending)
 {
+    VNTraceScopedNamed("jni:lcevcSynchronizeDecoder");
     LOGV("lcevcSynchronizeDecoder: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
@@ -986,6 +1025,7 @@ NATIVE_FUNC(jint, lcevcSynchronizeDecoder, jlong instance, jboolean dropPending)
 
 NATIVE_FUNC(jint, lcevcRenderSetWindow, jlong instance, jobject surface, jboolean secure)
 {
+    VNTraceScopedNamed("jni:lcevcRenderSetWindow");
     LOGV("lcevcRenderSetWindow: entering");
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
     if (context == nullptr) {
@@ -1039,6 +1079,7 @@ NATIVE_FUNC(jint, lcevcRenderSetWindow, jlong instance, jobject surface, jboolea
 
 NATIVE_FUNC(jlong, lcevcAllocPicture, jlong instance, jobject pictureDescObj)
 {
+    VNTraceScopedNamed("jni:lcevcAllocPicture");
     LOGV("lcevcAllocPicture: entering");
 
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
@@ -1130,6 +1171,7 @@ NATIVE_FUNC(jlong, lcevcAllocPicture, jlong instance, jobject pictureDescObj)
 
 NATIVE_FUNC(jint, lcevcFreePicture, jlong instance, jlong pictureHandle)
 {
+    VNTraceScopedNamed("jni:lcevcFreePicture");
     LOGV("lcevcFreePicture: entering");
     ClientContext* context = reinterpret_cast<ClientContext*>(instance);
     if (context == nullptr || pictureHandle == 0) {
@@ -1147,6 +1189,7 @@ NATIVE_FUNC(jint, lcevcFreePicture, jlong instance, jlong pictureHandle)
 NATIVE_FUNC(jint, lcevcPictureSetPlaneBuffers, jlong pictureHandle, jobject inputBuffer,
             jintArray inputOffsets, jintArray inputByteStrides)
 {
+    VNTraceScopedNamed("jni:lcevcPictureSetPlaneBuffers");
     LOGV("lcevcPictureSetPlaneBuffers: entering");
     if (pictureHandle == 0 || inputBuffer == nullptr || inputOffsets == nullptr ||
         inputByteStrides == nullptr) {

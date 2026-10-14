@@ -41,6 +41,10 @@ public:
 
     void getPlaneDescInternal(uint32_t plane, LdpPicturePlaneDesc& desc) const override;
 
+    // For the shared temporal picture: cleared/new storage is empty until commands are applied.
+    // One flag covers all enhanced planes because convert-out uses a single addTemporal switch.
+    bool temporalBufferEmpty = false;
+
 #if VN_OS(ANDROID)
     // Wrap an externally-supplied AHardwareBuffer and attach it as this
     // picture's backing buffer.  Returns false on failure.

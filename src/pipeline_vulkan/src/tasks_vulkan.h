@@ -26,7 +26,7 @@ class BufferVulkan;
 class FrameVulkan;
 class PictureVulkan;
 struct VulkanApplyCommonArgs;
-struct VulkanAddArgs;
+
 struct VulkanConversionArgs;
 struct VulkanUpscaleArgs;
 

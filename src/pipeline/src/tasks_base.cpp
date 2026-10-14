@@ -298,7 +298,10 @@ static void* taskUpscaleDirect(LdcTask* task, const LdcTaskPart* /*part*/)
     upscaleArgs.planeIndex = data.plane;
     upscaleArgs.kernel = &frame->globalConfig->kernel;
     upscaleArgs.applyPA = frame->globalConfig->predictedAverageEnabled;
-    upscaleArgs.frameDither = NULL; // No dithering on un-enhanced planes
+    // Dither enhanced planes inline, unless sharpening will apply it afterward.
+    const bool deferDitherToSharpen = frame->sharpeningStrength(data.plane) > 0.0f;
+    upscaleArgs.frameDither =
+        data.plane < frame->globalConfig->numPlanes && !deferDitherToSharpen ? frame->dither() : nullptr;
     upscaleArgs.mode = data.scalingMode;
 
     const uint32_t srcWidth = ldpPictureLayoutPlaneWidth(upscaleArgs.srcLayout, data.plane) *
@@ -553,26 +556,31 @@ LdcTaskDependency addTaskApplyCmdBufferTemporal(PipelineBase* pipeline, FrameBas
                           sizeof(data), "ApplyCmdBufferTemporal");
 }
 
-//// ApplyAddTemporal
+//// AddTemporal
 //
 // Add a temporal buffer to a picture plane.
 //
-struct TaskApplyAddTemporalData
+struct TaskAddTemporalData
 {
     PipelineBase* pipeline;
     FrameBase* frame;
     uint32_t planeIndex;
 };
 
-static void* taskApplyAddTemporal(LdcTask* task, const LdcTaskPart* /*part*/)
+static void* taskAddTemporal(LdcTask* task, const LdcTaskPart* /*part*/)
 {
-    assert(task->dataSize == sizeof(TaskApplyAddTemporalData));
+    assert(task->dataSize == sizeof(TaskAddTemporalData));
 
-    const TaskApplyAddTemporalData& data{VNTaskData(task, TaskApplyAddTemporalData)};
+    const TaskAddTemporalData& data{VNTaskData(task, TaskAddTemporalData)};
     PipelineBase* const pipeline{data.pipeline};
     FrameBase* const frame{data.frame};
 
     VNTraceScopedArgs("timestamp", frame->timestamp, "plane", data.planeIndex);
+
+    if (pipeline->isFlushed(frame)) {
+        return nullptr;
+    }
+    const bool temporalBufferEmpty = frame->updateTemporalBufferEmpty(data.planeIndex);
 
     if (pipeline->isSkipped(frame) || frame->isPassthrough()) {
         // Just move temporal buffer along pipeline
@@ -580,7 +588,7 @@ static void* taskApplyAddTemporal(LdcTask* task, const LdcTaskPart* /*part*/)
         return nullptr;
     }
 
-    VNLogDebug("taskApplyAddTemporal ts:%" PRIx64 " plane:%d", data.frame->timestamp, data.planeIndex);
+    VNLogDebug("taskAddTemporal ts:%" PRIx64 " plane:%d", data.frame->timestamp, data.planeIndex);
 
     LdpPicturePlaneDesc srcPlane{};
     frame->getIntermediatePlaneDesc(data.planeIndex, LOQ0, srcPlane);
@@ -593,23 +601,28 @@ static void* taskApplyAddTemporal(LdcTask* task, const LdcTaskPart* /*part*/)
 
     VNDiagInfo(diagInfo, task->name, frame->timestamp, LOQ0, data.planeIndex);
 
-    if (!ldppPlaneAdd(pipeline->taskPool(), task, data.planeIndex,
-                      frame->getIntermediateLayout(LOQ0), &frame->outputPicture->layout, &tbDesc,
-                      &srcPlane, &dstPlane, VNDiagInfoPtr(diagInfo))) {
+    if (temporalBufferEmpty) {
+        if (!ldppPlaneConvert(pipeline->taskPool(), task, data.planeIndex,
+                              frame->getIntermediateLayout(LOQ0), &frame->outputPicture->layout,
+                              &srcPlane, &dstPlane, VNDiagInfoPtr(diagInfo))) {
+            VNLogError("ldppPlaneConvert out failed");
+        }
+    } else if (!ldppPlaneAdd(pipeline->taskPool(), task, data.planeIndex,
+                             frame->getIntermediateLayout(LOQ0), &frame->outputPicture->layout,
+                             &tbDesc, &srcPlane, &dstPlane, VNDiagInfoPtr(diagInfo))) {
         VNLogError("ldppPlaneAdd out failed");
     }
 
     return nullptr;
 }
 
-LdcTaskDependency addTaskApplyAddTemporal(PipelineBase* pipeline, FrameBase* frame,
-                                          uint32_t planeIndex, LdcTaskDependency temporalDep,
-                                          LdcTaskDependency sourceDep, LdcTaskDependency outputDep)
+LdcTaskDependency addTaskAddTemporal(PipelineBase* pipeline, FrameBase* frame, uint32_t planeIndex,
+                                     LdcTaskDependency temporalDep, LdcTaskDependency sourceDep,
+                                     LdcTaskDependency outputDep)
 {
-    const TaskApplyAddTemporalData data{pipeline, frame, planeIndex};
+    const TaskAddTemporalData data{pipeline, frame, planeIndex};
     const LdcTaskDependency inputs[] = {temporalDep, sourceDep, outputDep};
-    return frame->taskAdd(inputs, VNArraySize(inputs), taskApplyAddTemporal, &data, sizeof(data),
-                          "ApplyAddTemporal");
+    return frame->taskAdd(inputs, VNArraySize(inputs), taskAddTemporal, &data, sizeof(data), "AddTemporal");
 }
 
 //// Passthrough
@@ -633,7 +646,7 @@ static void* taskPassthrough(LdcTask* task, const LdcTaskPart* /*part*/)
 
     VNTraceScopedArgs("timestamp", frame->timestamp, "plane", data.planeIndex);
 
-    if (pipeline->isSkipped(frame)) {
+    if (pipeline->isSkipped(frame) || !frame->basePicture || !frame->outputPicture) {
         return nullptr;
     }
 

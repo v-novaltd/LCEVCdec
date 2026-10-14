@@ -14,11 +14,13 @@
 
 #include <LCEVC/pipeline/frame_base.h>
 //
+#include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/log.h>
 #include <LCEVC/common/printf_macros.h>
 #include <LCEVC/enhancement/cmdbuffer_cpu.h>
 #include <LCEVC/enhancement/cmdbuffer_gpu.h>
 #include <LCEVC/enhancement/config_parser.h>
+#include <LCEVC/enhancement/utilities.h>
 #include <LCEVC/pipeline/buffer_alignment.h>
 #include <LCEVC/pipeline/picture_base.h>
 
@@ -134,15 +136,23 @@ uint8_t* FrameBase::setEnhancementData(const uint8_t* data, uint32_t byteSize)
         return nullptr;
     }
 
-    VNAllocateIdArray(m_enhancementAllocator, &m_enhancementData, uint8_t, byteSize,
-                      "FrameBase_EnhancementData", timestamp);
+    {
+        VNTraceBeginArgs("enhancement.allocate", "timestamp", timestamp, "bytes", byteSize);
+        VNAllocateIdArray(m_enhancementAllocator, &m_enhancementData, uint8_t, byteSize,
+                          "FrameBase_EnhancementData", timestamp);
+        VNTraceEnd();
+    }
     uint8_t* const enhancement{VNAllocationPtr(m_enhancementData, uint8_t)};
 
     if (!enhancement) {
         return nullptr;
     }
 
-    memcpy(enhancement, data, byteSize);
+    {
+        VNTraceBeginArgs("enhancement.copy", "timestamp", timestamp, "bytes", byteSize);
+        memcpy(enhancement, data, byteSize);
+        VNTraceEnd();
+    }
     return enhancement;
 }
 
@@ -150,8 +160,12 @@ uint8_t* FrameBase::setEnhancementData(const uint8_t* data, uint32_t byteSize)
 // Switch to pass-through if configuration parse failed.
 bool FrameBase::parseEnhancementData(LdeConfigPool* configPool)
 {
-    return ldeConfigPoolFrameInsert(configPool, timestamp, VNAllocationPtr(m_enhancementData, uint8_t),
-                                    VNAllocationSize(m_enhancementData, uint8_t), &globalConfig, &config);
+    VNTraceBeginArgs("enhancement.parse", "timestamp", timestamp);
+    const bool result =
+        ldeConfigPoolFrameInsert(configPool, timestamp, VNAllocationPtr(m_enhancementData, uint8_t),
+                                 VNAllocationSize(m_enhancementData, uint8_t), &globalConfig, &config);
+    VNTraceEnd();
+    return result;
 }
 
 LdcTaskDependency FrameBase::taskAdd(const LdcTaskDependency* inputs, uint32_t inputsCount,
@@ -185,6 +199,10 @@ void FrameBase::setOutputPicture(LdpPicture* picture)
     assert(m_depOutputPicture != kTaskDependencyInvalid);
 
     outputPicture = picture;
+    if (picture) {
+        VNTraceAsyncBeginArgs("output.pictureLifetime", reinterpret_cast<uintptr_t>(picture),
+                              "timestamp", timestamp);
+    }
     ldcTaskDependencyMet(&m_taskGroup, m_depOutputPicture, picture);
 }
 
@@ -323,6 +341,10 @@ LdcReturnCode FrameBase::setBasePicture(LdpPicture* picture, uint64_t frameDeadl
     }
 
     basePicture = picture;
+    if (picture) {
+        VNTraceAsyncBeginArgs("base.pictureLifetime", reinterpret_cast<uintptr_t>(picture),
+                              "timestamp", timestamp);
+    }
 
     // Record metadata for output decoder info
     userData = baseUserData;
@@ -429,6 +451,18 @@ void FrameBase::updateTemporalBuffer(uint32_t plane)
     m_temporalBuffer[plane]->update(m_temporalBufferDesc[plane]);
 
     ldcTaskDependencyMet(&m_taskGroup, m_depTemporalBuffer[plane], m_temporalBuffer[plane]);
+}
+
+bool FrameBase::updateTemporalBufferEmpty(uint32_t plane)
+{
+    assert(plane < VNArraySize(m_temporalBuffer));
+    TemporalBufferBase* const buffer = m_temporalBuffer[plane];
+    assert(buffer);
+
+    if (buffer->temporalBufferEmpty && ldeHasResiduals(globalConfig, &config, LOQ0, plane)) {
+        buffer->temporalBufferEmpty = false;
+    }
+    return buffer->temporalBufferEmpty;
 }
 
 TemporalBufferBase* FrameBase::detachTemporalBuffer(uint32_t plane)

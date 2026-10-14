@@ -63,6 +63,8 @@ TEST(Convert, ColorFormat)
         case LCEVC_GRAY_12_LE:
         case LCEVC_GRAY_14_LE:
         case LCEVC_GRAY_16_LE:
+        case LCEVC_P010_10:
+        case LCEVC_P016_16:
 
         case LCEVC_ColorFormat_ForceInt32:;
     }
@@ -96,6 +98,8 @@ TEST(Convert, ColorFormat)
     EXPECT_TRUE(fromString("GRAY_12_LE", fmt) && (fmt == LCEVC_GRAY_12_LE));
     EXPECT_TRUE(fromString("GRAY_14_LE", fmt) && (fmt == LCEVC_GRAY_14_LE));
     EXPECT_TRUE(fromString("GRAY_16_LE", fmt) && (fmt == LCEVC_GRAY_16_LE));
+    EXPECT_TRUE(fromString("P010_10", fmt) && (fmt == LCEVC_P010_10));
+    EXPECT_TRUE(fromString("P016_16", fmt) && (fmt == LCEVC_P016_16));
     EXPECT_TRUE(fromString("P420", fmt) && (fmt == LCEVC_I420_8));
     EXPECT_TRUE(fromString("NV12", fmt) && (fmt == LCEVC_NV12_8));
     EXPECT_TRUE(fromString("NV21", fmt) && (fmt == LCEVC_NV21_8));
@@ -166,6 +170,8 @@ TEST(Convert, ColorFormatSynonyms)
     EXPECT_STREQ(toString(LCEVC_GRAY_12_LE).data(), "GRAY_12_LE");
     EXPECT_STREQ(toString(LCEVC_GRAY_14_LE).data(), "GRAY_14_LE");
     EXPECT_STREQ(toString(LCEVC_GRAY_16_LE).data(), "GRAY_16_LE");
+    EXPECT_STREQ(toString(LCEVC_P010_10).data(), "P010_10");
+    EXPECT_STREQ(toString(LCEVC_P016_16).data(), "P016_16");
 }
 
 TEST(Convert, ReturnCode)

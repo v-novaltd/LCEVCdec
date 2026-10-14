@@ -88,6 +88,9 @@ TEST(PipelineTypes, EnumColorFormat)
     ASSERT_EQ(LdpColorFormatGRAY_12_LE, LCEVC_GRAY_12_LE);
     ASSERT_EQ(LdpColorFormatGRAY_14_LE, LCEVC_GRAY_14_LE);
     ASSERT_EQ(LdpColorFormatGRAY_16_LE, LCEVC_GRAY_16_LE);
+
+    ASSERT_EQ(LdpColorFormatP010_10, LCEVC_P010_10);
+    ASSERT_EQ(LdpColorFormatP016_16, LCEVC_P016_16);
 }
 
 TEST(PipelineTypes, EnumColorPrimaries)

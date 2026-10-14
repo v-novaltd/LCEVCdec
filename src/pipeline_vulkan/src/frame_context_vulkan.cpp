@@ -29,6 +29,15 @@
 
 namespace lcevc_dec::pipeline_vulkan {
 
+struct DescriptorSetSpec
+{
+    VkDescriptorSetLayout layout;
+    VkDescriptorSet* destination;
+    uint32_t storageBuffers;
+    uint32_t storageImages;
+    uint32_t uniformBuffers;
+};
+
 VulkanFrameContext::~VulkanFrameContext() { freeTmpCmdBuffers(); }
 
 bool VulkanFrameContext::init()
@@ -68,23 +77,23 @@ bool VulkanFrameContext::init()
         return false;
     }
 
-    VkEventCreateInfo evtInfo{};
-    evtInfo.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+    VkEventCreateInfo eventInfo{};
+    eventInfo.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
 
-    if (vkCreateEvent(device, &evtInfo, nullptr, &m_event) != VK_SUCCESS) {
+    if (vkCreateEvent(device, &eventInfo, nullptr, &m_event) != VK_SUCCESS) {
         VNLogError("failed to create event for context");
         destroy();
         return false;
     }
 
-    m_timestamps = TimestampVulkan(device, m_backend->getPhysicalDevice(), m_backend->getInstance(),
-                                   m_backend->getTimestampsLimit(),
+    VkTimeDomainEXT timeDomain =
 #if VN_OS(WINDOWS)
-                                   VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT
+        VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_EXT;
 #else
-                                   VK_TIME_DOMAIN_CLOCK_MONOTONIC_EXT
+        VK_TIME_DOMAIN_CLOCK_MONOTONIC_EXT;
 #endif
-    );
+    m_timestamps = TimestampVulkan(device, m_backend->getPhysicalDevice(), m_backend->getInstance(),
+                                   m_backend->getTimestampsLimit(), timeDomain);
 
     return true;
 }
@@ -125,20 +134,35 @@ void VulkanFrameContext::destroy()
     freeTmpCmdBuffers();
 }
 
-bool VulkanFrameContext::allocateDescriptorSets(const DescriptorSetLayouts& layouts, uint32_t /*totalNumTiles*/)
+bool VulkanFrameContext::allocateDescriptorSets(const DescriptorSetLayouts& layouts)
 {
-    // 10 descriptor sets: 8 fixed + 2 apply (one per LOQ, each with its own merged command buffer)
-    constexpr uint32_t descriptorSetCount = 10u;
+    const std::array specs{
+        DescriptorSetSpec{layouts.upscale, &m_descriptorSetUpscaleLoq1, 3, 0, 0},
+        DescriptorSetSpec{layouts.upscale, &m_descriptorSetUpscaleLoq0, 3, 0, 0},
+        DescriptorSetSpec{layouts.conversion, &m_descriptorSetConversionTo, 3, 0, 0},
+        DescriptorSetSpec{layouts.conversion, &m_descriptorSetConversionFrom, 3, 0, 0},
+        DescriptorSetSpec{layouts.convertOutImage, &m_descriptorSetConversionFromImage, 2, 2, 0},
+        DescriptorSetSpec{layouts.apply, &m_descriptorSetApply[LOQ0], 2, 0, 0},
+        DescriptorSetSpec{layouts.apply, &m_descriptorSetApply[LOQ1], 2, 0, 0},
+        DescriptorSetSpec{layouts.dequantTransform, &m_descriptorSetDequantTransform, 2, 0, 1},
+    };
+
+    std::array<VkDescriptorSetLayout, specs.size()> setLayouts{};
+    std::array poolSizes{
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0},
+        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0},
+    };
+    for (size_t i = 0; i < specs.size(); ++i) {
+        setLayouts[i] = specs[i].layout;
+        poolSizes[0].descriptorCount += specs[i].storageBuffers;
+        poolSizes[1].descriptorCount += specs[i].storageImages;
+        poolSizes[2].descriptorCount += specs[i].uniformBuffers;
+    }
+
     VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
     descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolCreateInfo.maxSets = descriptorSetCount;
-
-    std::array<VkDescriptorPoolSize, 2> poolSizes{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[0].descriptorCount = 24;
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[1].descriptorCount = 2;
-
+    descriptorPoolCreateInfo.maxSets = static_cast<uint32_t>(specs.size());
     descriptorPoolCreateInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
     if (vkCreateDescriptorPool(m_backend->getDevice(), &descriptorPoolCreateInfo, nullptr,
@@ -147,46 +171,34 @@ bool VulkanFrameContext::allocateDescriptorSets(const DescriptorSetLayouts& layo
         return false;
     }
 
-    std::array<VkDescriptorSetLayout, descriptorSetCount> setLayouts = {
-        layouts.vertical,   layouts.horizontal, layouts.vertical,        layouts.horizontal,
-        layouts.conversion, layouts.conversion, layouts.convertOutImage, layouts.add,
-        layouts.apply,      layouts.apply};
-
     VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
     descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     descriptorSetAllocateInfo.descriptorPool = m_descriptorPool;
-    descriptorSetAllocateInfo.descriptorSetCount = descriptorSetCount;
+    descriptorSetAllocateInfo.descriptorSetCount = static_cast<uint32_t>(specs.size());
     descriptorSetAllocateInfo.pSetLayouts = setLayouts.data();
 
-    std::array<VkDescriptorSet, descriptorSetCount> descriptorSets{};
+    std::array<VkDescriptorSet, specs.size()> descriptorSets{};
     if (vkAllocateDescriptorSets(m_backend->getDevice(), &descriptorSetAllocateInfo,
                                  descriptorSets.data()) != VK_SUCCESS) {
         VNLogError("failed to allocate descriptor sets");
         return false;
     }
 
-    m_descriptorSetSrcMidLoq1 = descriptorSets[0];
-    m_descriptorSetMidDstLoq1 = descriptorSets[1];
-    m_descriptorSetSrcMidLoq0 = descriptorSets[2];
-    m_descriptorSetMidDstLoq0 = descriptorSets[3];
-    m_descriptorSetConversionTo = descriptorSets[4];
-    m_descriptorSetConversionFrom = descriptorSets[5];
-    m_descriptorSetConversionFromImage = descriptorSets[6];
-    m_descriptorSetAdd = descriptorSets[7];
-    m_descriptorSetApply[LOQ0] = descriptorSets[8];
-    m_descriptorSetApply[LOQ1] = descriptorSets[9];
+    for (size_t i = 0; i < specs.size(); ++i) {
+        *specs[i].destination = descriptorSets[i];
+    }
 
     return true;
 }
 
-bool VulkanFrameContext::begin(const DescriptorSetLayouts& layouts, uint32_t numTiles)
+bool VulkanFrameContext::begin(const DescriptorSetLayouts& layouts)
 {
     assert(m_backend);
 
     m_eventPrevAtBegin = m_eventPrev;
 
     if (!m_descriptorSetsAllocated) {
-        if (!allocateDescriptorSets(layouts, numTiles)) {
+        if (!allocateDescriptorSets(layouts)) {
             VNLogError("Failed to allocate descriptor sets!");
             return false;
         }
@@ -288,7 +300,8 @@ bool VulkanFrameContext::prepareCommandBuffer(LdeLOQIndex loq, uint32_t size)
     // Could add some sort of shrink mechanism eg: if < 1/2 for 100 consecutive frames?
     if (!m_gpuCommandBuffer[loq] || m_gpuCommandBuffer[loq]->getVkBuffer() == VK_NULL_HANDLE ||
         m_gpuCommandBuffer[loq]->size() == 0 || size > m_gpuCommandBuffer[loq]->size()) {
-        auto* replacement = new (std::nothrow) BufferVulkanVma(*m_backend, size, pipeline::BufferUsageIn);
+        auto* replacement = new (std::nothrow)
+            BufferVulkanVma(*m_backend, size, pipeline::BufferUsageIn, BufferVulkanBinding::Storage);
         if (replacement == nullptr) {
             VNLogError("Failed to allocate command buffer object: loq=%u size=%u",
                        static_cast<uint32_t>(loq), size);
@@ -338,15 +351,17 @@ void VulkanFrameContext::setEvent()
     m_eventPrev = m_event;
 }
 
-void VulkanFrameContext::insertComputeBarrier()
+void VulkanFrameContext::insertComputeBarrier(const char* label)
 {
     VkMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
+    m_timestamps.begin(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, label);
     vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+    m_timestamps.end(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, label);
 }
 
 } // namespace lcevc_dec::pipeline_vulkan

@@ -29,23 +29,29 @@ layout(rg16, set = 0, binding = 2) uniform restrict writeonly image2D dstUV;
 
 void main()
 {
-    const int x = int(gl_GlobalInvocationID.x);
-    const int y = int(gl_GlobalInvocationID.y);
+    const int cx = int(gl_GlobalInvocationID.x);
+    const int cy = int(gl_GlobalInvocationID.y);
+    const int x = cx << 1;
+    const int y = cy << 1;
 
     if (x >= width || y >= height) {
         return;
     }
 
-    const float yf = internalToUnorm(loadInternalValue(x, y, containerStrideY, containerOffsetY, containerStrideTemporalY, containerOffsetTemporalY), 5, 1023);
-    imageStore(dstY, ivec2(x, y), vec4(yf, 0.0, 0.0, 1.0));
+    const ivec2 y0 = loadInternalPair(cx, y, containerStrideY, containerOffsetY,
+                                      containerStrideTemporalY, containerOffsetTemporalY);
+    const ivec2 y1 = loadInternalPair(cx, y + 1, containerStrideY, containerOffsetY,
+                                      containerStrideTemporalY, containerOffsetTemporalY);
+    imageStore(dstY, ivec2(x, y), vec4(internalToUnorm(y0.x, 5, 1023), 0.0, 0.0, 1.0));
+    imageStore(dstY, ivec2(x + 1, y), vec4(internalToUnorm(y0.y, 5, 1023), 0.0, 0.0, 1.0));
+    imageStore(dstY, ivec2(x, y + 1), vec4(internalToUnorm(y1.x, 5, 1023), 0.0, 0.0, 1.0));
+    imageStore(dstY, ivec2(x + 1, y + 1), vec4(internalToUnorm(y1.y, 5, 1023), 0.0, 0.0, 1.0));
 
-    const int chromaMaskX = (1 << chromaWidthShift) - 1;
-    const int chromaMaskY = (1 << chromaHeightShift) - 1;
-    if ((x & chromaMaskX) == 0 && (y & chromaMaskY) == 0) {
-        const int cx = x >> chromaWidthShift;
-        const int cy = y >> chromaHeightShift;
-        const float u = internalToUnorm(loadInternalValue(cx, cy, containerStrideU, containerOffsetU, containerStrideTemporalU, containerOffsetTemporalU), 5, 1023);
-        const float v = internalToUnorm(loadInternalValue(cx, cy, containerStrideV, containerOffsetV, containerStrideTemporalV, containerOffsetTemporalV), 5, 1023);
-        imageStore(dstUV, ivec2(cx, cy), vec4(u, v, 0.0, 1.0));
-    }
+    const float u = internalToUnorm(loadInternalValue(cx, cy, containerStrideU, containerOffsetU,
+                                                       containerStrideTemporalU, containerOffsetTemporalU),
+                                    5, 1023);
+    const float v = internalToUnorm(loadInternalValue(cx, cy, containerStrideV, containerOffsetV,
+                                                       containerStrideTemporalV, containerOffsetTemporalV),
+                                    5, 1023);
+    imageStore(dstUV, ivec2(cx, cy), vec4(u, v, 0.0, 1.0));
 }

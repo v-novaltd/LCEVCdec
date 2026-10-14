@@ -56,17 +56,22 @@ list(
     "src/temporal_buffer_vulkan.h"
     "src/timestamp_vulkan.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/apply.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/add.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_in.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_nv12.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_p010.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_planar8.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_planar16.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_p010.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_nv12.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba8.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba8_generic.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba10.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba10_generic.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/dequant_transform.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/render_fragment.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/render_vertex.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_horizontal.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_vertical.h")
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_1d.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_2d.h")
 
 list(APPEND INTERFACES "include/LCEVC/pipeline_vulkan/create_pipeline.h")
 
@@ -74,31 +79,43 @@ set(ALL_FILES ${SOURCES} ${HEADERS} ${INTERFACES} "Sources.cmake")
 
 set(SHADER_INPUT_FILES
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/apply.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/add.comp
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/common.glsl
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_common.glsl
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_common.glsl
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_in.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_nv12.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_p010.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_planar8.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_planar16.comp
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_p010.comp
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_nv12.comp
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_rgba8.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_rgba8_generic.comp
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_rgba10.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/convert_out_image_rgba10_generic.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/dequant_transform.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/dequant_transform.glsl
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/render_fragment.frag
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/render_vertex.vert
     ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_constants.glsl
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_horizontal.comp
-    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_vertical.comp)
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_1d.comp
+    ${CMAKE_CURRENT_LIST_DIR}/src/shaders/src/upscale_2d.comp)
 
 set(SHADER_OUTPUT_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/apply.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/add.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_in.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_nv12.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_p010.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_planar8.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_planar16.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_p010.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_nv12.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba8.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba8_generic.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba10.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_image_rgba10_generic.h
+    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/dequant_transform.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/render_fragment.h
     ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/render_vertex.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_horizontal.h
-    ${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_vertical.h)
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_1d.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/upscale_2d.h")

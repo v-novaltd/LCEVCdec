@@ -16,17 +16,34 @@
 
 #include "backend_vulkan.h"
 
+#include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/log.h>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/pipeline/buffer_base.h>
 #include <LCEVC/pipeline/types.h>
 #include <vulkan/vulkan_core.h>
 
+#include <limits>
+
 namespace lcevc_dec::pipeline_vulkan {
 
-BufferVulkanVma::BufferVulkanVma(BackendVulkan& pipeline, uint32_t size, pipeline::BufferUsage usage)
+namespace {
+    VkBufferUsageFlags toVkBufferUsageFlags(BufferVulkanBinding binding)
+    {
+        switch (binding) {
+            case BufferVulkanBinding::Storage: return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+            case BufferVulkanBinding::Uniform: return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        }
+        assert(false);
+        return 0;
+    }
+} // namespace
+
+BufferVulkanVma::BufferVulkanVma(BackendVulkan& pipeline, uint32_t size,
+                                 pipeline::BufferUsage usage, BufferVulkanBinding binding)
     : m_pipeline(pipeline)
     , m_usage(usage)
+    , m_binding(binding)
 {
     if (size > 0) {
         createBufferAndMemory(size);
@@ -37,6 +54,7 @@ BufferVulkanVma::~BufferVulkanVma() { destroy(); }
 
 void BufferVulkanVma::destroy()
 {
+    VNTraceScopedNamedArgs("vulkan:BufferVulkanVma::destroy", "bytes", m_size);
     assert(m_mapped == false);
 
     if (m_buffer != VK_NULL_HANDLE) {
@@ -53,6 +71,8 @@ uint32_t BufferVulkanVma::size() const { return m_size; }
 
 bool BufferVulkanVma::createBufferAndMemory(uint32_t size)
 {
+    VNTraceScopedNamedArgs("vulkan:BufferVulkanVma::createBufferAndMemory", "bytes", size, "usage",
+                           static_cast<uint32_t>(m_usage));
     assert(m_ptr == nullptr);
     assert(m_size == 0);
     assert(m_buffer == VK_NULL_HANDLE);
@@ -74,7 +94,7 @@ bool BufferVulkanVma::createBufferAndMemory(uint32_t size)
     bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     bufferCreateInfo.queueFamilyIndexCount = 1;
     bufferCreateInfo.pQueueFamilyIndices = &queueFamilyIndex;
-    bufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    bufferCreateInfo.usage = toVkBufferUsageFlags(m_binding);
     bufferCreateInfo.size = static_cast<VkDeviceSize>(size);
 
     VmaAllocationCreateInfo allocInfo = {};
@@ -103,11 +123,12 @@ bool BufferVulkanVma::createBufferAndMemory(uint32_t size)
         default: assert(0); break;
     }
 
-    VmaAllocationInfo allocationInfo = {};
     const VkResult result = vmaCreateBuffer(m_pipeline.getVmaAllocator(), &bufferCreateInfo,
-                                            &allocInfo, &m_buffer, &m_vmaAllocation, &allocationInfo);
+                                            &allocInfo, &m_buffer, &m_vmaAllocation, nullptr);
     if (result != VK_SUCCESS) {
         VNLogError("vmaCreateBuffer failed: %d", static_cast<int32_t>(result));
+        m_buffer = VK_NULL_HANDLE;
+        m_vmaAllocation = {};
         return false;
     }
 
@@ -132,7 +153,8 @@ bool BufferVulkanVma::map(LdpBufferMapping* mapping, int32_t offset, uint32_t ma
     }
 
     // Does requested window fit in buffer?
-    if (offset < 0 || (offset + mapSize) > size()) {
+    if (offset < 0 || static_cast<uint32_t>(offset) > size() ||
+        mapSize > size() - static_cast<uint32_t>(offset)) {
         assert(0);
         return false;
     }
@@ -150,13 +172,16 @@ bool BufferVulkanVma::map(LdpBufferMapping* mapping, int32_t offset, uint32_t ma
         return false;
     }
 
-    // Make sure CPU sees the GPU writes
-    const VkResult invalidateResult =
-        vmaInvalidateAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation, 0, m_size);
-    if (invalidateResult != VK_SUCCESS) {
-        VNLogError("vmaInvalidateAllocation failed: %d", static_cast<int32_t>(invalidateResult));
-        vmaUnmapMemory(m_pipeline.getVmaAllocator(), m_vmaAllocation);
-        return false;
+    // Make GPU writes visible before host reads. VMA atom-aligns the requested range.
+    if (access != LdpAccessWrite) {
+        const VkResult invalidateResult = vmaInvalidateAllocation(
+            m_pipeline.getVmaAllocator(), m_vmaAllocation, static_cast<VkDeviceSize>(offset),
+            static_cast<VkDeviceSize>(mapSize));
+        if (invalidateResult != VK_SUCCESS) {
+            VNLogError("vmaInvalidateAllocation failed: %d", static_cast<int32_t>(invalidateResult));
+            vmaUnmapMemory(m_pipeline.getVmaAllocator(), m_vmaAllocation);
+            return false;
+        }
     }
 
     // Record details
@@ -176,8 +201,15 @@ void BufferVulkanVma::unmap(const LdpBufferMapping* mapping)
 {
     assert(mapping->userData == (void*)this);
 
-    // Make sure GPU sees the CPU writes
-    vmaFlushAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation, 0, m_size);
+    // Make host writes visible to the GPU. VMA atom-aligns the requested range.
+    if (mapping->access != LdpAccessRead) {
+        const VkResult flushResult = vmaFlushAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation,
+                                                        static_cast<VkDeviceSize>(mapping->offset),
+                                                        static_cast<VkDeviceSize>(mapping->size));
+        if (flushResult != VK_SUCCESS) {
+            VNLogError("vmaFlushAllocation failed: %d", static_cast<int32_t>(flushResult));
+        }
+    }
 
     vmaUnmapMemory(m_pipeline.getVmaAllocator(), m_vmaAllocation);
     m_mapped = false;
@@ -202,16 +234,23 @@ void BufferVulkanVma::clear() // NOLINT(readability-make-member-function-const)
 
     assert(m_buffer != VK_NULL_HANDLE);
 
+    const bool alreadyMapped = m_mapped;
     LdpBufferMapping mapping{};
-    if (!m_mapped) {
-        map(&mapping, 0, m_size, LdpAccessWrite);
+    if (!alreadyMapped && !map(&mapping, 0, m_size, LdpAccessWrite)) {
+        return;
     }
 
     assert(m_ptr != nullptr);
     memset(m_ptr, 0, m_size);
 
-    if (mapping.buffer) {
+    if (!alreadyMapped) {
         unmap(&mapping);
+    } else {
+        const VkResult flushResult =
+            vmaFlushAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation, 0, m_size);
+        if (flushResult != VK_SUCCESS) {
+            VNLogError("vmaFlushAllocation failed: %d", static_cast<int32_t>(flushResult));
+        }
     }
 }
 
@@ -234,16 +273,27 @@ void BufferVulkanVma::copyIn(uint32_t dstOffset, const void* src, uint32_t size)
         return;
     }
 
+    const bool alreadyMapped = m_mapped;
     LdpBufferMapping mapping{};
-    if (!m_mapped) {
-        map(&mapping, 0, m_size, LdpAccessWrite);
+    if (!alreadyMapped) {
+        assert(dstOffset <= static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+        if (!map(&mapping, static_cast<int32_t>(dstOffset), size, LdpAccessWrite)) {
+            return;
+        }
     }
 
     assert(m_ptr != nullptr);
     memcpy(m_ptr + dstOffset, src, size);
 
-    if (mapping.buffer) {
+    if (!alreadyMapped) {
         unmap(&mapping);
+    } else {
+        const VkResult flushResult =
+            vmaFlushAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation,
+                               static_cast<VkDeviceSize>(dstOffset), static_cast<VkDeviceSize>(size));
+        if (flushResult != VK_SUCCESS) {
+            VNLogError("vmaFlushAllocation failed: %d", static_cast<int32_t>(flushResult));
+        }
     }
 }
 
@@ -257,15 +307,33 @@ void BufferVulkanVma::copyOut(void* dst, uint32_t srcOffset, uint32_t size)
         return;
     }
 
+    const bool alreadyMapped = m_mapped;
     LdpBufferMapping mapping{};
-    if (!m_mapped) {
-        map(&mapping, 0, m_size, LdpAccessRead);
+    if (!alreadyMapped) {
+        assert(srcOffset <= static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+        if (!map(&mapping, static_cast<int32_t>(srcOffset), size, LdpAccessRead)) {
+            return;
+        }
+    } else {
+        // Preserve any writes through the active mapping before invalidating another range.
+        VkResult result = vmaFlushAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation, 0, m_size);
+        if (result != VK_SUCCESS) {
+            VNLogError("vmaFlushAllocation failed: %d", static_cast<int32_t>(result));
+            return;
+        }
+        result = vmaInvalidateAllocation(m_pipeline.getVmaAllocator(), m_vmaAllocation,
+                                         static_cast<VkDeviceSize>(srcOffset),
+                                         static_cast<VkDeviceSize>(size));
+        if (result != VK_SUCCESS) {
+            VNLogError("vmaInvalidateAllocation failed: %d", static_cast<int32_t>(result));
+            return;
+        }
     }
 
     assert(m_ptr != nullptr);
     memcpy(dst, m_ptr + srcOffset, size);
 
-    if (mapping.buffer) {
+    if (!alreadyMapped) {
         unmap(&mapping);
     }
 }

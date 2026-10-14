@@ -14,23 +14,28 @@
 
 #include "compute_vulkan.h"
 
-#include "add.h"
 #include "apply.h"
 #include "buffer_vulkan.h"
 #include "convert_in.h"
-#include "convert_out.h"
 #include "convert_out_image_nv12.h"
 #include "convert_out_image_p010.h"
 #include "convert_out_image_rgba10.h"
+#include "convert_out_image_rgba10_generic.h"
 #include "convert_out_image_rgba8.h"
+#include "convert_out_image_rgba8_generic.h"
+#include "convert_out_nv12.h"
+#include "convert_out_p010.h"
+#include "convert_out_planar16.h"
+#include "convert_out_planar8.h"
+#include "dequant_transform.h"
 #include "frame_context_vulkan.h"
 #include "frame_vulkan.h"
 #include "from_base.h"
 #include "picture_vulkan.h"
 #include "pipeline_vulkan.h"
 #include "shaders/src/specialization_ids.h"
-#include "upscale_horizontal.h"
-#include "upscale_vertical.h"
+#include "upscale_1d.h"
+#include "upscale_2d.h"
 
 #include <LCEVC/build_config.h> // NOLINT(misc-include-cleaner) - needed for VN_SDK_FEATURE in #if
 #include <LCEVC/common/limit.h>
@@ -94,32 +99,51 @@ struct PushConstantsConversion
     uint32_t containerOffsetIn;
     uint32_t containerStrideOut;
     uint32_t containerOffsetOut;
-    uint32_t containerStrideV; // used to check for nv12 and as input or output stride for V-plane
-    uint32_t containerOffsetV; // used with nv12 as input or output offset for V-plane
-    uint32_t shift;            // 5 for 10bit, 3 for 12bit, and 1 for 14bit
-    uint32_t sharpenStrength;  // 0 disables sharpening, otherwise U16 strength
-    uint32_t nv21Swap;         // non-zero -> swap U/V order in 8-bit semi-planar chroma write
-    // Note: convert_out_image_*.comp shaders alias `shift` and `sharpenStrength`
-    // as chromaWidthShift / chromaHeightShift and do not read `nv21Swap`.
+    uint32_t containerStrideV;
+    uint32_t containerOffsetV;
+    uint32_t shift;           // 5 for 10bit, 3 for 12bit, and 1 for 14bit
+    uint32_t sharpenStrength; // 0 disables sharpening, otherwise U16 strength
+    uint32_t nv21Swap;        // non-zero -> swap U/V order during semiplanar input conversion
+    // Note: generic RGBA convert_out_image_*.comp shaders alias `shift` and
+    // `sharpenStrength` as chromaWidthShift / chromaHeightShift. Fixed-4:2:0 image shaders
+    // do not read those fields, and no image-output shader reads `nv21Swap`.
     //
-    // Strides of eash planes' temporal buffer - buffer is present if stride != 0
+    // Strides of each plane's temporal buffer - buffer is present if stride != 0.
     uint32_t containerStrideTemporal0;
     uint32_t containerOffsetTemporal0;
     uint32_t containerStrideTemporal1;
     uint32_t containerOffsetTemporal1;
     uint32_t containerStrideTemporal2;
     uint32_t containerOffsetTemporal2;
+    // Additional metadata used only by fused semiplanar buffer-output shaders.
+    uint32_t containerStrideU;
+    uint32_t containerOffsetU;
+    uint32_t containerStrideUVOut;
+    uint32_t containerOffsetUVOut;
 };
 
-struct PushConstantsAdd
+static_assert(sizeof(PushConstantsConversion) == 21 * sizeof(uint32_t));
+static_assert(offsetof(PushConstantsConversion, containerStrideTemporal0) == 11 * sizeof(uint32_t));
+static_assert(offsetof(PushConstantsConversion, containerStrideU) == 17 * sizeof(uint32_t));
+
+struct PushConstantsDequantTransform
 {
-    uint32_t width;
-    uint32_t height;
-    uint32_t containerStride;
-    uint32_t containerOffset;
+    uint32_t transformUnitCount;
+    uint32_t layerCount;
+    uint32_t temporalSignal;
+    uint32_t scalingMode;
+    uint32_t deblockEnabled;
+    uint32_t deblockCorner;
+    uint32_t deblockSide;
 };
 
 namespace {
+    const std::vector<VkDescriptorType> kTwoStorageBufferDescriptorTypes(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    const std::vector<VkDescriptorType> kThreeStorageBufferDescriptorTypes(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    const std::vector<VkDescriptorType> kDequantTransformDescriptorTypes = {
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER};
+
     // Convert a byte offset or stride to uint32 (SSBO) units. The GPU shader
     // addresses the buffer as uint32[], so byte values must be a multiple of 4.
     inline int toUint32Units(uint32_t bytes)
@@ -254,14 +278,15 @@ void ComputeVulkan::releaseFrameContext(VulkanFrameContext* context)
 }
 
 bool ComputeVulkan::createComputeBindingsAndPipelineLayout(ComputePipelineLayout& computePipelineLayout,
-                                                           uint32_t numBuffers, uint32_t pushConstantsSize)
+                                                           const std::vector<VkDescriptorType>& descriptorTypes,
+                                                           uint32_t pushConstantsSize)
 {
     std::vector<VkDescriptorSetLayoutBinding> layoutBindings;
 
-    for (uint32_t i = 0; i < numBuffers; i++) {
+    for (uint32_t i = 0; i < descriptorTypes.size(); i++) {
         VkDescriptorSetLayoutBinding layoutBinding{};
         layoutBinding.binding = i;
-        layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        layoutBinding.descriptorType = descriptorTypes[i];
         layoutBinding.descriptorCount = 1;
         layoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         layoutBindings.push_back(layoutBinding);
@@ -624,9 +649,10 @@ bool ComputeVulkan::updateComputeImageDescriptorSets(BufferVulkan* src, BufferVu
 }
 
 bool ComputeVulkan::updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan* dst1,
-                                                BufferVulkan* dst2, VkDescriptorSet descriptorSet)
+                                                BufferVulkan* dst2, VkDescriptorSet descriptorSet,
+                                                const std::vector<VkDescriptorType>& descriptorTypes)
 {
-    if (!validateDescriptorSet(descriptorSet)) {
+    if (!validateDescriptorSet(descriptorSet) || descriptorTypes.size() != 3) {
         return false;
     }
 
@@ -644,7 +670,7 @@ bool ComputeVulkan::updateComputeDescriptorSets(BufferVulkan* src, BufferVulkan*
         writes[i].dstBinding = i;
         writes[i].dstArrayElement = 0;
         writes[i].descriptorCount = 1;
-        writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[i].descriptorType = descriptorTypes[i];
         writes[i].pBufferInfo = &bufferInfos[i];
     }
 
@@ -662,9 +688,9 @@ bool ComputeVulkan::updateConfig(uint8_t loq, const LdpPictureDesc& desc)
     return false;
 }
 
-bool ComputeVulkan::beginCompute(VulkanFrameContext* context, uint32_t numTiles)
+bool ComputeVulkan::beginCompute(VulkanFrameContext* context)
 {
-    return context->begin(m_descriptorSetLayouts, numTiles);
+    return context->begin(m_descriptorSetLayouts);
 }
 
 bool ComputeVulkan::endCompute(VulkanFrameContext* context)
@@ -678,20 +704,17 @@ bool ComputeVulkan::init()
     uint32_t workgroupWidth = 32;
     uint32_t workgroupHeight = 8;
 
-    if (!createComputeBindingsAndPipelineLayout(m_pipelineLayoutVertical, 2, sizeof(PushConstantsUpscale))) {
-        return false;
-    }
-
-    if (!createComputeBindingsAndPipelineLayout(m_pipelineLayoutHorizontal, 3,
+    if (!createComputeBindingsAndPipelineLayout(m_pipelineLayoutUpscale, kThreeStorageBufferDescriptorTypes,
                                                 sizeof(PushConstantsUpscale))) {
         return false;
     }
 
-    if (!createComputeBindingsAndPipelineLayout(m_pipelineLayoutApply, 2, sizeof(PushConstantsApply))) {
+    if (!createComputeBindingsAndPipelineLayout(m_pipelineLayoutApply, kTwoStorageBufferDescriptorTypes,
+                                                sizeof(PushConstantsApply))) {
         return false;
     }
 
-    if (!createComputeBindingsAndPipelineLayout(m_pipelineLayoutConversion, 3,
+    if (!createComputeBindingsAndPipelineLayout(m_pipelineLayoutConversion, kThreeStorageBufferDescriptorTypes,
                                                 sizeof(PushConstantsConversion))) {
         return false;
     }
@@ -701,30 +724,19 @@ bool ComputeVulkan::init()
         return false;
     }
 
-    if (!createComputeBindingsAndPipelineLayout(m_pipelineLayoutAdd, 2, sizeof(PushConstantsAdd))) {
+    if (!createComputeBindingsAndPipelineLayout(m_pipelineLayoutDequantTransform, kDequantTransformDescriptorTypes,
+                                                sizeof(PushConstantsDequantTransform))) {
         return false;
     }
 
-    if (!createComputePipeline(m_pipelineVertical, m_pipelineLayoutVertical, upscale_vertical_spv,
-                               sizeof(upscale_vertical_spv), "upscaleVertical", {16, 16}, {2, 1}, {})) {
-        return false;
-    }
-
-    if (!createComputePipeline(m_pipelineHorizontalPA0, m_pipelineLayoutHorizontal,
-                               upscale_horizontal_spv, sizeof(upscale_horizontal_spv),
-                               "upscaleHorizontalPA0", {64, 1}, {2, 1}, {{SPECID_PA, 0}})) {
-        return false;
-    }
-
-    if (!createComputePipeline(m_pipelineHorizontalPA1, m_pipelineLayoutHorizontal,
-                               upscale_horizontal_spv, sizeof(upscale_horizontal_spv),
-                               "upscaleHorizontalPA1", {64, 1}, {2, 1}, {{SPECID_PA, 1}})) {
-        return false;
-    }
-
-    if (!createComputePipeline(m_pipelineHorizontalPA2, m_pipelineLayoutHorizontal,
-                               upscale_horizontal_spv, sizeof(upscale_horizontal_spv),
-                               "upscaleHorizontalPA2", {64, 1}, {2, 1}, {{SPECID_PA, 2}})) {
+    if (!createComputePipeline(m_pipelineUpscale1DPA0, m_pipelineLayoutUpscale, upscale_1d_spv,
+                               sizeof(upscale_1d_spv), "upscale1DPA0", {64, 1}, {2, 1}, {{SPECID_PA, 0}}) ||
+        !createComputePipeline(m_pipelineUpscale1DPA1, m_pipelineLayoutUpscale, upscale_1d_spv,
+                               sizeof(upscale_1d_spv), "upscale1DPA1", {64, 1}, {2, 1}, {{SPECID_PA, 1}}) ||
+        !createComputePipeline(m_pipelineUpscale2DPA0, m_pipelineLayoutUpscale, upscale_2d_spv,
+                               sizeof(upscale_2d_spv), "upscale2DPA0", {16, 8}, {2, 1}, {{SPECID_PA, 0}}) ||
+        !createComputePipeline(m_pipelineUpscale2DPA2, m_pipelineLayoutUpscale, upscale_2d_spv,
+                               sizeof(upscale_2d_spv), "upscale2DPA2", {16, 8}, {2, 1}, {{SPECID_PA, 2}})) {
         return false;
     }
 
@@ -757,110 +769,183 @@ bool ComputeVulkan::init()
                                {{SPECID_8_BIT, 1}, {SPECID_NV12, 1}})) {
         return false;
     }
-    if (!createComputePipeline(m_pipelineConversionFromInternal8Bit, m_pipelineLayoutConversion,
-                               convert_out_spv, sizeof(convert_out_spv), "conversionOut8",
-                               {workgroupWidth, workgroupHeight}, {4, 1},
-                               {{SPECID_8_BIT, 1}, {SPECID_NV12, 0}})) {
-        return false;
-    }
-    if (!createComputePipeline(m_pipelineConversionFromInternal8BitNV12, m_pipelineLayoutConversion,
-                               convert_out_spv, sizeof(convert_out_spv), "conversionOut8Nv12",
-                               {workgroupWidth, workgroupHeight}, {4, 1},
-                               {{SPECID_8_BIT, 1}, {SPECID_NV12, 1}})) {
-        return false;
-    }
     if (!createComputePipeline(m_pipelineConversionToInternal16Bit, m_pipelineLayoutConversion,
                                convert_in_spv, sizeof(convert_in_spv), "conversionIn16",
                                {workgroupWidth, workgroupHeight}, {2, 1},
                                {{SPECID_8_BIT, 0}, {SPECID_NV12, 0}})) {
         return false;
     }
-    if (!createComputePipeline(m_pipelineConversionFromInternal16Bit, m_pipelineLayoutConversion,
-                               convert_out_spv, sizeof(convert_out_spv), "conversionOut16",
-                               {workgroupWidth, workgroupHeight}, {2, 1},
-                               {{SPECID_8_BIT, 0}, {SPECID_NV12, 0}})) {
+    if (!createComputePipeline(m_pipelineConversionFromInternalPlanar8, m_pipelineLayoutConversion,
+                               convert_out_planar8_spv, sizeof(convert_out_planar8_spv),
+                               "conversionOutPlanar8", {workgroupWidth, workgroupHeight}, {4, 2}, {})) {
         return false;
     }
-    if (!createComputePipeline(m_pipelineConversionFromInternal16BitP010,
-                               m_pipelineLayoutConversion, convert_out_spv, sizeof(convert_out_spv),
-                               "conversionOut16P010", {workgroupWidth, workgroupHeight}, {2, 1},
-                               {{SPECID_8_BIT, 0}, {SPECID_NV12, 1}})) {
+    if (!createComputePipeline(m_pipelineConversionFromInternalPlanar8Sharpen,
+                               m_pipelineLayoutConversion, convert_out_planar8_spv,
+                               sizeof(convert_out_planar8_spv), "conversionOutPlanar8Sharpen",
+                               {workgroupWidth, workgroupHeight}, {4, 2}, {{SPECID_SHARPEN, 1}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalPlanar16, m_pipelineLayoutConversion,
+                               convert_out_planar16_spv, sizeof(convert_out_planar16_spv),
+                               "conversionOutPlanar16", {workgroupWidth, workgroupHeight}, {2, 2}, {})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalPlanar16Sharpen,
+                               m_pipelineLayoutConversion, convert_out_planar16_spv,
+                               sizeof(convert_out_planar16_spv), "conversionOutPlanar16Sharpen",
+                               {workgroupWidth, workgroupHeight}, {2, 2}, {{SPECID_SHARPEN, 1}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalNv12, m_pipelineLayoutConversion,
+                               convert_out_nv12_spv, sizeof(convert_out_nv12_spv),
+                               "conversionOutNv12", {workgroupWidth, workgroupHeight}, {4, 2}, {})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalNv12Sharpen, m_pipelineLayoutConversion,
+                               convert_out_nv12_spv, sizeof(convert_out_nv12_spv), "conversionOutNv12Sharpen",
+                               {workgroupWidth, workgroupHeight}, {4, 2}, {{SPECID_SHARPEN, 1}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalP010, m_pipelineLayoutConversion,
+                               convert_out_p010_spv, sizeof(convert_out_p010_spv),
+                               "conversionOutP010", {workgroupWidth, workgroupHeight}, {2, 2}, {})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalP010Sharpen, m_pipelineLayoutConversion,
+                               convert_out_p010_spv, sizeof(convert_out_p010_spv), "conversionOutP010Sharpen",
+                               {workgroupWidth, workgroupHeight}, {2, 2}, {{SPECID_SHARPEN, 1}})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternalRgba8Image,
                                m_pipelineLayoutConvertOutImage, convert_out_image_rgba8_spv,
                                sizeof(convert_out_image_rgba8_spv), "conversionOutRgba8Image",
-                               {workgroupWidth, workgroupHeight}, {1, 1}, {})) {
+                               {workgroupWidth, workgroupHeight}, {2, 2}, {})) {
+        return false;
+    }
+    if (!createComputePipeline(
+            m_pipelineConversionFromInternalRgba8ImageGeneric, m_pipelineLayoutConvertOutImage,
+            convert_out_image_rgba8_generic_spv, sizeof(convert_out_image_rgba8_generic_spv),
+            "conversionOutRgba8ImageGeneric", {workgroupWidth, workgroupHeight}, {1, 1}, {})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternalP010Image, m_pipelineLayoutConvertOutImage,
                                convert_out_image_p010_spv, sizeof(convert_out_image_p010_spv),
-                               "conversionOutP010Image", {workgroupWidth, workgroupHeight}, {1, 1}, {})) {
+                               "conversionOutP010Image", {workgroupWidth, workgroupHeight}, {2, 2}, {})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternalNv12Image, m_pipelineLayoutConvertOutImage,
                                convert_out_image_nv12_spv, sizeof(convert_out_image_nv12_spv),
-                               "conversionOutNv12Image", {workgroupWidth, workgroupHeight}, {1, 1}, {})) {
+                               "conversionOutNv12Image", {workgroupWidth, workgroupHeight}, {2, 2}, {})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternalRgba10Image,
                                m_pipelineLayoutConvertOutImage, convert_out_image_rgba10_spv,
                                sizeof(convert_out_image_rgba10_spv), "conversionOutRgba10Image",
-                               {workgroupWidth, workgroupHeight}, {1, 1}, {})) {
+                               {workgroupWidth, workgroupHeight}, {2, 2}, {})) {
+        return false;
+    }
+    if (!createComputePipeline(
+            m_pipelineConversionFromInternalRgba10ImageGeneric, m_pipelineLayoutConvertOutImage,
+            convert_out_image_rgba10_generic_spv, sizeof(convert_out_image_rgba10_generic_spv),
+            "conversionOutRgba10ImageGeneric", {workgroupWidth, workgroupHeight}, {1, 1}, {})) {
         return false;
     }
 
-    if (!createComputePipeline(m_pipelineConversionFromInternal8BitAddTemporal,
-                               m_pipelineLayoutConversion, convert_out_spv, sizeof(convert_out_spv),
-                               "conversionOut8AddTemporal", {workgroupWidth, workgroupHeight}, {4, 1},
-                               {{SPECID_8_BIT, 1}, {SPECID_NV12, 0}, {SPECID_ADD_TEMPORAL, 1}})) {
+    if (!createComputePipeline(m_pipelineConversionFromInternalPlanar8AddTemporal,
+                               m_pipelineLayoutConversion, convert_out_planar8_spv,
+                               sizeof(convert_out_planar8_spv), "conversionOutPlanar8AddTemporal",
+                               {workgroupWidth, workgroupHeight}, {4, 2}, {{SPECID_ADD_TEMPORAL, 1}})) {
         return false;
     }
-    if (!createComputePipeline(m_pipelineConversionFromInternal8BitNV12AddTemporal,
-                               m_pipelineLayoutConversion, convert_out_spv, sizeof(convert_out_spv),
-                               "conversionOut8Nv12AddTemporal", {workgroupWidth, workgroupHeight},
-                               {4, 1}, {{SPECID_8_BIT, 1}, {SPECID_NV12, 1}, {SPECID_ADD_TEMPORAL, 1}})) {
+    if (!createComputePipeline(m_pipelineConversionFromInternalPlanar8SharpenAddTemporal,
+                               m_pipelineLayoutConversion, convert_out_planar8_spv,
+                               sizeof(convert_out_planar8_spv), "conversionOutPlanar8SharpenAddTemporal",
+                               {workgroupWidth, workgroupHeight}, {4, 2},
+                               {{SPECID_ADD_TEMPORAL, 1}, {SPECID_SHARPEN, 1}})) {
         return false;
     }
-    if (!createComputePipeline(m_pipelineConversionFromInternal16BitAddTemporal,
-                               m_pipelineLayoutConversion, convert_out_spv, sizeof(convert_out_spv),
-                               "conversionOut16AddTemporal", {workgroupWidth, workgroupHeight}, {2, 1},
-                               {{SPECID_8_BIT, 0}, {SPECID_NV12, 0}, {SPECID_ADD_TEMPORAL, 1}})) {
+    if (!createComputePipeline(m_pipelineConversionFromInternalPlanar16AddTemporal,
+                               m_pipelineLayoutConversion, convert_out_planar16_spv,
+                               sizeof(convert_out_planar16_spv), "conversionOutPlanar16AddTemporal",
+                               {workgroupWidth, workgroupHeight}, {2, 2}, {{SPECID_ADD_TEMPORAL, 1}})) {
         return false;
     }
-    if (!createComputePipeline(m_pipelineConversionFromInternal16BitP010AddTemporal,
-                               m_pipelineLayoutConversion, convert_out_spv, sizeof(convert_out_spv),
-                               "conversionOut16P010AddTemporal", {workgroupWidth, workgroupHeight},
-                               {2, 1}, {{SPECID_8_BIT, 0}, {SPECID_NV12, 1}, {SPECID_ADD_TEMPORAL, 1}})) {
+    if (!createComputePipeline(m_pipelineConversionFromInternalPlanar16SharpenAddTemporal,
+                               m_pipelineLayoutConversion, convert_out_planar16_spv,
+                               sizeof(convert_out_planar16_spv), "conversionOutPlanar16SharpenAddTemporal",
+                               {workgroupWidth, workgroupHeight}, {2, 2},
+                               {{SPECID_ADD_TEMPORAL, 1}, {SPECID_SHARPEN, 1}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalNv12AddTemporal,
+                               m_pipelineLayoutConversion, convert_out_nv12_spv,
+                               sizeof(convert_out_nv12_spv), "conversionOutNv12AddTemporal",
+                               {workgroupWidth, workgroupHeight}, {4, 2}, {{SPECID_ADD_TEMPORAL, 1}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalNv12SharpenAddTemporal,
+                               m_pipelineLayoutConversion, convert_out_nv12_spv,
+                               sizeof(convert_out_nv12_spv), "conversionOutNv12SharpenAddTemporal",
+                               {workgroupWidth, workgroupHeight}, {4, 2},
+                               {{SPECID_ADD_TEMPORAL, 1}, {SPECID_SHARPEN, 1}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalP010AddTemporal,
+                               m_pipelineLayoutConversion, convert_out_p010_spv,
+                               sizeof(convert_out_p010_spv), "conversionOutP010AddTemporal",
+                               {workgroupWidth, workgroupHeight}, {2, 2}, {{SPECID_ADD_TEMPORAL, 1}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalP010SharpenAddTemporal,
+                               m_pipelineLayoutConversion, convert_out_p010_spv,
+                               sizeof(convert_out_p010_spv), "conversionOutP010SharpenAddTemporal",
+                               {workgroupWidth, workgroupHeight}, {2, 2},
+                               {{SPECID_ADD_TEMPORAL, 1}, {SPECID_SHARPEN, 1}})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternalRgba8ImageAddTemporal,
                                m_pipelineLayoutConvertOutImage, convert_out_image_rgba8_spv,
                                sizeof(convert_out_image_rgba8_spv), "conversionOutRgba8ImageAddTemporal",
+                               {workgroupWidth, workgroupHeight}, {2, 2}, {{SPECID_ADD_TEMPORAL, 1}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalRgba8ImageGenericAddTemporal,
+                               m_pipelineLayoutConvertOutImage, convert_out_image_rgba8_generic_spv,
+                               sizeof(convert_out_image_rgba8_generic_spv),
+                               "conversionOutRgba8ImageGenericAddTemporal",
                                {workgroupWidth, workgroupHeight}, {1, 1}, {{SPECID_ADD_TEMPORAL, 1}})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternalP010ImageAddTemporal,
                                m_pipelineLayoutConvertOutImage, convert_out_image_p010_spv,
                                sizeof(convert_out_image_p010_spv), "conversionOutP010ImageAddTemporal",
-                               {workgroupWidth, workgroupHeight}, {1, 1}, {{SPECID_ADD_TEMPORAL, 1}})) {
+                               {workgroupWidth, workgroupHeight}, {2, 2}, {{SPECID_ADD_TEMPORAL, 1}})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternalNv12ImageAddTemporal,
                                m_pipelineLayoutConvertOutImage, convert_out_image_nv12_spv,
                                sizeof(convert_out_image_nv12_spv), "conversionOutNv12ImageAddTemporal",
-                               {workgroupWidth, workgroupHeight}, {1, 1}, {{SPECID_ADD_TEMPORAL, 1}})) {
+                               {workgroupWidth, workgroupHeight}, {2, 2}, {{SPECID_ADD_TEMPORAL, 1}})) {
         return false;
     }
     if (!createComputePipeline(m_pipelineConversionFromInternalRgba10ImageAddTemporal,
                                m_pipelineLayoutConvertOutImage, convert_out_image_rgba10_spv,
                                sizeof(convert_out_image_rgba10_spv), "conversionOutRgba10ImageAddTemporal",
+                               {workgroupWidth, workgroupHeight}, {2, 2}, {{SPECID_ADD_TEMPORAL, 1}})) {
+        return false;
+    }
+    if (!createComputePipeline(m_pipelineConversionFromInternalRgba10ImageGenericAddTemporal,
+                               m_pipelineLayoutConvertOutImage, convert_out_image_rgba10_generic_spv,
+                               sizeof(convert_out_image_rgba10_generic_spv),
+                               "conversionOutRgba10ImageGenericAddTemporal",
                                {workgroupWidth, workgroupHeight}, {1, 1}, {{SPECID_ADD_TEMPORAL, 1}})) {
         return false;
     }
 
-    if (!createComputePipeline(m_pipelineAdd, m_pipelineLayoutAdd, add_spv, sizeof(add_spv), "add",
-                               {workgroupWidth, workgroupHeight}, {2, 1}, {})) {
+    if (!createComputePipeline(m_pipelineDequantTransform, m_pipelineLayoutDequantTransform,
+                               dequant_transform_spv, sizeof(dequant_transform_spv),
+                               "dequantTransform", {64, 1}, {1, 1}, {})) {
         return false;
     }
 
@@ -875,13 +960,11 @@ bool ComputeVulkan::init()
         m_freeContexts.push(idx);
     }
 
-    // Recreate for previous code
-    m_descriptorSetLayouts.vertical = m_pipelineLayoutVertical.descriptorSetLayout;
-    m_descriptorSetLayouts.horizontal = m_pipelineLayoutHorizontal.descriptorSetLayout;
+    m_descriptorSetLayouts.upscale = m_pipelineLayoutUpscale.descriptorSetLayout;
     m_descriptorSetLayouts.apply = m_pipelineLayoutApply.descriptorSetLayout;
     m_descriptorSetLayouts.conversion = m_pipelineLayoutConversion.descriptorSetLayout;
     m_descriptorSetLayouts.convertOutImage = m_pipelineLayoutConvertOutImage.descriptorSetLayout;
-    m_descriptorSetLayouts.add = m_pipelineLayoutAdd.descriptorSetLayout;
+    m_descriptorSetLayouts.dequantTransform = m_pipelineLayoutDequantTransform.descriptorSetLayout;
 
     return true;
 }
@@ -914,6 +997,7 @@ bool ComputeVulkan::applyCommon(VulkanApplyCommonArgs* params)
         if (needsClear) {
             BufferVulkan* temporalBuffer = fromPipeline(params->temporalPicture->buffer);
             temporalBuffer->clearCmd(params->context->m_commandBuffer);
+            params->temporalPicture->temporalBufferEmpty = true;
         }
     }
 
@@ -1020,44 +1104,38 @@ bool ComputeVulkan::applyTile(VulkanApplyTileArgs* params)
     return true;
 }
 
-bool ComputeVulkan::add(VulkanAddArgs* params)
+bool ComputeVulkan::dequantTransform(VulkanDequantTransformArgs* params)
 {
-    PictureVulkan* srcPicture = params->src;
-    BufferVulkan* srcBuffer = fromPipeline(srcPicture->buffer);
-
-    PictureVulkan* dstPicture = params->dst;
-    BufferVulkan* dstBuffer = fromPipeline(dstPicture->buffer);
-
-    VulkanFrameContext* context = params->context;
-
-    if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetAdd)) {
-        VNLogError("add: failed to update descriptor set");
+    if (params == nullptr || params->context == nullptr || params->coefficients == nullptr ||
+        params->dequantParameters == nullptr || params->residuals == nullptr ||
+        params->transformUnitCount == 0 ||
+        (params->layerCount != RCLayerCountDD && params->layerCount != RCLayerCountDDS)) {
+        VNLogError("dequant_transform: invalid arguments");
         return false;
     }
 
-    context->bind(&m_pipelineLayoutAdd, &m_pipelineAdd, context->m_descriptorSetAdd);
-
-    PushConstantsAdd constants{};
-    for (uint8_t plane = 0; plane < params->numEnhancedPlanes; ++plane) {
-        int widthShift = 0;
-        int heightShift = 0;
-        if (plane != 0) {
-            getSubsamplingShifts(params->chroma, widthShift, heightShift);
-        }
-        constants.width = srcPicture->getActiveWidth() >> widthShift;
-        constants.height = srcPicture->getActiveHeight() >> heightShift;
-        constants.containerStride = toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, plane));
-        constants.containerOffset =
-            toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, plane));
-
-        vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutAdd.pipelineLayout,
-                           VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsAdd), &constants);
-
-        context->dispatch(constants.width, constants.height, "add");
+    VulkanFrameContext* context = params->context;
+    if (!updateComputeDescriptorSets(params->coefficients, params->dequantParameters,
+                                     params->residuals, context->m_descriptorSetDequantTransform,
+                                     kDequantTransformDescriptorTypes)) {
+        VNLogError("dequant_transform: failed to update descriptor set");
+        return false;
     }
 
-    context->insertComputeBarrier();
+    context->bind(&m_pipelineLayoutDequantTransform, &m_pipelineDequantTransform,
+                  context->m_descriptorSetDequantTransform);
 
+    const PushConstantsDequantTransform constants = {params->transformUnitCount,
+                                                     params->layerCount,
+                                                     params->temporalSignal,
+                                                     static_cast<uint32_t>(params->scalingMode),
+                                                     params->deblockEnabled ? 1u : 0u,
+                                                     params->deblockCorner,
+                                                     params->deblockSide};
+    vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutDequantTransform.pipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
+    context->dispatch(params->transformUnitCount, 1, "dequant_transform");
+    context->insertComputeBarrier("barrier_after_dequant_transform");
     return true;
 }
 
@@ -1079,6 +1157,7 @@ bool ComputeVulkan::convertIn(VulkanConvertInArgs* params)
     constants.height = srcPicture->layout.height;
     constants.shift = 15 - params->bitDepth;
     constants.sharpenStrength = 0;
+    constants.nv21Swap = (srcFormat == LdpColorFormatNV21_8) ? 1u : 0u;
 
     setContainerStrides(constants, 0, srcPicture, dstPicture, nullptr);
 
@@ -1088,7 +1167,8 @@ bool ComputeVulkan::convertIn(VulkanConvertInArgs* params)
     constants.containerOffsetV = 0;
 
     // Alias srcBuffer intop temporal
-    if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, srcBuffer, context->m_descriptorSetConversionTo)) {
+    if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, srcBuffer, context->m_descriptorSetConversionTo,
+                                     kThreeStorageBufferDescriptorTypes)) {
         VNLogError("convert_in: failed to update descriptor set");
         return false;
     }
@@ -1138,7 +1218,7 @@ bool ComputeVulkan::convertIn(VulkanConvertInArgs* params)
         }
     }
 
-    context->insertComputeBarrier();
+    context->insertComputeBarrier("barrier_after_convert_in");
 
     return true;
 }
@@ -1166,7 +1246,8 @@ bool ComputeVulkan::convertOut(VulkanConvertOutArgs* params)
     const bool dstHasImage = dstBuffer->getVkImage() != VK_NULL_HANDLE;
     const bool dstIsImageFormat =
         dstFormat == LdpColorFormatRGBA_8 || dstFormat == LdpColorFormatRGBA_10_2_LE ||
-        dstFormat == LdpColorFormatP010_10 || dstFormat == LdpColorFormatNV12_8;
+        dstFormat == LdpColorFormatP010_10 || dstFormat == LdpColorFormatNV12_8 ||
+        dstFormat == LdpColorFormatNV21_8;
     if (dstHasImage && dstIsImageFormat) {
         return convertOutToImage(params, constants);
     }
@@ -1183,35 +1264,54 @@ bool ComputeVulkan::convertOutToImage(VulkanConvertOutArgs* params, PushConstant
     VulkanFrameContext* context = params->context;
 
     const bool dstIsP010Image = dstFormat == LdpColorFormatP010_10;
-    const bool dstIsNv12Image = dstFormat == LdpColorFormatNV12_8;
+    const bool dstIsNv8Image = dstFormat == LdpColorFormatNV12_8 || dstFormat == LdpColorFormatNV21_8;
     const bool dstIsRgba10Image = dstFormat == LdpColorFormatRGBA_10_2_LE;
 
     if (params->chroma == LdeChroma::CTMonochrome) {
         VNLogError("convertOut: VkImage output requires chroma planes");
         return false;
     }
-    int widthShift{};
-    int heightShift{};
-    getSubsamplingShifts(params->chroma, widthShift, heightShift);
+    const bool dstIs420Image = dstIsP010Image || dstIsNv8Image;
+    const bool use420BlockShader = dstIs420Image || params->chroma == LdeChroma::CT420;
+    if (dstIs420Image && params->chroma != LdeChroma::CT420) {
+        VNLogError("convertOut: NV12/NV21/P010 VkImage output requires 4:2:0 chroma");
+        return false;
+    }
+    if (use420BlockShader && ((constants.width | constants.height) & 1) != 0) {
+        VNLogError("convertOut: 4:2:0 VkImage output requires even storage dimensions");
+        return false;
+    }
 
-    // The image-output shaders alias `shift`/`sharpenStrength` as the chroma
-    // sub-sampling shifts, and consume all three plane stride/offset slots
-    // straight from the src layout.
+    // Image-output shaders consume all three source plane stride/offset slots directly.
+    // Generic RGBA shaders additionally alias `shift`/`sharpenStrength` as chroma subsampling
+    // shifts; fixed-4:2:0 image shaders do not read those fields.
     constants.containerStrideIn = toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, 0));
     constants.containerOffsetIn = toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, 0));
-    constants.containerStrideOut = toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, 1));
-    constants.containerOffsetOut = toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, 1));
-    constants.containerStrideV = toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, 2));
-    constants.containerOffsetV = toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, 2));
-    constants.shift = static_cast<uint32_t>(widthShift);
-    constants.sharpenStrength = static_cast<uint32_t>(heightShift);
+    const bool dstIsNv21Image = dstFormat == LdpColorFormatNV21_8;
+    const uint32_t firstChromaPlane = dstIsNv21Image ? 2u : 1u;
+    const uint32_t secondChromaPlane = dstIsNv21Image ? 1u : 2u;
+    constants.containerStrideOut =
+        toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, firstChromaPlane));
+    constants.containerOffsetOut =
+        toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, firstChromaPlane));
+    constants.containerStrideV =
+        toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, secondChromaPlane));
+    constants.containerOffsetV =
+        toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, secondChromaPlane));
+    if (!use420BlockShader) {
+        int widthShift{};
+        int heightShift{};
+        getSubsamplingShifts(params->chroma, widthShift, heightShift);
+        constants.shift = static_cast<uint32_t>(widthShift);
+        constants.sharpenStrength = static_cast<uint32_t>(heightShift);
+    }
 
     // Temporal-add. One dispatch handles Y/U/V, so the per-plane temporal stride/offset (pairs
     // 0/1/2) are all set here; Non-zero stride enables the add for a plane.
     const bool doAdd = params->addTemporal && params->temporal && params->temporal->buffer;
     setTemporalStrides(constants, 0, 0, doAdd, params->numEnhancedPlanes, params->temporal);
-    setTemporalStrides(constants, 1, 1, doAdd, params->numEnhancedPlanes, params->temporal);
-    setTemporalStrides(constants, 2, 2, doAdd, params->numEnhancedPlanes, params->temporal);
+    setTemporalStrides(constants, 1, firstChromaPlane, doAdd, params->numEnhancedPlanes, params->temporal);
+    setTemporalStrides(constants, 2, secondChromaPlane, doAdd, params->numEnhancedPlanes, params->temporal);
     BufferVulkan* temporalBuffer = doAdd ? fromPipeline(params->temporal->buffer) : srcBuffer;
 
     if (!updateComputeImageDescriptorSets(srcBuffer, dstBuffer, temporalBuffer,
@@ -1227,21 +1327,37 @@ bool ComputeVulkan::convertOutToImage(VulkanConvertOutArgs* params, PushConstant
         VK_IMAGE_LAYOUT_GENERAL, /*srcAccess=*/0, VK_ACCESS_SHADER_WRITE_BIT,
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
-    const ComputePipeline* convertOutPipeline = doAdd ? &m_pipelineConversionFromInternalRgba8ImageAddTemporal
-                                                      : &m_pipelineConversionFromInternalRgba8Image;
-    const char* convertOutLabel = "convert_out_image_rgba8";
+    const bool useGenericRgbaShader = params->chroma != LdeChroma::CT420;
+    const ComputePipeline* convertOutPipeline{};
+    const char* convertOutLabel{};
+    if (useGenericRgbaShader) {
+        convertOutPipeline = doAdd ? &m_pipelineConversionFromInternalRgba8ImageGenericAddTemporal
+                                   : &m_pipelineConversionFromInternalRgba8ImageGeneric;
+        convertOutLabel = "convert_out_image_rgba8_generic";
+    } else {
+        convertOutPipeline = doAdd ? &m_pipelineConversionFromInternalRgba8ImageAddTemporal
+                                   : &m_pipelineConversionFromInternalRgba8Image;
+        convertOutLabel = "convert_out_image_rgba8_420";
+    }
     if (dstIsP010Image) {
         convertOutPipeline = doAdd ? &m_pipelineConversionFromInternalP010ImageAddTemporal
                                    : &m_pipelineConversionFromInternalP010Image;
         convertOutLabel = "convert_out_image_p010";
-    } else if (dstIsNv12Image) {
+    } else if (dstIsNv8Image) {
         convertOutPipeline = doAdd ? &m_pipelineConversionFromInternalNv12ImageAddTemporal
                                    : &m_pipelineConversionFromInternalNv12Image;
-        convertOutLabel = "convert_out_image_nv12";
+        convertOutLabel =
+            dstFormat == LdpColorFormatNV21_8 ? "convert_out_image_nv21" : "convert_out_image_nv12";
     } else if (dstIsRgba10Image) {
-        convertOutPipeline = doAdd ? &m_pipelineConversionFromInternalRgba10ImageAddTemporal
-                                   : &m_pipelineConversionFromInternalRgba10Image;
-        convertOutLabel = "convert_out_image_rgba10";
+        if (useGenericRgbaShader) {
+            convertOutPipeline = doAdd ? &m_pipelineConversionFromInternalRgba10ImageGenericAddTemporal
+                                       : &m_pipelineConversionFromInternalRgba10ImageGeneric;
+            convertOutLabel = "convert_out_image_rgba10_generic";
+        } else {
+            convertOutPipeline = doAdd ? &m_pipelineConversionFromInternalRgba10ImageAddTemporal
+                                       : &m_pipelineConversionFromInternalRgba10Image;
+            convertOutLabel = "convert_out_image_rgba10_420";
+        }
     }
     context->bind(&m_pipelineLayoutConvertOutImage, convertOutPipeline,
                   context->m_descriptorSetConversionFromImage);
@@ -1249,7 +1365,7 @@ bool ComputeVulkan::convertOutToImage(VulkanConvertOutArgs* params, PushConstant
     vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConvertOutImage.pipelineLayout,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion), &constants);
     context->dispatch(constants.width, constants.height, convertOutLabel);
-    context->insertComputeBarrier();
+    context->insertComputeBarrier("barrier_after_convert_out_image");
     return true;
 }
 
@@ -1260,180 +1376,170 @@ bool ComputeVulkan::convertOutToBuffer(VulkanConvertOutArgs* params, PushConstan
     PictureVulkan* dstPicture = params->dst;
     BufferVulkan* dstBuffer = fromPipeline(dstPicture->buffer);
     const LdpColorFormat dstFormat = ldpPictureLayoutFormat(&dstPicture->layout);
-    const bool is8bit = ldpPictureLayoutSampleSize(&dstPicture->layout) == 1;
-    const bool nv12 = dstFormat == LdpColorFormatNV12_8 || dstFormat == LdpColorFormatNV21_8;
-    const bool p010 = dstFormat == LdpColorFormatP010_10;
-    const bool semiPlanar = nv12 || p010;
     VulkanFrameContext* context = params->context;
 
-    const bool doAdd = params->addTemporal && params->temporal && params->temporal->buffer;
-    BufferVulkan* temporalBuffer = doAdd ? fromPipeline(params->temporal->buffer) : srcBuffer;
+    enum class BufferOutputType : uint8_t
+    {
+        Planar8,
+        Planar16,
+        Nv12,
+        P010,
+    };
 
-    constants.containerStrideV = 0; // used to signal no nv12
-    constants.containerOffsetV = 0;
-    // Y plane (plane 0) -> slot 0; slot 2 unused for Y.
-    setTemporalStrides(constants, 0, 0, doAdd, params->numEnhancedPlanes, params->temporal);
-    setTemporalStrides(constants, 2, 0, false, 0, nullptr);
-    if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, temporalBuffer,
-                                     context->m_descriptorSetConversionFrom)) {
+    BufferOutputType outputType{};
+    switch (dstFormat) {
+        case LdpColorFormatI420_8:
+        case LdpColorFormatI422_8:
+        case LdpColorFormatI444_8:
+        case LdpColorFormatGRAY_8: outputType = BufferOutputType::Planar8; break;
+        case LdpColorFormatI420_10_LE:
+        case LdpColorFormatI420_12_LE:
+        case LdpColorFormatI420_14_LE:
+        case LdpColorFormatI420_16_LE:
+        case LdpColorFormatI422_10_LE:
+        case LdpColorFormatI422_12_LE:
+        case LdpColorFormatI422_14_LE:
+        case LdpColorFormatI422_16_LE:
+        case LdpColorFormatI444_10_LE:
+        case LdpColorFormatI444_12_LE:
+        case LdpColorFormatI444_14_LE:
+        case LdpColorFormatI444_16_LE:
+        case LdpColorFormatGRAY_10_LE:
+        case LdpColorFormatGRAY_12_LE:
+        case LdpColorFormatGRAY_14_LE:
+        case LdpColorFormatGRAY_16_LE: outputType = BufferOutputType::Planar16; break;
+        case LdpColorFormatNV12_8:
+        case LdpColorFormatNV21_8: outputType = BufferOutputType::Nv12; break;
+        case LdpColorFormatP010_10: outputType = BufferOutputType::P010; break;
+        default:
+            VNLogError("convertOut: unsupported VkBuffer destination format %d",
+                       static_cast<int32_t>(dstFormat));
+            return false;
+    }
+
+    if (ldpPictureLayoutChroma(&dstPicture->layout) != params->chroma) {
+        VNLogError("convertOut: source and VkBuffer destination chroma formats do not match");
+        return false;
+    }
+
+    const bool isSemiplanar = outputType == BufferOutputType::Nv12 || outputType == BufferOutputType::P010;
+    if (isSemiplanar && ((constants.width | constants.height) & 1) != 0) {
+        VNLogError("convertOut: semiplanar VkBuffer output requires even storage dimensions");
+        return false;
+    }
+    const bool validPlanar16Depth =
+        params->bitDepth == 10 || params->bitDepth == 12 || params->bitDepth == 14;
+    if ((outputType == BufferOutputType::Planar8 && params->bitDepth != 8) ||
+        (outputType == BufferOutputType::Planar16 && !validPlanar16Depth) ||
+        (outputType == BufferOutputType::Nv12 && params->bitDepth != 8) ||
+        (outputType == BufferOutputType::P010 && params->bitDepth != 10)) {
+        VNLogError("convertOut: VkBuffer destination format and bit depth do not match");
+        return false;
+    }
+
+    const bool doAdd = params->addTemporal && params->temporal && params->temporal->buffer;
+    const bool doSharpen = constants.sharpenStrength != 0;
+    BufferVulkan* temporalBuffer = doAdd ? fromPipeline(params->temporal->buffer) : srcBuffer;
+    if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, temporalBuffer, context->m_descriptorSetConversionFrom,
+                                     kThreeStorageBufferDescriptorTypes)) {
         VNLogError("convert_out_buffer: failed to update descriptor set");
         return false;
     }
 
-    const ComputePipeline* pipeline = nullptr;
-    if (is8bit) {
-        if (nv12) {
-            pipeline = doAdd ? &m_pipelineConversionFromInternal8BitNV12AddTemporal
-                             : &m_pipelineConversionFromInternal8BitNV12;
-        } else {
-            pipeline = doAdd ? &m_pipelineConversionFromInternal8BitAddTemporal
-                             : &m_pipelineConversionFromInternal8Bit;
-        }
-    } else {
-        if (p010) {
-            pipeline = doAdd ? &m_pipelineConversionFromInternal16BitP010AddTemporal
-                             : &m_pipelineConversionFromInternal16BitP010;
-        } else {
-            pipeline = doAdd ? &m_pipelineConversionFromInternal16BitAddTemporal
-                             : &m_pipelineConversionFromInternal16Bit;
-        }
+    const ComputePipeline* regularPipeline{};
+    const ComputePipeline* sharpenPipeline{};
+    switch (outputType) {
+        case BufferOutputType::Planar8:
+            regularPipeline = doAdd ? &m_pipelineConversionFromInternalPlanar8AddTemporal
+                                    : &m_pipelineConversionFromInternalPlanar8;
+            sharpenPipeline = doAdd ? &m_pipelineConversionFromInternalPlanar8SharpenAddTemporal
+                                    : &m_pipelineConversionFromInternalPlanar8Sharpen;
+            break;
+        case BufferOutputType::Planar16:
+            regularPipeline = doAdd ? &m_pipelineConversionFromInternalPlanar16AddTemporal
+                                    : &m_pipelineConversionFromInternalPlanar16;
+            sharpenPipeline = doAdd ? &m_pipelineConversionFromInternalPlanar16SharpenAddTemporal
+                                    : &m_pipelineConversionFromInternalPlanar16Sharpen;
+            break;
+        case BufferOutputType::Nv12:
+            regularPipeline = doAdd ? &m_pipelineConversionFromInternalNv12AddTemporal
+                                    : &m_pipelineConversionFromInternalNv12;
+            sharpenPipeline = doAdd ? &m_pipelineConversionFromInternalNv12SharpenAddTemporal
+                                    : &m_pipelineConversionFromInternalNv12Sharpen;
+            break;
+        case BufferOutputType::P010:
+            regularPipeline = doAdd ? &m_pipelineConversionFromInternalP010AddTemporal
+                                    : &m_pipelineConversionFromInternalP010;
+            sharpenPipeline = doAdd ? &m_pipelineConversionFromInternalP010SharpenAddTemporal
+                                    : &m_pipelineConversionFromInternalP010Sharpen;
+            break;
     }
-    context->bind(&m_pipelineLayoutConversion, pipeline, context->m_descriptorSetConversionFrom);
 
-    vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConversion.pipelineLayout,
-                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion), &constants);
-
-    context->dispatch(constants.width, constants.height, "convert_out_y"); // Y
-
-    if (params->chroma != LdeChroma::CTMonochrome) {
-        int widthShift{};
-        int heightShift{};
-        getSubsamplingShifts(params->chroma, widthShift, heightShift);
-
-        if (!semiPlanar) {
-            constants.width = srcPicture->layout.width >> widthShift;
-        } else {
-            constants.containerStrideV =
-                toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, 2));
-            constants.containerOffsetV =
-                toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, 2));
-        }
-        const uint32_t chromaHeight = srcPicture->layout.height >> heightShift;
-        constants.height = chromaHeight;
-        constants.sharpenStrength = 0;
-        setContainerStrides(constants, 1, srcPicture, dstPicture, nullptr);
-        constants.nv21Swap = (is8bit && dstFormat == LdpColorFormatNV21_8) ? 1u : 0u;
-        // U plane (plane 1) -> slot 0; for semi-planar the same dispatch reads V
-        // (plane 2) -> slot 2, otherwise slot 2 is unused.
-        setTemporalStrides(constants, 0, 1, doAdd, params->numEnhancedPlanes, params->temporal);
-        if (semiPlanar) {
-            setTemporalStrides(constants, 2, 2, doAdd, params->numEnhancedPlanes, params->temporal);
-        } else {
-            setTemporalStrides(constants, 2, 0, false, 0, nullptr);
-        }
+    if (isSemiplanar) {
+        context->bind(&m_pipelineLayoutConversion, doSharpen ? sharpenPipeline : regularPipeline,
+                      context->m_descriptorSetConversionFrom);
+        const bool swapChroma = dstFormat == LdpColorFormatNV21_8;
+        const uint32_t firstChromaPlane = swapChroma ? 2u : 1u;
+        const uint32_t secondChromaPlane = swapChroma ? 1u : 2u;
+        constants.containerStrideU =
+            toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, firstChromaPlane));
+        constants.containerOffsetU =
+            toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, firstChromaPlane));
+        constants.containerStrideV =
+            toUint32Units(ldpPictureLayoutRowStride(&srcPicture->layout, secondChromaPlane));
+        constants.containerOffsetV =
+            toUint32Units(ldpPictureLayoutPlaneOffset(&srcPicture->layout, secondChromaPlane));
+        constants.containerStrideUVOut =
+            toUint32Units(ldpPictureLayoutRowStride(&dstPicture->layout, 1));
+        constants.containerOffsetUVOut =
+            toUint32Units(ldpPictureLayoutPlaneOffset(&dstPicture->layout, 1));
+        setTemporalStrides(constants, 0, 0, doAdd, params->numEnhancedPlanes, params->temporal);
+        setTemporalStrides(constants, 1, firstChromaPlane, doAdd, params->numEnhancedPlanes,
+                           params->temporal);
+        setTemporalStrides(constants, 2, secondChromaPlane, doAdd, params->numEnhancedPlanes,
+                           params->temporal);
 
         vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConversion.pipelineLayout,
                            VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion), &constants);
-        context->dispatch(constants.width, chromaHeight, "convert_out_u"); // U
-
-        if (!semiPlanar) {
-            setContainerStrides(constants, 2, srcPicture, dstPicture, nullptr);
-            // V plane (plane 2) -> slot 0 for this separate dispatch.
-            setTemporalStrides(constants, 0, 2, doAdd, params->numEnhancedPlanes, params->temporal);
+        const char* label = "convert_out_nv12";
+        if (outputType == BufferOutputType::P010) {
+            label = "convert_out_p010";
+        } else if (swapChroma) {
+            label = "convert_out_nv21";
+        }
+        context->dispatch(constants.width, constants.height, label);
+    } else {
+        const uint8_t planeCount = ldpPictureLayoutPlanes(&srcPicture->layout);
+        static constexpr const char* kLabels[] = {"convert_out_y", "convert_out_u", "convert_out_v"};
+        setTemporalStrides(constants, 1, 0, false, 0, nullptr);
+        setTemporalStrides(constants, 2, 0, false, 0, nullptr);
+        context->bind(&m_pipelineLayoutConversion, doSharpen ? sharpenPipeline : regularPipeline,
+                      context->m_descriptorSetConversionFrom);
+        for (uint8_t plane = 0; plane < planeCount; ++plane) {
+            if (plane == 1 && doSharpen) {
+                context->bind(&m_pipelineLayoutConversion, regularPipeline,
+                              context->m_descriptorSetConversionFrom);
+            }
+            constants.width = ldpPictureLayoutPlaneWidth(&srcPicture->layout, plane);
+            constants.height = ldpPictureLayoutPlaneHeight(&srcPicture->layout, plane);
+            setContainerStrides(constants, plane, srcPicture, dstPicture, nullptr);
+            setTemporalStrides(constants, 0, plane, doAdd, params->numEnhancedPlanes, params->temporal);
             vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutConversion.pipelineLayout,
                                VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsConversion),
                                &constants);
-            context->dispatch(constants.width, chromaHeight, "convert_out_v"); // V
+            context->dispatch(constants.width, constants.height, kLabels[plane]);
         }
     }
 
-    context->insertComputeBarrier();
-
+    context->insertComputeBarrier("barrier_after_convert_out_buffer");
     return true;
 }
 
-bool ComputeVulkan::upscaleVertical(const LdeKernel* kernel, VulkanUpscaleArgs* params)
-{
-    if (kernel == nullptr || params == nullptr || params->src == nullptr ||
-        params->dst == nullptr || params->context == nullptr) {
-        VNLogError("upscale_vertical: invalid arguments");
-        return false;
-    }
-
-    PictureVulkan* srcPicture = params->src;
-    PictureVulkan* dstPicture = params->dst;
-
-    // Get VkBuffers to update descriptor sets (attach buffers to shaders)
-    BufferVulkan* srcBuffer = fromPipeline(srcPicture->buffer);
-    BufferVulkan* dstBuffer = fromPipeline(dstPicture->buffer);
-
-    VulkanFrameContext* context = params->context;
-
-    // Vertical set for upscaling from base and writing to intermediate
-    if (params->loq1) {
-        if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetSrcMidLoq1)) {
-            VNLogError("upscale_vertical_loq1: failed to update descriptor set");
-            return false;
-        }
-    } else {
-        if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, context->m_descriptorSetSrcMidLoq0)) {
-            VNLogError("upscale_vertical_loq0: failed to update descriptor set");
-            return false;
-        }
-    }
-
-    const uint32_t srcWidth = srcPicture->getActiveWidth();
-    const uint32_t srcHeight = srcPicture->getActiveHeight();
-
-    PushConstantsUpscale constants{};
-    for (int i = 0; i < 4; ++i) {
-        constants.kernel[i] = ldeKernelGetCoefficient(kernel, i);
-    }
-
-    constants.srcWidth = srcWidth;
-    constants.srcHeight = srcHeight;
-    setContainerStrides(constants, 0, srcPicture, dstPicture, nullptr);
-
-    VkDescriptorSet& verticalSet =
-        params->loq1 ? context->m_descriptorSetSrcMidLoq1 : context->m_descriptorSetSrcMidLoq0;
-
-    context->bind(&m_pipelineLayoutVertical, &m_pipelineVertical, verticalSet);
-
-    vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutVertical.pipelineLayout,
-                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsUpscale), &constants);
-
-    context->dispatch(constants.srcWidth, constants.srcHeight, "upscalev_y"); // Y
-
-    if (params->chroma != LdeChroma::CTMonochrome) {
-        int widthShift{};
-        int heightShift{};
-        getSubsamplingShifts(params->chroma, widthShift, heightShift);
-
-        constants.srcWidth = srcWidth >> widthShift;
-        constants.srcHeight = srcHeight >> heightShift;
-        setContainerStrides(constants, 1, srcPicture, dstPicture, nullptr);
-
-        vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutVertical.pipelineLayout,
-                           VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsUpscale), &constants);
-        context->dispatch(constants.srcWidth, constants.srcHeight, "upscalev_u"); // U
-
-        setContainerStrides(constants, 2, srcPicture, dstPicture, nullptr);
-
-        vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutVertical.pipelineLayout,
-                           VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsUpscale), &constants);
-        context->dispatch(constants.srcWidth, constants.srcHeight, "upscalev_v"); // V
-    }
-
-    context->insertComputeBarrier();
-
-    return true;
-}
-
-bool ComputeVulkan::upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArgs* params)
+bool ComputeVulkan::upscale1D(const LdeKernel* kernel, VulkanUpscaleArgs* params)
 {
     if (kernel == nullptr || params == nullptr || params->src == nullptr ||
         params->dst == nullptr || params->base == nullptr || params->context == nullptr) {
-        VNLogError("upscale_horizontal: invalid arguments");
+        VNLogError("upscale_1d: invalid arguments");
         return false;
     }
 
@@ -1453,19 +1559,12 @@ bool ComputeVulkan::upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArgs
 
     VulkanFrameContext* context = params->context;
 
-    // Horizontal set for upscaling from intermediate, applying PA from base, and writing to output
-    if (params->loq1) {
-        if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, baseBuffer,
-                                         context->m_descriptorSetMidDstLoq1)) {
-            VNLogError("upscale_horizontal_loq1: failed to update descriptor set");
-            return false;
-        }
-    } else {
-        if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, baseBuffer,
-                                         context->m_descriptorSetMidDstLoq0)) {
-            VNLogError("upscale_horizontal_loq0: failed to update descriptor set");
-            return false;
-        }
+    VkDescriptorSet& descriptorSet =
+        params->loq1 ? context->m_descriptorSetUpscaleLoq1 : context->m_descriptorSetUpscaleLoq0;
+    if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, baseBuffer, descriptorSet,
+                                     kThreeStorageBufferDescriptorTypes)) {
+        VNLogError("upscale_1d: failed to update descriptor set");
+        return false;
     }
 
     PushConstantsUpscale constants{};
@@ -1477,22 +1576,14 @@ bool ComputeVulkan::upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArgs
     constants.srcHeight = srcHeight;
     setContainerStrides(constants, 0, srcPicture, dstPicture, basePicture);
 
-    VkDescriptorSet& horizontalSet =
-        params->loq1 ? context->m_descriptorSetMidDstLoq1 : context->m_descriptorSetMidDstLoq0;
+    const ComputePipeline* pipeline =
+        params->applyPA == 1 ? &m_pipelineUpscale1DPA1 : &m_pipelineUpscale1DPA0;
+    context->bind(&m_pipelineLayoutUpscale, pipeline, descriptorSet);
 
-    const ComputePipeline* horizontalPipeline = &m_pipelineHorizontalPA0;
-    if (params->applyPA == 1) {
-        horizontalPipeline = &m_pipelineHorizontalPA1;
-    } else if (params->applyPA == 2) {
-        horizontalPipeline = &m_pipelineHorizontalPA2;
-    }
-
-    context->bind(&m_pipelineLayoutHorizontal, horizontalPipeline, horizontalSet);
-
-    vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutHorizontal.pipelineLayout,
+    vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutUpscale.pipelineLayout,
                        VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsUpscale), &constants);
     context->dispatch(constants.srcWidth, (constants.srcHeight + 1) >> 1,
-                      "upscaleh_y"); // Y. Round up: 2 rows at a time for PA, last invocation may have 1 row
+                      "upscale1d_y"); // Y. Round up: the shader processes two rows per invocation.
 
     if (params->chroma != LdeChroma::CTMonochrome) {
         int widthShift{};
@@ -1504,21 +1595,83 @@ bool ComputeVulkan::upscaleHorizontal(const LdeKernel* kernel, VulkanUpscaleArgs
 
         setContainerStrides(constants, 1, srcPicture, dstPicture, basePicture);
 
-        vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutHorizontal.pipelineLayout,
+        vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutUpscale.pipelineLayout,
                            VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsUpscale), &constants);
-        context->dispatch(constants.srcWidth, (constants.srcHeight + 1) >> 1,
-                          "upscaleh_u"); // U. Round up: 2 rows at a time for PA
+        context->dispatch(constants.srcWidth, (constants.srcHeight + 1) >> 1, "upscale1d_u");
 
         setContainerStrides(constants, 2, srcPicture, dstPicture, basePicture);
 
-        vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutHorizontal.pipelineLayout,
+        vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutUpscale.pipelineLayout,
                            VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsUpscale), &constants);
-        context->dispatch(constants.srcWidth, (constants.srcHeight + 1) >> 1,
-                          "upscaleh_v"); // V. Round up: 2 rows at a time for PA
+        context->dispatch(constants.srcWidth, (constants.srcHeight + 1) >> 1, "upscale1d_v");
     }
 
-    context->insertComputeBarrier();
+    context->insertComputeBarrier(params->loq1 ? "barrier_after_upscale_1d_loq1"
+                                               : "barrier_after_upscale_1d_loq0");
 
+    return true;
+}
+
+bool ComputeVulkan::upscale2D(const LdeKernel* kernel, VulkanUpscaleArgs* params)
+{
+    if (kernel == nullptr || params == nullptr || params->src == nullptr ||
+        params->dst == nullptr || params->base == nullptr || params->context == nullptr) {
+        VNLogError("upscale_2d: invalid arguments");
+        return false;
+    }
+
+    PictureVulkan* srcPicture = params->src;
+    PictureVulkan* dstPicture = params->dst;
+    PictureVulkan* basePicture = params->base;
+    BufferVulkan* srcBuffer = fromPipeline(srcPicture->buffer);
+    BufferVulkan* dstBuffer = fromPipeline(dstPicture->buffer);
+    BufferVulkan* baseBuffer = fromPipeline(basePicture->buffer);
+    VulkanFrameContext* context = params->context;
+
+    VkDescriptorSet& descriptorSet =
+        params->loq1 ? context->m_descriptorSetUpscaleLoq1 : context->m_descriptorSetUpscaleLoq0;
+    if (!updateComputeDescriptorSets(srcBuffer, dstBuffer, baseBuffer, descriptorSet,
+                                     kThreeStorageBufferDescriptorTypes)) {
+        VNLogError("upscale_2d: failed to update descriptor set");
+        return false;
+    }
+
+    PushConstantsUpscale constants{};
+    for (uint32_t i = 0; i < 4; ++i) {
+        constants.kernel[i] = ldeKernelGetCoefficient(kernel, i);
+    }
+    constants.srcWidth = srcPicture->getActiveWidth();
+    constants.srcHeight = srcPicture->getActiveHeight();
+    setContainerStrides(constants, 0, srcPicture, dstPicture, basePicture);
+
+    const ComputePipeline* pipeline =
+        params->applyPA == 2 ? &m_pipelineUpscale2DPA2 : &m_pipelineUpscale2DPA0;
+    context->bind(&m_pipelineLayoutUpscale, pipeline, descriptorSet);
+
+    vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutUpscale.pipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsUpscale), &constants);
+    context->dispatch(constants.srcWidth, constants.srcHeight, "upscale2d_y");
+
+    if (params->chroma != LdeChroma::CTMonochrome) {
+        int widthShift{};
+        int heightShift{};
+        getSubsamplingShifts(params->chroma, widthShift, heightShift);
+        constants.srcWidth = srcPicture->getActiveWidth() >> widthShift;
+        constants.srcHeight = srcPicture->getActiveHeight() >> heightShift;
+        setContainerStrides(constants, 1, srcPicture, dstPicture, basePicture);
+
+        vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutUpscale.pipelineLayout,
+                           VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsUpscale), &constants);
+        context->dispatch(constants.srcWidth, constants.srcHeight, "upscale2d_u");
+
+        setContainerStrides(constants, 2, srcPicture, dstPicture, basePicture);
+        vkCmdPushConstants(context->m_commandBuffer, m_pipelineLayoutUpscale.pipelineLayout,
+                           VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantsUpscale), &constants);
+        context->dispatch(constants.srcWidth, constants.srcHeight, "upscale2d_v");
+    }
+
+    context->insertComputeBarrier(params->loq1 ? "barrier_after_upscale_2d_loq1"
+                                               : "barrier_after_upscale_2d_loq0");
     return true;
 }
 
@@ -1534,43 +1687,30 @@ bool ComputeVulkan::upscaleFrame(const LdeKernel* kernel, VulkanUpscaleArgs* par
     LdpPictureDesc desc{};
     params->src->getDesc(desc);
     if (params->mode == Scale1D) {
-        params->vertical ? desc.height *= 2 : desc.width *= 2;
-        if (!prepareInternalPictureBuffer(params->dst, desc)) {
+        desc.width *= 2;
+        const bool outputPrepared = VNTraceFuncNamed("vulkan:upscale.prepareOutputBuffer",
+                                                     prepareInternalPictureBuffer(params->dst, desc));
+        if (!outputPrepared) {
             VNLogError("upscale_1d: failed to prepare destination picture buffer");
             return false;
         }
 
         params->applyPA = params->applyPA ? 1 : 0;
-        return params->vertical ? upscaleVertical(kernel, params) : upscaleHorizontal(kernel, params);
+        return VNTraceFuncNamed("vulkan:upscale.record1D", upscale1D(kernel, params));
     }
 
     if (params->mode == Scale2D) {
-        PictureVulkan* output = params->dst;
-        const LdeLOQIndex loq = params->loq1 ? LOQ1 : LOQ0;
-        PictureVulkan* intermediate = params->intermediateUpscalePicture[loq];
-
-        LdpPictureDesc intermediateDesc{desc};
-        intermediateDesc.height *= 2;
-        updateConfig(static_cast<uint8_t>(loq), desc);
-        if (!prepareInternalPictureBuffer(intermediate, intermediateDesc)) {
-            VNLogError("upscale_2d: failed to prepare intermediate picture buffer");
-            return false;
-        }
-        params->dst = intermediate;
-        if (!upscaleVertical(kernel, params)) {
-            return false;
-        }
-
         desc.width *= 2;
         desc.height *= 2;
-        if (!prepareInternalPictureBuffer(output, desc)) {
+        const bool outputPrepared = VNTraceFuncNamed("vulkan:upscale.prepareOutputBuffer",
+                                                     prepareInternalPictureBuffer(params->dst, desc));
+        if (!outputPrepared) {
             VNLogError("upscale_2d: failed to prepare destination picture buffer");
             return false;
         }
-        params->src = params->dst;
-        params->dst = output;
+
         params->applyPA = params->applyPA ? 2 : 0;
-        return upscaleHorizontal(kernel, params);
+        return VNTraceFuncNamed("vulkan:upscale.record2D", upscale2D(kernel, params));
     }
 
     VNLogError("upscale: unsupported scaling mode %d", static_cast<int32_t>(params->mode));
@@ -1596,40 +1736,52 @@ void ComputeVulkan::destroy()
         context.destroy();
     }
 
-    destroyComputePipelineLayout(m_pipelineLayoutVertical);
-    destroyComputePipelineLayout(m_pipelineLayoutHorizontal);
+    destroyComputePipelineLayout(m_pipelineLayoutUpscale);
     destroyComputePipelineLayout(m_pipelineLayoutApply);
     destroyComputePipelineLayout(m_pipelineLayoutConversion);
     destroyComputePipelineLayout(m_pipelineLayoutConvertOutImage);
-    destroyComputePipelineLayout(m_pipelineLayoutAdd);
+    destroyComputePipelineLayout(m_pipelineLayoutDequantTransform);
 
-    destroyComputePipeline(m_pipelineVertical);
-    destroyComputePipeline(m_pipelineHorizontalPA0);
-    destroyComputePipeline(m_pipelineHorizontalPA1);
-    destroyComputePipeline(m_pipelineHorizontalPA2);
+    destroyComputePipeline(m_pipelineUpscale1DPA0);
+    destroyComputePipeline(m_pipelineUpscale1DPA1);
+    destroyComputePipeline(m_pipelineUpscale2DPA0);
+    destroyComputePipeline(m_pipelineUpscale2DPA2);
     destroyComputePipeline(m_pipelineApplyDd);
     destroyComputePipeline(m_pipelineApplyDds);
     destroyComputePipeline(m_pipelineApplyDdRaster);
     destroyComputePipeline(m_pipelineApplyDdsRaster);
-    destroyComputePipeline(m_pipelineConversionFromInternal8Bit);
     destroyComputePipeline(m_pipelineConversionToInternal8Bit);
-    destroyComputePipeline(m_pipelineConversionFromInternal8BitNV12);
     destroyComputePipeline(m_pipelineConversionToInternal8BitNV12);
-    destroyComputePipeline(m_pipelineConversionFromInternal16Bit);
     destroyComputePipeline(m_pipelineConversionToInternal16Bit);
+    destroyComputePipeline(m_pipelineConversionFromInternalPlanar8);
+    destroyComputePipeline(m_pipelineConversionFromInternalPlanar8Sharpen);
+    destroyComputePipeline(m_pipelineConversionFromInternalPlanar16);
+    destroyComputePipeline(m_pipelineConversionFromInternalPlanar16Sharpen);
+    destroyComputePipeline(m_pipelineConversionFromInternalNv12);
+    destroyComputePipeline(m_pipelineConversionFromInternalNv12Sharpen);
+    destroyComputePipeline(m_pipelineConversionFromInternalP010);
+    destroyComputePipeline(m_pipelineConversionFromInternalP010Sharpen);
     destroyComputePipeline(m_pipelineConversionFromInternalRgba8Image);
+    destroyComputePipeline(m_pipelineConversionFromInternalRgba8ImageGeneric);
     destroyComputePipeline(m_pipelineConversionFromInternalRgba10Image);
+    destroyComputePipeline(m_pipelineConversionFromInternalRgba10ImageGeneric);
     destroyComputePipeline(m_pipelineConversionFromInternalP010Image);
     destroyComputePipeline(m_pipelineConversionFromInternalNv12Image);
-    destroyComputePipeline(m_pipelineConversionFromInternal8BitAddTemporal);
-    destroyComputePipeline(m_pipelineConversionFromInternal8BitNV12AddTemporal);
-    destroyComputePipeline(m_pipelineConversionFromInternal16BitAddTemporal);
-    destroyComputePipeline(m_pipelineConversionFromInternal16BitP010AddTemporal);
+    destroyComputePipeline(m_pipelineConversionFromInternalPlanar8AddTemporal);
+    destroyComputePipeline(m_pipelineConversionFromInternalPlanar8SharpenAddTemporal);
+    destroyComputePipeline(m_pipelineConversionFromInternalPlanar16AddTemporal);
+    destroyComputePipeline(m_pipelineConversionFromInternalPlanar16SharpenAddTemporal);
+    destroyComputePipeline(m_pipelineConversionFromInternalNv12AddTemporal);
+    destroyComputePipeline(m_pipelineConversionFromInternalNv12SharpenAddTemporal);
+    destroyComputePipeline(m_pipelineConversionFromInternalP010AddTemporal);
+    destroyComputePipeline(m_pipelineConversionFromInternalP010SharpenAddTemporal);
     destroyComputePipeline(m_pipelineConversionFromInternalRgba8ImageAddTemporal);
+    destroyComputePipeline(m_pipelineConversionFromInternalRgba8ImageGenericAddTemporal);
     destroyComputePipeline(m_pipelineConversionFromInternalRgba10ImageAddTemporal);
+    destroyComputePipeline(m_pipelineConversionFromInternalRgba10ImageGenericAddTemporal);
     destroyComputePipeline(m_pipelineConversionFromInternalP010ImageAddTemporal);
     destroyComputePipeline(m_pipelineConversionFromInternalNv12ImageAddTemporal);
-    destroyComputePipeline(m_pipelineAdd);
+    destroyComputePipeline(m_pipelineDequantTransform);
 }
 
 } // namespace lcevc_dec::pipeline_vulkan

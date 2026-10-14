@@ -423,9 +423,40 @@ bool ldcDiagTraceFileRelease(void);
     _VNDiagEventNamedArgs(LdcDiagTypeTraceBegin, LdcLogLevelNone, __func__, ##__VA_ARGS__); \
     LdcTraceScoped _traceScoped
 
+/*! Emit a scoped trace duration event with an explicit name.
+ *
+ * Emits a begin event immediately and an end event when the scope exits.
+ */
+#define VNTraceScopedNamed(msg)                                \
+    _VNDiagEvent(LdcDiagTypeTraceBegin, LdcLogLevelNone, msg); \
+    LdcTraceScoped _traceScoped
+
+/*! Emit a named scoped trace duration event with named arguments.
+ *
+ * Emits a begin event immediately and an end event when the scope exits.
+ * Arguments are provided as: "name1", value1, "name2", value2, ...
+ */
+#define VNTraceScopedNamedArgs(msg, ...)                                               \
+    _VNDiagEventNamedArgs(LdcDiagTypeTraceBegin, LdcLogLevelNone, msg, ##__VA_ARGS__); \
+    LdcTraceScoped _traceScoped
+
+/*! Evaluate an expression within a named trace duration event.
+ *
+ * Returns the result of the expression, preserving void and reference return types.
+ */
+#define VNTraceFuncNamed(msg, expression) \
+    ([&]() -> decltype(auto) {            \
+        VNTraceBegin(msg);                \
+        LdcTraceScoped traceScoped_;      \
+        return (expression);              \
+    }())
+
 #else
 #define VNTraceScoped() (void)(0)
 #define VNTraceScopedArgs(...) (void)(0)
+#define VNTraceScopedNamed(msg) (void)(msg)
+#define VNTraceScopedNamedArgs(msg, ...) (void)(msg)
+#define VNTraceFuncNamed(msg, expression) (expression)
 #endif
 #endif
 

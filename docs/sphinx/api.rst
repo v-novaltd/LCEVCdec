@@ -210,7 +210,7 @@ Option                      Type       Default          Description
 ``vulkan_validation``       boolean    isDebugBuild     True if any available Vulkan validation layer should be used.
 ``vulkan_timestamps``       int        0                If greater than 0, the number of shader timestamps to record
                                                         and report in Debug log.
-``vulkan_contexts``         int        4                The number of distinct Vulkan contexts that can be in-flight.
+``vulkan_contexts``         int        1                The number of distinct Vulkan contexts that can be in-flight.
 ``will_render``             bool       false            Informs the Vulkan pipeline at initialization to setup for
 =========================== ========== ================ ===============================================================
 

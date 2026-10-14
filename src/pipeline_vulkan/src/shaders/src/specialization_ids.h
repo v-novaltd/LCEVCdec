@@ -29,3 +29,6 @@
 
 // UpscaleH
 #define SPECID_PA 8
+
+// Buffer output conversion
+#define SPECID_SHARPEN 9

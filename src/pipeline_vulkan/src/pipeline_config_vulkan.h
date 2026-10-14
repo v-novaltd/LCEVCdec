@@ -32,7 +32,7 @@ struct PipelineConfigVulkan : public pipeline::PipelineConfigBase
 
     bool willRender = false;
 
-    int32_t contexts = 4; // Number of available Vulkan frame contexts
+    int32_t contexts = 1; // Number of available Vulkan frame contexts
 
     int32_t device = -1;         // If >=0 - choose given Vulkan device
     int32_t timestampsLimit = 0; // Maximum number of Vulkan shader timestamps to record (0 disables)

@@ -236,6 +236,27 @@ TEST_F(DiagnosticsTest, Formatted)
     EXPECT_EQ(get(), "Error (formatted): Formatted 34\n");
 }
 
+TEST_F(DiagnosticsTest, TraceFunc)
+{
+    int value = 41;
+    int& reference = VNTraceFuncNamed("ReturnReference", (value));
+    EXPECT_EQ(&reference, &value);
+
+    VNTraceFuncNamed("ReturnVoid", static_cast<void>(++value));
+    EXPECT_EQ(value, 42);
+
+#if VN_SDK_FEATURE(TRACING)
+    EXPECT_EQ(get(), "Trace: {\"ph\":\"B\", \"ts\":0.000, \"pid\":1, \"tid\":2, "
+                     "\"name\":\"ReturnReference\"},\n\n"
+                     "Trace: {\"ph\":\"E\", \"ts\":0.000, \"pid\":1, \"tid\":2},\n\n"
+                     "Trace: {\"ph\":\"B\", \"ts\":0.000, \"pid\":1, \"tid\":2, "
+                     "\"name\":\"ReturnVoid\"},\n\n"
+                     "Trace: {\"ph\":\"E\", \"ts\":0.000, \"pid\":1, \"tid\":2},\n\n");
+#else
+    EXPECT_TRUE(get().empty());
+#endif
+}
+
 #if VN_SDK_FEATURE(TRACING)
 
 TEST_F(DiagnosticsTest, TraceEvents)
@@ -304,6 +325,10 @@ static void function1()
     function2();
 }
 
+static void namedScoped() { VNTraceScopedNamed("prefix:named"); }
+
+static void namedScopedArgs() { VNTraceScopedNamedArgs("prefix:namedArgs", "arg", 42); }
+
 TEST_F(DiagnosticsTest, Scoped)
 {
     function1();
@@ -323,6 +348,19 @@ TEST_F(DiagnosticsTest, Scoped)
         "Trace: {\"ph\":\"E\", \"ts\":0.000, \"pid\":1, \"tid\":2},\n\n"
         "Trace: {\"ph\":\"E\", \"ts\":0.000, \"pid\":1, \"tid\":2},\n\n"
         "Trace: {\"ph\":\"E\", \"ts\":0.000, \"pid\":1, \"tid\":2},\n\n");
+}
+
+TEST_F(DiagnosticsTest, NamedScoped)
+{
+    namedScoped();
+    namedScopedArgs();
+
+    EXPECT_EQ(get(), "Trace: {\"ph\":\"B\", \"ts\":0.000, \"pid\":1, \"tid\":2, "
+                     "\"name\":\"prefix:named\"},\n\n"
+                     "Trace: {\"ph\":\"E\", \"ts\":0.000, \"pid\":1, \"tid\":2},\n\n"
+                     "Trace: {\"ph\":\"B\", \"ts\":0.000, \"pid\":1, \"tid\":2, "
+                     "\"name\":\"prefix:namedArgs\", \"args\": { \"arg\": 42}},\n\n"
+                     "Trace: {\"ph\":\"E\", \"ts\":0.000, \"pid\":1, \"tid\":2},\n\n");
 }
 #endif
 

@@ -26,7 +26,7 @@ list(
     "src/config_pool.c"
     "src/decode.c"
     "src/dequant.c"
-    "src/dimensions.c"
+    "src/utilities.c"
     "src/entropy.c"
     "src/huffman.c"
     "src/log_utilities.c"
@@ -68,7 +68,7 @@ list(
     "include/LCEVC/enhancement/config_pool.h"
     "include/LCEVC/enhancement/config_types.h"
     "include/LCEVC/enhancement/decode.h"
-    "include/LCEVC/enhancement/dimensions.h"
+    "include/LCEVC/enhancement/utilities.h"
     "include/LCEVC/enhancement/hdr_types.h"
     "include/LCEVC/enhancement/transform_unit.h")
 

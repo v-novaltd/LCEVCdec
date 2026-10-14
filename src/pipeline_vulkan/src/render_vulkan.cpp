@@ -23,6 +23,7 @@
 #include "render_vertex.h"
 
 #include <LCEVC/build_config.h>
+#include <LCEVC/common/diagnostics.h>
 #include <LCEVC/pipeline_vulkan/types_vulkan.h>
 #include <LCEVC/pixel_processing/dither.h>
 #if VN_SDK_FEATURE(MINIMUM_LIB_SIZE)
@@ -337,6 +338,13 @@ bool RenderVulkan::createSwapChainAndGetImages()
     VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
     VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
 #if VN_OS(ANDROID)
+    // Size the pre-rotated render target, not the final window rectangle.
+    // Otherwise landscape content loses detail when composition stretches it.
+    const auto transform = swapChainSupport.capabilities.currentTransform;
+    if (transform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
+        transform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
+        std::swap(extent.width, extent.height);
+    }
     int winWidth = 0;
     int winHeight = 0;
     getWindowSize(winWidth, winHeight);
@@ -402,8 +410,14 @@ bool RenderVulkan::createSwapChainAndGetImages()
 
     m_swapChainImageFormat = surfaceFormat.format;
     m_swapChainExtent = extent;
+#if VN_OS(ANDROID)
+    // Resize detection uses the window dimensions, independently of the raster.
+    m_lastWindowWidth = winWidth;
+    m_lastWindowHeight = winHeight;
+#else
     m_lastWindowWidth = static_cast<int>(extent.width);
     m_lastWindowHeight = static_cast<int>(extent.height);
+#endif
 
     return true;
 }
@@ -1753,6 +1767,7 @@ VkExtent2D RenderVulkan::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabi
 
 void RenderVulkan::drawFrame()
 {
+    VNTraceScopedNamed("vulkan:RenderVulkan::drawFrame");
     if (!m_isInitialised) {
         if (!m_backend.initRemainingRender()) {
             return;
@@ -1775,12 +1790,15 @@ void RenderVulkan::drawFrame()
         m_framebufferResized = true;
     }
 #endif
-    vkWaitForFences(m_backend.getDevice(), 1, &m_inFlightFences[m_currentFrame], VK_TRUE, UINT64_MAX);
+    VNTraceFuncNamed("vulkan:present.waitFrameFence",
+                     vkWaitForFences(m_backend.getDevice(), 1, &m_inFlightFences[m_currentFrame],
+                                     VK_TRUE, UINT64_MAX));
 
     uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(m_backend.getDevice(), m_swapChain, UINT64_MAX,
-                                            m_imageAvailableSemaphores[m_currentFrame],
-                                            VK_NULL_HANDLE, &imageIndex);
+    VkResult result = VNTraceFuncNamed(
+        "vulkan:present.acquireSwapchainImage",
+        vkAcquireNextImageKHR(m_backend.getDevice(), m_swapChain, UINT64_MAX,
+                              m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE, &imageIndex));
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         recreateSwapChain();
@@ -1798,10 +1816,11 @@ void RenderVulkan::drawFrame()
 
     vkResetFences(m_backend.getDevice(), 1, &m_inFlightFences[m_currentFrame]);
 
+    VNTraceBegin("vulkan:present.recordCommands");
     updateUniformBuffer(m_currentFrame);
-
     vkResetCommandBuffer(m_graphicsCommandBuffers[m_currentFrame], 0);
     recordRenderCommandBuffer(m_graphicsCommandBuffers[m_currentFrame], imageIndex);
+    VNTraceEnd();
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1819,8 +1838,9 @@ void RenderVulkan::drawFrame()
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    result = m_backend.submitQueue(m_backend.getGraphicsQueue(), 1, &submitInfo,
-                                   m_inFlightFences[m_currentFrame]);
+    result = VNTraceFuncNamed("vulkan:present.submit",
+                              m_backend.submitQueue(m_backend.getGraphicsQueue(), 1, &submitInfo,
+                                                    m_inFlightFences[m_currentFrame]));
 
     if (result != VK_SUCCESS) {
         // Presenting after a failed submit would wait on a semaphore that will never
@@ -1841,7 +1861,8 @@ void RenderVulkan::drawFrame()
     presentInfo.pSwapchains = swapChains;
     presentInfo.pImageIndices = &imageIndex;
 
-    result = m_backend.presentQueue(m_backend.getPresentQueue(), &presentInfo);
+    result = VNTraceFuncNamed("vulkan:present.queuePresent",
+                              m_backend.presentQueue(m_backend.getPresentQueue(), &presentInfo));
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebufferResized) {
         m_framebufferResized = false;
@@ -1908,6 +1929,7 @@ void RenderVulkan::releaseSurfaceAndSwapChain()
 bool RenderVulkan::mapTexturePlanes(const uint8_t* source, const LdpPictureLayout& sourceLayout,
                                     uint32_t width, uint32_t height)
 {
+    VNTraceScopedNamedArgs("vulkan:RenderVulkan::mapTexturePlanes", "width", width, "height", height);
     if (source == nullptr) {
         VNLogError("Cannot upload render texture planes from a null pointer");
         return false;
@@ -1922,6 +1944,7 @@ bool RenderVulkan::mapTexturePlanes(const uint8_t* source, const LdpPictureLayou
     std::array<void*, NUM_PLANES> data{};
     uint8_t mappedPlaneCount = 0;
 
+    VNTraceBegin("vulkan:texture.mapPlanes");
     for (uint8_t plane = 0; plane < NUM_PLANES; ++plane) {
         vkGetImageSubresourceLayout(device, m_textureImage[plane], &subresource, &layouts[plane]);
 
@@ -1949,6 +1972,7 @@ bool RenderVulkan::mapTexturePlanes(const uint8_t* source, const LdpPictureLayou
         memories[plane] = memory;
         ++mappedPlaneCount;
     }
+    VNTraceEnd();
 
     const bool allPlanesMapped = mappedPlaneCount == NUM_PLANES;
     if (allPlanesMapped) {
@@ -1957,6 +1981,7 @@ bool RenderVulkan::mapTexturePlanes(const uint8_t* source, const LdpPictureLayou
         const uint32_t chromaWidth = width >> 1;
         const uint32_t chromaHeight = height >> 1;
         const uint32_t chromaRowBytes = m_renderBit8 ? chromaWidth : chromaWidth << 1;
+        VNTraceBegin("vulkan:texture.copyPlanes");
         const uint8_t* srcY = source + sourceLayout.planeOffsets[0];
         auto* dstY = static_cast<uint8_t*>(data[0]);
 
@@ -1996,12 +2021,15 @@ bool RenderVulkan::mapTexturePlanes(const uint8_t* source, const LdpPictureLayou
                 srcV += sourceLayout.rowStrides[2];
             }
         }
+        VNTraceEnd();
     }
 
+    VNTraceBegin("vulkan:texture.unmapPlanes");
     while (mappedPlaneCount > 0) {
         --mappedPlaneCount;
         vkUnmapMemory(device, memories[mappedPlaneCount]);
     }
+    VNTraceEnd();
 
     return allPlanesMapped;
 }

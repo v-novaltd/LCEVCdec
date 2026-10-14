@@ -80,6 +80,9 @@ public:
     // Get dither generator
     virtual LdppDitherGlobal* ditherGlobal() = 0;
 
+    // Call in frame task-generation order for each enhanced plane.
+    bool directUpscaleEligible(const FrameBase& frame, uint32_t plane);
+
     // Called by allocPictureExternal when the buffer descriptor carries an accelBuffer.
     // Return LdcReturnCodeNotSupported if the buffer cannot be handled..
     virtual LdcReturnCode storeAccelBuffer(PictureBase* picture, const LdpPictureDesc& desc,
@@ -250,6 +253,9 @@ private:
 
     // The prior frame during initial in-order config parsing - used to negotiate temporal buffers
     uint64_t m_previousTimestamp{kInvalidTimestamp};
+
+    // Predict per-plane temporal contents for direct upscale eligibility.
+    bool m_temporalPlaneEmpty[RCMaxPlanes]{};
 
     // Pending base pictures
     lcevc_dec::common::Vector<BasePicture> m_basePicturePending;

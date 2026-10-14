@@ -20,13 +20,12 @@
 #include <algorithm>
 #include <cstring>
 #include <new>
+#include <vector>
 
 #if VN_OS(ANDROID)
 
-// AHardwareBuffer_lockPlanes is API 29: weak_api29.h keeps the reference weak
-// regardless of the platform level this translation unit is compiled for, so
-// the library still loads on older devices; the call site below checks the
-// symbol is present before using it.
+// AHardwareBuffer_lockPlanes is API 29; weak_api29.h keeps it a weak symbol
+// so the library still loads on older devices (checked before use below).
 #include "weak_api29.h"
 
 #include <android/hardware_buffer.h>
@@ -37,8 +36,8 @@ BufferAHardware::~BufferAHardware() = default;
 
 bool BufferAHardware::map(LdpBufferMapping* mapping, int32_t offset, uint32_t size, LdpAccess access)
 {
-    // Best effort: expose the luma plane base. Plane-accurate access should go
-    // through the picture's plane descriptors.
+    // Best effort: luma base only. Use the picture's plane descriptors for
+    // plane-accurate access.
     if (!mapping || offset < 0 || offset + size > m_size) {
         return false;
     }
@@ -101,12 +100,12 @@ BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareB
 
     AHardwareBuffer_acquire(hardwareBuffer);
 
-    // Write-only lock (matching the buffer's allocation usage): the NV21 chroma
-    // swap before unlock reads back through this mapping, which is fine for the
-    // linear CPU-writable layouts this path accepts.
+    // Request read as well as write: bufferAHardwareDestroy() reads this
+    // mapping back to swap chroma order before unlocking.
     AHardwareBuffer_Planes planes{};
-    if (AHardwareBuffer_lockPlanes(hardwareBuffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1,
-                                   nullptr, &planes) != 0 ||
+    if (AHardwareBuffer_lockPlanes(hardwareBuffer,
+                                   AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+                                   -1, nullptr, &planes) != 0 ||
         planes.planeCount < 3) {
         VNLogWarning("bufferAHardwareCreate: AHardwareBuffer_lockPlanes failed (planes=%u)",
                      planes.planeCount);
@@ -132,8 +131,7 @@ BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareB
         AHardwareBuffer_release(hardwareBuffer);
         return nullptr;
     }
-    // NV21 device layout (Cr first): the decoder writes NV12 (Cb first), so the
-    // chroma pairs are swapped in place before the buffer is unlocked.
+    // NV21 device layout (Cr first): swapped back to NV12 before unlock.
     const bool chromaSwap = (cbPtr == crPtr + 1);
 
     planesOut[0] = {static_cast<uint8_t*>(luma.data), luma.rowStride};
@@ -165,14 +163,26 @@ void bufferAHardwareDestroy(LdcMemoryAllocator* allocator, BufferAHardware* buff
         return;
     }
 
-    // NV21-layout buffer: the decoder wrote NV12 chroma pairs, so swap Cb/Cr in
-    // place while the buffer is still CPU-locked.
+    // Swap Cb/Cr for NV21 devices via three bulk passes (read to scratch, swap,
+    // write back) rather than in-place read-modify-write: interleaving reads
+    // and writes to the same address on write-combined memory forces a flush
+    // per byte pair, which is far slower than separate sequential passes.
     if (buffer->m_chromaSwap && buffer->m_chromaBase != nullptr) {
+        const size_t rowBytes = buffer->m_chromaRowBytes;
+        const size_t rowStride = buffer->m_chromaRowStride;
+        const size_t planeSize = rowStride * buffer->m_chromaRows;
+        std::vector<uint8_t> scratch(planeSize);
         for (uint32_t row = 0; row < buffer->m_chromaRows; ++row) {
-            uint8_t* rowPtr = buffer->m_chromaBase + static_cast<size_t>(row) * buffer->m_chromaRowStride;
-            for (uint32_t x = 0; x + 1 < buffer->m_chromaRowBytes; x += 2) {
+            std::memcpy(scratch.data() + row * rowStride, buffer->m_chromaBase + row * rowStride, rowBytes);
+        }
+        for (uint32_t row = 0; row < buffer->m_chromaRows; ++row) {
+            uint8_t* rowPtr = scratch.data() + row * rowStride;
+            for (uint32_t x = 0; x + 1 < rowBytes; x += 2) {
                 std::swap(rowPtr[x], rowPtr[x + 1]);
             }
+        }
+        for (uint32_t row = 0; row < buffer->m_chromaRows; ++row) {
+            std::memcpy(buffer->m_chromaBase + row * rowStride, scratch.data() + row * rowStride, rowBytes);
         }
     }
 

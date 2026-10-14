@@ -38,6 +38,7 @@ class LCEVCDecoderSDK(ConanFile):
         "simd": [True, False],
         "api_layer": [True, False],
         "json_config": [True, False],
+        "tracing": [True, False],
         "base_decoder": ["ffmpeg", "libav", "manual", "none"],
     }
 
@@ -49,7 +50,10 @@ class LCEVCDecoderSDK(ConanFile):
         "simd": True,
         "api_layer": True,
         "json_config": True,
+        "tracing": True,
         "fmt:header_only": True,
+        "perfetto:shared": False,
+        "perfetto:fPIC": True,
     }
 
     generators = "cmake_find_package_multi"
@@ -154,6 +158,11 @@ class LCEVCDecoderSDK(ConanFile):
                 if self.options.executables:
                     reqs.append('glfw/3.3.8')
 
+        if self.options.tracing and self.settings.os == "Android":
+            if 'fmt/8.0.1' not in reqs:
+                reqs.append('fmt/8.0.1')
+            reqs.append('perfetto/48.1')
+
         for package in reqs:
             self.requires(package)
 
@@ -211,6 +220,7 @@ class LCEVCDecoderSDK(ConanFile):
 
     def generate(self):
         deps = CMakeDeps(self)
+        deps.set_property("fmt", "cmake_target_name", "fmt::fmt")
         deps.generate()
 
         if self.options.base_decoder == "none":
@@ -228,6 +238,9 @@ class LCEVCDecoderSDK(ConanFile):
         cmake.variables["VN_SDK_EXECUTABLES"] = self.options.executables
         cmake.variables["VN_SDK_PIPELINE_VULKAN"] = self.options.vulkan
         cmake.variables["VN_SDK_API_LAYER"] = self.options.api_layer
+        cmake.variables["VN_SDK_TRACING"] = self.options.tracing
+        cmake.variables["VN_SDK_TRACING_SYSTEM_SINK"] = (
+            self.options.tracing and self.settings.os == "Android")
         cmake.variables["VN_CORE_BENCHMARK"] = self.options.benchmark
         cmake.variables["VN_CORE_SIMD"] = self.options.simd
 
@@ -278,7 +291,10 @@ class LCEVCDecoderSDK(ConanFile):
                 self.cpp_info.components["pipeline_vulkan"].libs = ["lcevc_dec_pipeline_vulkan"]
 
         # Utility library
-        if self.options.executables or self.options.unit_tests:
+        if (self.options.executables or self.options.unit_tests
+                or (self.options.tracing and self.settings.os == "Android")):
             self.cpp_info.components["utility"].libs = ["lcevc_dec_utility"]
             if self.options.shared:
                 self.cpp_info.components["api_utility"].libs = ["lcevc_dec_api_utility"]
+            if self.options.tracing and self.settings.os == "Android":
+                self.cpp_info.components["utility"].requires = ["perfetto::perfetto"]

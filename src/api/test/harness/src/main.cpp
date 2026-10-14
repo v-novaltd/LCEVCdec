@@ -14,7 +14,6 @@
 
 #include "bin_writer.h"
 #include "hash.h"
-#include "trickplay.h"
 
 #include <CLI/CLI.hpp> // NOLINT(misc-include-cleaner)
 #include <fmt/core.h>
@@ -22,14 +21,19 @@
 #include <LCEVC/api_utility/chrono.h>
 #include <LCEVC/build_config.h>
 #include <LCEVC/common/constants.h>
+#include <LCEVC/common/diagnostics.h>
 #include <LCEVC/lcevc_dec.h>
 #include <LCEVC/utility/base_decoder.h>
 #include <LCEVC/utility/check.h>
 #include <LCEVC/utility/configure.h>
+#if VN_SDK_FEATURE(TRACING_SYSTEM_SINK)
+#include <LCEVC/utility/perfetto_sdk.h>
+#endif
 #include <LCEVC/utility/picture_functions.h>
 #include <LCEVC/utility/raw_writer.h>
 #include <LCEVC/utility/timestamp.h>
 
+#include <cstdio>
 #include <cstdlib>
 
 using namespace lcevc_dec::utility;
@@ -60,7 +64,6 @@ struct Config
     // Decoding config. Avoiding adding direct command-line interface for configs that are already
     // available via the JSON.
     std::string configurationJson;
-    std::string trickplayJson;
     bool verbose{false};
     bool render{false};
     uint32_t repeat{1};
@@ -146,8 +149,6 @@ int setupConfig(int argc, char** argv, Config& cfgOut)
     // Decoding config
     app.add_option("-c,--configuration", cfgOut.configurationJson,
                    "JSON configuration (Inline json, or json filename)");
-    app.add_option("--trickplay", cfgOut.trickplayJson,
-                   "JSON trickplay configuration (Inline json, or json filename)");
     app.add_flag("-v,--verbose", cfgOut.verbose, "Enable verbose logging");
     app.add_flag("-r,--render", cfgOut.render, "Render output");
     app.add_option("--repeat", cfgOut.repeat, "Repeat count for decoding task, use -1 to repeat forever");
@@ -399,11 +400,6 @@ static int decode(const Config& cfg)
         }
     }
 
-    std::vector<Trickplay> trickplays;
-    if (!cfg.trickplayJson.empty()) {
-        trickplays = parseTrickplayJson(cfg.trickplayJson);
-    }
-
     // Create and initialize LCEVC decoder
     LCEVC_DecoderHandle decoder = {};
     if (const int res = createAndInitDecoder(cfg.configurationJson, cfg.verbose, cfg.render, decoder);
@@ -541,29 +537,6 @@ static int decode(const Config& cfg)
             }
         }
 
-        auto frameNum = stats.inputEnhancedCount;
-        auto trickplay =
-            std::find_if(trickplays.begin(), trickplays.end(), [frameNum](const Trickplay& trickplay) {
-                return trickplay.frameNum == frameNum;
-            });
-        if (trickplay != trickplays.end() && !(&*trickplay)->completed) {
-            logTrickplay((&*trickplay));
-            if (trickplay->action == Peek) {
-                uint32_t width = 0;
-                uint32_t height = 0;
-                VN_LCEVC_AGAIN(LCEVC_PeekDecoder(decoder, trickplay->timestamp, &width, &height));
-            } else if (trickplay->action == Skip) {
-                VN_LCEVC_CHECK(LCEVC_SkipDecoder(decoder, trickplay->timestamp));
-            } else if (trickplay->action == Synchronize) {
-                VN_LCEVC_CHECK(LCEVC_SynchronizeDecoder(decoder, trickplay->dropPending));
-                pendingCount = 0;
-            } else if (trickplay->action == Flush) {
-                VN_LCEVC_CHECK(LCEVC_FlushDecoder(decoder));
-                pendingCount = 0;
-            }
-            trickplay->completed = true;
-        }
-
         // Sync. LCEVC decoder if base is exhausted
         if (!synchronized && !baseRunning) {
             VN_LCEVC_CHECK(LCEVC_SynchronizeDecoder(decoder, false));
@@ -600,9 +573,25 @@ int main(int argc, char** argv)
         return res;
     }
 
+#if VN_SDK_FEATURE(TRACING_SYSTEM_SINK)
+    ldcDiagnosticsInitialize(nullptr);
+    if (!lcevcPerfettoSdkRegister()) {
+        ldcDiagnosticsRelease();
+        fmt::print(stderr, "Could not register Perfetto diagnostics handler\n");
+        return EXIT_FAILURE;
+    }
+#endif
+
+    int result = EXIT_SUCCESS;
     for (uint32_t r = 0; r < cfg.repeat; ++r) {
         if (int ret = decode(cfg); ret != EXIT_SUCCESS) {
-            return ret;
+            result = ret;
+            break;
         }
     }
+#if VN_SDK_FEATURE(TRACING_SYSTEM_SINK)
+    lcevcPerfettoSdkUnregister();
+    ldcDiagnosticsRelease();
+#endif
+    return result;
 }

@@ -75,6 +75,7 @@ const KernelEntry kKernels[] = {
     {"Nearest", {{0, 16384, 0, 0}, 2, false}},
     {"Linear", {{0, 12288, 4096, 0}, 2, false}},
     {"Cubic", {{1382, 14285, 3942, 461}, 4, false}},
+    {"Adaptive", {{1024, 13312, 5120, 1024}, 4, false}},
 };
 
 void fillInternalNoise(int16_t* data, uint32_t count, std::mt19937& rng)
@@ -138,19 +139,9 @@ public:
         if (!m_vulkanPipeline) {
             GTEST_SKIP() << "Skipping test due to lack of Vulkan support";
         }
-
-        m_intermediateUpscalePicture0 = m_vulkanPipeline->allocatePicture();
-        m_intermediateUpscalePicture1 = m_vulkanPipeline->allocatePicture();
     }
 
-    void TearDown() override
-    {
-        ldcTaskPoolDestroy(&m_taskPool);
-        if (m_vulkanPipeline) {
-            m_vulkanPipeline->freePicture(m_intermediateUpscalePicture0);
-            m_vulkanPipeline->freePicture(m_intermediateUpscalePicture1);
-        }
-    }
+    void TearDown() override { ldcTaskPoolDestroy(&m_taskPool); }
 
 protected:
     // Run GPU upscale and return the dst buffer contents.
@@ -174,14 +165,9 @@ protected:
         upscaleArgs.dst = dst;
         upscaleArgs.base = src; // base = src for PA
         upscaleArgs.applyPA = predictedAverage;
-        upscaleArgs.dither = nullptr;
         upscaleArgs.mode = mode;
-        upscaleArgs.vertical = false;
         upscaleArgs.loq1 = false;
-        upscaleArgs.intermediateUpscalePicture[0] = m_intermediateUpscalePicture0;
-        upscaleArgs.intermediateUpscalePicture[1] = m_intermediateUpscalePicture1;
         upscaleArgs.chroma = LdeChroma::CT420;
-        upscaleArgs.pipeline = m_vulkanPipeline;
 
         LdeKernel kernelCopy = kernel;
 
@@ -284,8 +270,6 @@ protected:
 
     std::unique_ptr<Pipeline> m_pipeline;
     PipelineVulkan* m_vulkanPipeline{};
-    PictureVulkan* m_intermediateUpscalePicture0{};
-    PictureVulkan* m_intermediateUpscalePicture1{};
     LdcMemoryAllocator* m_allocator{};
     LdcTaskPool m_taskPool{};
 };
@@ -301,11 +285,11 @@ TEST_P(PipelineVulkanUpscaleTest, CompareGPUvsCPUScalar)
     uint32_t dstWidth{};
     uint32_t dstHeight{};
     if (params.scalingMode == Scale1D) {
-        // 1D upscale: GPU upscaleFrame does horizontal (width * 2) when vertical=false
+        // 1D upscale doubles the width in one shader pass.
         dstWidth = srcWidth * 2;
         dstHeight = srcHeight;
     } else {
-        // 2D upscale: vertical then horizontal
+        // 2D upscale doubles both dimensions in one shader pass.
         dstWidth = srcWidth * 2;
         dstHeight = srcHeight * 2;
     }
@@ -373,13 +357,9 @@ std::vector<UpscaleTestParams> generateUpscaleParams()
 
     for (const auto& res : kResolutions) {
         for (const auto& kernelEntry : kKernels) {
-            // 2D upscale without PA
             params.push_back({res, Scale2D, kernelEntry.name, kernelEntry.kernel, false});
-            // 2D upscale with PA
             params.push_back({res, Scale2D, kernelEntry.name, kernelEntry.kernel, true});
-            // 1D horizontal upscale without PA
             params.push_back({res, Scale1D, kernelEntry.name, kernelEntry.kernel, false});
-            // 1D horizontal upscale with PA
             params.push_back({res, Scale1D, kernelEntry.name, kernelEntry.kernel, true});
         }
     }

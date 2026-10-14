@@ -356,10 +356,13 @@ static inline int32_t avxClampRow(int32_t y, uint32_t height)
 #define AVX_LOAD_BASE8(ptr) AVX_JOIN(AVX_LOAD_BASE8_, IN_FIXED_POINT)(ptr)
 
 #define AVX_DEMOTE_U8(value) \
-    _mm256_add_epi16(_mm256_srai_epi16(_mm256_add_epi16((value), outputOffset256), 7), outputMidpoint256)
-#define AVX_DEMOTE_U16(value)                                                                   \
-    _mm256_add_epi16(_mm256_sra_epi16(_mm256_add_epi16((value), outputOffset256), outputShift), \
+    _mm256_add_epi16(_mm256_srai_epi16(_mm256_adds_epi16((value), outputOffset256), 7), outputMidpoint256)
+#define AVX_CONVERT_U16(value)                                                                   \
+    _mm256_add_epi16(_mm256_sra_epi16(_mm256_adds_epi16((value), outputOffset256), outputShift), \
                      outputMidpoint256)
+#define AVX_DEMOTE_U16(value)                                                           \
+    (_mm256_min_epi16(_mm256_max_epi16(AVX_CONVERT_U16(value), _mm256_setzero_si256()), \
+                      _mm256_set1_epi16((int16_t)(2 * params.midpoint - 1))))
 #define AVX_STORE_OUTPUT_1(ptr, value) avxStoreU8x16((uint8_t*)(ptr), AVX_DEMOTE_U8(value))
 #define AVX_STORE_OUTPUT_2(ptr, value) AVX_STORE_OUTPUT_1(ptr, value)
 #define AVX_STORE_OUTPUT_3(ptr, value) _mm256_storeu_si256((__m256i*)(ptr), AVX_DEMOTE_U16(value))

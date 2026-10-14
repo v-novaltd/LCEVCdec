@@ -14,7 +14,7 @@
 
 // Cross-validation for merging the temporal-buffer add into output conversion.
 //
-//   reference: add(temporal -> prediction) ; convertOut(prediction)
+//   reference: CPU saturating add(temporal, prediction) ; convertOut(combined)
 //   merged:    convertOut(prediction, temporal, addTemporal=true)
 
 #include "buffer_vulkan.h"
@@ -34,6 +34,7 @@
 #include <gtest/gtest.h>
 //
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -65,6 +66,36 @@ void fillInternalNoise(int16_t* data, uint32_t count, std::mt19937& rng)
     }
 }
 
+void addTemporalCpu(std::vector<int16_t>& destination, const std::vector<int16_t>& temporal,
+                    const LdpPictureLayout& layout, uint8_t numEnhancedPlanes)
+{
+    auto* destinationBytes = reinterpret_cast<uint8_t*>(destination.data());
+    const auto* temporalBytes = reinterpret_cast<const uint8_t*>(temporal.data());
+
+    for (uint8_t plane = 0; plane < numEnhancedPlanes; ++plane) {
+        const uint32_t width = ldpPictureLayoutPlaneWidth(&layout, plane);
+        const uint32_t height = ldpPictureLayoutPlaneHeight(&layout, plane);
+        const uint32_t stride = ldpPictureLayoutRowStride(&layout, plane);
+        const uint32_t offset = ldpPictureLayoutPlaneOffset(&layout, plane);
+
+        for (uint32_t y = 0; y < height; ++y) {
+            auto* destinationRow = reinterpret_cast<int16_t*>(destinationBytes + offset + y * stride);
+            const auto* temporalRow =
+                reinterpret_cast<const int16_t*>(temporalBytes + offset + y * stride);
+            for (uint32_t x = 0; x < width; ++x) {
+                const int32_t sum = static_cast<int32_t>(destinationRow[x]) + temporalRow[x];
+                if (sum > std::numeric_limits<int16_t>::max()) {
+                    destinationRow[x] = std::numeric_limits<int16_t>::max();
+                } else if (sum < std::numeric_limits<int16_t>::min()) {
+                    destinationRow[x] = std::numeric_limits<int16_t>::min();
+                } else {
+                    destinationRow[x] = static_cast<int16_t>(sum);
+                }
+            }
+        }
+    }
+}
+
 LdpColorFormat internalFormatForChroma(LdeChroma chroma)
 {
     switch (chroma) {
@@ -93,6 +124,10 @@ struct ConversionWithAddParams
         ss << static_cast<int>(bitDepth) << "bit";
         if (outputFormat == LdpColorFormatNV12_8) {
             ss << "_NV12";
+        } else if (outputFormat == LdpColorFormatNV21_8) {
+            ss << "_NV21";
+        } else if (outputFormat == LdpColorFormatP010_10) {
+            ss << "_P010";
         }
         ss << "_" << static_cast<int>(numEnhancedPlanes) << "planes_" << resolution.toString();
         return ss.str();
@@ -126,10 +161,10 @@ public:
 
 protected:
     // Run convertOut for one picture; optionally merging in the temporal add.
-    std::vector<uint8_t> runConvertOut(PictureVulkan* src, PictureVulkan* temporal,
-                                       bool addTemporal, uint8_t numEnhancedPlanes,
-                                       LdpColorFormat outputFormat, uint32_t width, uint32_t height,
-                                       uint8_t bitDepth, LdeChroma chroma) const
+    std::vector<uint8_t> runConvertOut(PictureVulkan* src, PictureVulkan* temporal, bool addTemporal,
+                                       uint8_t numEnhancedPlanes, LdpColorFormat outputFormat,
+                                       uint32_t width, uint32_t height, uint8_t bitDepth,
+                                       LdeChroma chroma, float sharpenStrength = 0.0f) const
     {
         auto* dst = vulkan_test_util::allocateTestPictureAndBuffer(m_vulkanPipeline, outputFormat,
                                                                    width, height);
@@ -145,6 +180,7 @@ protected:
         args.dst = dst;
         args.bitDepth = bitDepth;
         args.chroma = chroma;
+        args.sharpenStrength = sharpenStrength;
         args.temporal = temporal;
         args.addTemporal = addTemporal;
         args.numEnhancedPlanes = numEnhancedPlanes;
@@ -174,6 +210,14 @@ TEST_P(PipelineVulkanConversionWithAddTest, MergedMatchesAddThenConvert)
     const uint32_t width = params.resolution.width;
     const uint32_t height = params.resolution.height;
     const LdpColorFormat internalFormat = internalFormatForChroma(params.chroma);
+    // Exercise each sharpen+temporal shader family once while retaining broad coverage of the
+    // non-sharpen temporal specializations in the remaining parameter combinations.
+    const bool sharpenCase =
+        params.resolution.width == kResolutions[0].width &&
+        params.resolution.height == kResolutions[0].height && params.numEnhancedPlanes == 3 &&
+        (params.outputFormat == LdpColorFormatI420_8 || params.outputFormat == LdpColorFormatI420_10_LE ||
+         params.outputFormat == LdpColorFormatNV12_8 || params.outputFormat == LdpColorFormatP010_10);
+    const float sharpenStrength = sharpenCase ? 0.5f : 0.0f;
 
     LdpPictureLayout internalLayout{};
     ldpPictureLayoutInitialize(&internalLayout, internalFormat, width, height, kBufferRowAlignment);
@@ -192,31 +236,15 @@ TEST_P(PipelineVulkanConversionWithAddTest, MergedMatchesAddThenConvert)
         vulkan_test_util::allocateTestPictureAndBuffer(m_vulkanPipeline, internalFormat, width, height);
     static_cast<BufferVulkan*>(temporal->buffer)->copyIn(0, temporalData.data(), internalSize);
 
-    // --- Reference path: add(temporal -> combined) then convertOut(combined) ---
+    // --- Reference path: CPU saturating add then ordinary convertOut(combined) ---
+    std::vector<int16_t> combinedData = predictionData;
+    addTemporalCpu(combinedData, temporalData, internalLayout, params.numEnhancedPlanes);
     auto* combined =
         vulkan_test_util::allocateTestPictureAndBuffer(m_vulkanPipeline, internalFormat, width, height);
-    static_cast<BufferVulkan*>(combined->buffer)->copyIn(0, predictionData.data(), internalSize);
-    {
-        auto& compute = m_vulkanPipeline->backend().compute();
-        VulkanFrameContext* frameContext = compute.acquireFrameContext(nullptr);
-        ASSERT_NE(frameContext, nullptr);
-        compute.beginCompute(frameContext);
-
-        VulkanAddArgs addArgs{};
-        addArgs.src = temporal;
-        addArgs.dst = combined;
-        addArgs.numEnhancedPlanes = params.numEnhancedPlanes;
-        addArgs.chroma = params.chroma;
-        addArgs.context = frameContext;
-        EXPECT_TRUE(m_vulkanPipeline->backend().add(&addArgs));
-
-        compute.endCompute(frameContext);
-        m_vulkanPipeline->addCompletionContext(frameContext);
-        m_vulkanPipeline->waitCompletionContextIdle();
-    }
-    const std::vector<uint8_t> referenceOut =
-        runConvertOut(combined, /*temporal=*/nullptr, /*addTemporal=*/false, params.numEnhancedPlanes,
-                      params.outputFormat, width, height, params.bitDepth, params.chroma);
+    static_cast<BufferVulkan*>(combined->buffer)->copyIn(0, combinedData.data(), internalSize);
+    const std::vector<uint8_t> referenceOut = runConvertOut(
+        combined, /*temporal=*/nullptr, /*addTemporal=*/false, params.numEnhancedPlanes,
+        params.outputFormat, width, height, params.bitDepth, params.chroma, sharpenStrength);
 
     // --- Merged path: convertOut(prediction, temporal, addTemporal=true) ---
     auto* prediction =
@@ -224,7 +252,7 @@ TEST_P(PipelineVulkanConversionWithAddTest, MergedMatchesAddThenConvert)
     static_cast<BufferVulkan*>(prediction->buffer)->copyIn(0, predictionData.data(), internalSize);
     const std::vector<uint8_t> mergedOut =
         runConvertOut(prediction, temporal, /*addTemporal=*/true, params.numEnhancedPlanes,
-                      params.outputFormat, width, height, params.bitDepth, params.chroma);
+                      params.outputFormat, width, height, params.bitDepth, params.chroma, sharpenStrength);
 
     // --- Compare per-plane active regions bit-exactly ---
     LdpPictureLayout outputLayout{};
@@ -276,14 +304,17 @@ std::vector<ConversionWithAddParams> generateParams()
     const FormatEntry formats[] = {
         {LdpColorFormatI420_8, 8},      {LdpColorFormatI420_10_LE, 10},
         {LdpColorFormatI420_12_LE, 12}, {LdpColorFormatI420_14_LE, 14},
-        {LdpColorFormatNV12_8, 8},
+        {LdpColorFormatNV12_8, 8},      {LdpColorFormatNV21_8, 8},
+        {LdpColorFormatP010_10, 10},
     };
 
     std::vector<ConversionWithAddParams> params;
     for (const auto& res : kResolutions) {
         for (const auto& fmt : formats) {
-            // Both luma-only and fully-enhanced (Y+U+V) temporal adds.
+            // Cover luma-only, partial-chroma, and fully-enhanced temporal adds. The two-plane
+            // case specifically verifies that NV21 swaps temporal plane metadata with U/V.
             params.push_back({fmt.format, fmt.bitDepth, LdeChroma::CT420, 1, res});
+            params.push_back({fmt.format, fmt.bitDepth, LdeChroma::CT420, 2, res});
             params.push_back({fmt.format, fmt.bitDepth, LdeChroma::CT420, 3, res});
         }
     }

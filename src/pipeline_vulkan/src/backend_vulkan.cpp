@@ -57,7 +57,7 @@ BackendVulkan::BackendVulkan(bool renderingEnabled, int32_t deviceOverride,
     , m_deviceOverride(deviceOverride)
     , m_enableValidationLayers(enableValidationLayers)
     , m_timestampsLimit(timestampsLimit)
-    , m_compute(*this, contextCount)
+    , m_compute(*this, contextCount > 0 ? static_cast<uint32_t>(contextCount) : 1u)
     , m_render(*this)
 {}
 
@@ -281,6 +281,10 @@ bool BackendVulkan::checkDeviceExtensionSupport(VkPhysicalDevice device) const
 
     const auto rde = getRequiredDeviceExtensions();
     std::set<std::string, std::less<>> requiredDeviceExtensions(rde.begin(), rde.end());
+
+    if (requiredDeviceExtensions.empty()) {
+        return true;
+    }
 
     VNLogInfo("Required %d device extensions:", requiredDeviceExtensions.size());
     for ([[maybe_unused]] const auto& e : requiredDeviceExtensions) {

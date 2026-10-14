@@ -46,7 +46,7 @@ layout(push_constant) uniform consts {
     int containerOffsetV; // used with nv12 as input or output offset for V-plane
     int shift;     // 5 for 10bit, 3 for 12bit, and 1 for 14bit
     int sharpenStrength; // 0 disables sharpening, otherwise U16 strength (in-direction: unused)
-    int nv21Swap; // (in-direction: unused; declared for layout parity with convert_out.comp)
+    int nv21Swap; // non-zero -> input chroma is VU rather than UV
 };
 
 #include "common.glsl"
@@ -111,8 +111,9 @@ void main()
         if (nv12 && containerStrideV != 0) {
             if (4 * x < width) {
                 const ivec4 pixels = toInternalFrom8bit(unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));
-                dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bitInternals(ivec2(pixels.x, pixels.z));
-                dst.samples[containerOffsetV + x + y * containerStrideV] = pack16bitInternals(ivec2(pixels.y, pixels.w));
+                const ivec4 uv = (nv21Swap != 0) ? pixels.yxwz : pixels;
+                dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bitInternals(ivec2(uv.x, uv.z));
+                dst.samples[containerOffsetV + x + y * containerStrideV] = pack16bitInternals(ivec2(uv.y, uv.w));
             }
         } else {
             const ivec4 pixels = toInternalFrom8bit(unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));

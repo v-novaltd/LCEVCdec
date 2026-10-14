@@ -17,7 +17,7 @@
 
 #include <LCEVC/common/task_pool.h>
 #include <LCEVC/enhancement/config_pool.h>
-#include <LCEVC/enhancement/dimensions.h>
+#include <LCEVC/enhancement/utilities.h>
 #include <LCEVC/pipeline/frame.h>
 #include <LCEVC/pipeline/pipeline_config_base.h>
 #include <LCEVC/pipeline/temporal_buffer_base.h>
@@ -134,6 +134,10 @@ public:
 
     // Make the allocated temporal buffer match the frame's description
     void updateTemporalBuffer(uint32_t plane);
+
+    // Update CPU empty state after all command buffers for this plane have been applied.
+    // Must run before transferring the temporal buffer to the next frame.
+    bool updateTemporalBufferEmpty(uint32_t plane);
 
     // Disconnect any temporal buffer from frame plane, and return it
     TemporalBufferBase* detachTemporalBuffer(uint32_t plane);

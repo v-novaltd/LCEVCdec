@@ -196,13 +196,18 @@ class ADBRunner(Runner):
 
     # Most Android phones run much faster with threads=1 for CLI applications
     def _set_android_threads(self):
-        if 'VIM' not in self.PLATFORM and self._executable.endswith('lcevc_dec_test_harness'):
-            if '--configuration' in self._config and 'threads' not in self._config.get('--configuration', {}):
-                existing = json.loads(self._config['--configuration'])
-                existing['threads'] = 1
-                self.set_json_param('--configuration', existing)
-            else:
-                self.set_json_param('--configuration', {'threads': 1})
+        if (self.PLATFORM and 'VIM' in self.PLATFORM) or not self._executable.endswith('lcevc_dec_test_harness'):
+            return
+
+        configuration = self.get_param('configuration')
+        if configuration is None:
+            self.set_json_param('configuration', {'threads': 1})
+            return
+
+        existing = json.loads(configuration.strip("'"))
+        if 'threads' not in existing:
+            existing['threads'] = 1
+            self.set_json_param('configuration', existing)
 
     def _translate_path(self, host_path):
         asset_cache = os.path.abspath(os.path.join(config.get('CACHE_PATH'), 'assets'))

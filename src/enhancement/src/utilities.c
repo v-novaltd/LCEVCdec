@@ -16,7 +16,7 @@
 #include <LCEVC/common/limit.h>
 #include <LCEVC/enhancement/bitstream_types.h>
 #include <LCEVC/enhancement/config_parser.h>
-#include <LCEVC/enhancement/dimensions.h>
+#include <LCEVC/enhancement/utilities.h>
 
 void ldeTileDimensionsFromConfig(const LdeGlobalConfig* globalConfig, LdeLOQIndex loq,
                                  uint16_t planeIdx, uint16_t tileIdx, uint16_t* width, uint16_t* height)
@@ -101,4 +101,66 @@ uint32_t ldeTotalNumTiles(const LdeGlobalConfig* globalConfig)
     }
 
     return totalTiles;
+}
+
+/* Recognize a single zero coefficient followed by a run covering the whole tile.
+ * At most five run bytes are inspected; other encodings are conservatively nonempty. */
+static bool chunkIsZeroRun(const LdeChunk* chunk, uint32_t tuCount)
+{
+    if (!chunk->rleOnly || !chunk->data || chunk->size == 0 || tuCount == 0 ||
+        (chunk->data[0] & 0x7f) != 0x40) {
+        return false;
+    }
+    uint32_t zeros = 0;
+    size_t offset = 1;
+    uint8_t symbol = chunk->data[0];
+    while (symbol & 0x80) {
+        if (offset >= chunk->size || offset >= 6 || zeros > (INT32_MAX >> 7)) {
+            return false;
+        }
+        symbol = chunk->data[offset++];
+        zeros = (zeros << 7) | (symbol & 0x7f);
+    }
+    return offset == chunk->size && zeros == tuCount - 1;
+}
+
+bool ldeHasResiduals(const LdeGlobalConfig* globalConfig, const LdeFrameConfig* frameConfig,
+                     LdeLOQIndex loq, uint32_t planeIdx)
+{
+    if (!globalConfig || !frameConfig || !globalConfig->initialized ||
+        !frameConfig->frameConfigSet || loq >= LOQEnhancedCount || planeIdx >= RCMaxPlanes) {
+        return true;
+    }
+    if (planeIdx >= globalConfig->numPlanes || !frameConfig->loqEnabled[loq] || !frameConfig->entropyEnabled) {
+        return false;
+    }
+    const uint32_t start = frameConfig->tileChunkResidualIndex[planeIdx][loq];
+    const uint64_t count = (uint64_t)globalConfig->numTiles[planeIdx][loq] * globalConfig->numLayers;
+    if (!frameConfig->chunks || count == 0 || (uint64_t)start + count > frameConfig->numChunks) {
+        return true;
+    }
+    const LdeChunk* chunk = frameConfig->chunks + start;
+    for (uint32_t tile = 0; tile < globalConfig->numTiles[planeIdx][loq]; ++tile) {
+        uint32_t tuCount = 0;
+        for (uint32_t layer = 0; layer < globalConfig->numLayers; ++layer, ++chunk) {
+            if (!chunk->entropyEnabled) {
+                continue;
+            }
+            if (!chunk->rleOnly || !globalConfig->tileWidth[planeIdx] ||
+                !globalConfig->tileHeight[planeIdx]) {
+                return true;
+            }
+            if (!tuCount) {
+                uint16_t width = 0, height = 0;
+                ldeTileDimensionsFromConfig(globalConfig, loq, (uint16_t)planeIdx, (uint16_t)tile,
+                                            &width, &height);
+                const uint8_t shift = globalConfig->transform == TransformDDS ? 2 : 1;
+                tuCount = (uint32_t)(width >> shift) * (height >> shift);
+            }
+            if (!chunkIsZeroRun(chunk, tuCount)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }

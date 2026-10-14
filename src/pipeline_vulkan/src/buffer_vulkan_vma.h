@@ -25,12 +25,19 @@ namespace lcevc_dec::pipeline_vulkan {
 class PictureVulkan;
 class BackendVulkan;
 
+enum class BufferVulkanBinding : uint32_t
+{
+    Storage,
+    Uniform
+};
+
 // VMA-backed implementation of the BufferVulkan interface. This is the default
 // allocator for all internal pipeline buffers.
 class BufferVulkanVma : public BufferVulkan
 {
 public:
-    BufferVulkanVma(BackendVulkan& pipeline, uint32_t size, pipeline::BufferUsage usage);
+    BufferVulkanVma(BackendVulkan& pipeline, uint32_t size, pipeline::BufferUsage usage,
+                    BufferVulkanBinding binding);
     ~BufferVulkanVma() override;
 
     uint32_t size() const override;
@@ -59,6 +66,7 @@ private:
 
     uint32_t m_size{};
     pipeline::BufferUsage m_usage{};
+    BufferVulkanBinding m_binding{};
 
     VkBuffer m_buffer{VK_NULL_HANDLE};
     VmaAllocation m_vmaAllocation{};

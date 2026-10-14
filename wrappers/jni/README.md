@@ -11,6 +11,8 @@ The JNI wrapper can be built either with Android Studio or with command line too
 - generic LCEVCdec build dependencies must be installed - it is a good idea to test that the dependencies are configured by performing a generic LCEVCdec build before building the JNI wrapper, see `docs/building.md`
 - the JNI is built with Ninja, which is not a requirement to build LCEVCdec generally
 - the JNI build also depends on the `glslangValidator` tool.
+- Conan is disabled by default, and the JNI build uses `glslangValidator` from `PATH`. Enable Conan dependencies with `-PCONAN_ENABLED=TRUE`; Gradle then installs them before configuring CMake. Conan 1 must be available on `PATH` with a default build profile. A different dependency root can be passed with `-PCONAN_DEPS_ROOT=/path/to/conan`.
+- The Android system tracing sink is disabled by default. Enable it with `-PTRACING_SYSTEM_SINK=TRUE`; it requires `-PCONAN_ENABLED=TRUE` for Perfetto and fmt.
 
 ### Android Studio
 
@@ -20,21 +22,34 @@ The JNI wrapper can be built either with Android Studio or with command line too
 
 - Wait for the project to import/sync.
 
-- Select the `jni [publish]` configuration in the top right area.
+- Select `jni [publish]`, or `jni [publish tracing]` to enable Perfetto tracing and install its dependencies with Conan.
 
 - Press `Run` in the top right area to build the project.
 
 ### Command Line Tools
 
-In this section, on Windows, replace usage of `./gradlew` with `gradlew.bat`.
+Run the following commands from the repository root. On Windows, replace `./gradlew` with `gradlew.bat`.
 
 - [Download](https://developer.android.com/studio#command-line-tools-only), install and set up the command line tools. This package will enable auto-installation of any components used in the build without having to manually select them.
 
 - Change to the `wrappers/jni` directory.
 
 - Run the `publish` task.
+
     ```bash
     ./gradlew publish
+    ```
+
+- To source Vulkan build tools from Conan:
+
+    ```bash
+    ./gradlew publish -PCONAN_ENABLED=TRUE
+    ```
+
+- To build with the Android system tracing sink:
+
+    ```bash
+    ./gradlew publish -PCONAN_ENABLED=TRUE -PTRACING_SYSTEM_SINK=TRUE
     ```
 
 ### Local m2 Maven Repository, Snapshots and Versions

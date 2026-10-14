@@ -33,7 +33,7 @@
 #include <LCEVC/enhancement/cmdbuffer_gpu.h>
 #include <LCEVC/enhancement/config_parser.h>
 #include <LCEVC/enhancement/decode.h>
-#include <LCEVC/enhancement/dimensions.h>
+#include <LCEVC/enhancement/utilities.h>
 #include <LCEVC/pipeline/buffer.h>
 #include <LCEVC/pipeline/event_sink.h>
 #include <LCEVC/pipeline/pipeline.h>

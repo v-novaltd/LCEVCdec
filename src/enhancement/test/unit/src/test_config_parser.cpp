@@ -17,7 +17,7 @@
 #include <LCEVC/common/diagnostics.h>
 #include <LCEVC/common/memory.h>
 #include <LCEVC/enhancement/config_parser.h>
-#include <LCEVC/enhancement/dimensions.h>
+#include <LCEVC/enhancement/utilities.h>
 #include <LCEVC/utility/bin_reader.h>
 
 #include <filesystem>

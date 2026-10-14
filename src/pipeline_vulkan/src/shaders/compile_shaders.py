@@ -13,6 +13,7 @@
 # THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.
 
 import argparse
+import ast
 import binascii
 import glob
 import os
@@ -40,15 +41,27 @@ def get_tool_path(build_dir, package_name, tool_name):
                     next_line = lines[line_no + 1].strip()
                     if not next_line:
                         break
-                    exe_path = f"{next_line}/{tool_name}"
-                    if os.name == 'nt':
-                        exe_path += '.exe'
-                    return exe_path
-            print("Could not find glslang package in conanbuildinfo.txt")
+                    return executable_path(next_line, tool_name)
+                if line.strip() == f'[ENV_{package_name}]':
+                    for env_line in lines[line_no + 1:]:
+                        if env_line.startswith('['):
+                            break
+                        if env_line.startswith('PATH='):
+                            for directory in ast.literal_eval(env_line.partition('=')[2]):
+                                path = executable_path(directory, tool_name)
+                                if os.path.isfile(path):
+                                    return path
+                            break
+            print(f"Could not find {package_name} package in conanbuildinfo.txt")
             return None
     except FileNotFoundError:
         pass
     return None
+
+
+def executable_path(directory, tool_name):
+    extension = '.exe' if os.name == 'nt' else ''
+    return os.path.join(directory, tool_name + extension)
 
 
 def get_glslang_validator_path(build_dir):
@@ -182,30 +195,39 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compile GLSL shaders")
     parser.add_argument('--cmakebuildinfodir', type=str, required=True,
                         help="The directory containing cmakebuildinfo.txt")
+    parser.add_argument('--conanbuildinfodir', type=str,
+                        help="Alternate directory containing conanbuildinfo.txt")
     parser.add_argument('--android-ndk', type=str,
                         help="Android NDK root, used to find shader-tools/*/spirv-opt")
     parser.add_argument('--optimize', action='store_true',
                         help="Run spirv-opt -Os after compilation to reduce SPIR-V binary size")
     args = parser.parse_args()
 
-    glslang_validator_path = get_glslang_validator_path(args.cmakebuildinfodir)
+    conan_build_info_dir = args.conanbuildinfodir or args.cmakebuildinfodir
+    glslang_validator_path = get_glslang_validator_path(conan_build_info_dir)
     shader_build_dir = os.path.join(args.cmakebuildinfodir, 'src', 'pipeline_vulkan')
 
     spirvopt_path = None
     if args.optimize:
-        spirvopt_path = get_spirv_opt_path(args.cmakebuildinfodir, args.android_ndk)
+        spirvopt_path = get_spirv_opt_path(conan_build_info_dir, args.android_ndk)
 
     shaders = [
-        "src/upscale_vertical.comp",
-        "src/upscale_horizontal.comp",
+        "src/upscale_1d.comp",
+        "src/upscale_2d.comp",
         "src/apply.comp",
         "src/convert_in.comp",
-        "src/convert_out.comp",
+        "src/convert_out_nv12.comp",
+        "src/convert_out_p010.comp",
+        "src/convert_out_planar8.comp",
+        "src/convert_out_planar16.comp",
         "src/convert_out_image_p010.comp",
         "src/convert_out_image_nv12.comp",
         "src/convert_out_image_rgba8.comp",
+        "src/convert_out_image_rgba8_generic.comp",
         "src/convert_out_image_rgba10.comp",
-        "src/add.comp",
+        "src/convert_out_image_rgba10_generic.comp",
+        "src/dequant_transform.comp",
+
         "src/render_vertex.vert",
         "src/render_fragment.frag",
     ]

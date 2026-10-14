@@ -30,6 +30,7 @@
 #include <fmt/core.h>
 #include <gtest/gtest.h>
 //
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <random>
@@ -172,8 +173,12 @@ struct ConversionTestParams
     {
         std::stringstream ss;
         ss << (toInternal ? "ToInternal" : "FromInternal") << "_" << static_cast<int>(bitDepth) << "bit";
-        if (isNV12Format(externalFormat)) {
+        if (externalFormat == LdpColorFormatNV12_8) {
             ss << "_NV12";
+        } else if (externalFormat == LdpColorFormatNV21_8) {
+            ss << "_NV21";
+        } else if (externalFormat == LdpColorFormatP010_10) {
+            ss << "_P010";
         }
         switch (chroma) {
             case LdeChroma::CT420: ss << "_420"; break;
@@ -235,8 +240,8 @@ protected:
     // Run the GPU conversion and return the dst buffer contents.
     std::vector<uint8_t> runGPUConversion(const uint8_t* srcData, uint32_t srcDataSize,
                                           LdpColorFormat srcFormat, LdpColorFormat dstFormat,
-                                          uint32_t width, uint32_t height, bool toInternal,
-                                          uint8_t bitDepth, LdeChroma chroma) const
+                                          uint32_t width, uint32_t height, bool toInternal, uint8_t bitDepth,
+                                          LdeChroma chroma, float sharpenStrength = 0.0f) const
     {
         auto* src =
             vulkan_test_util::allocateTestPictureAndBuffer(m_vulkanPipeline, srcFormat, width, height);
@@ -266,6 +271,7 @@ protected:
             args.dst = dst;
             args.bitDepth = bitDepth;
             args.chroma = chroma;
+            args.sharpenStrength = sharpenStrength;
             args.context = frameContext;
             EXPECT_TRUE(m_vulkanPipeline->backend().convertOut(&args));
         }
@@ -297,6 +303,37 @@ protected:
         const LdpFixedPoint dstFP = toInternal ? signedFP : unsignedFP;
         const LdpColorFormat srcFormat = ldpPictureLayoutFormat(&srcLayout);
         const LdpColorFormat dstFormat = ldpPictureLayoutFormat(&dstLayout);
+        if (!toInternal && dstFormat == LdpColorFormatP010_10) {
+            const auto toP010 = [](int16_t value) {
+                const int output = std::clamp((static_cast<int>(value) + 0x4000 + 16) >> 5, 0, 1023);
+                return static_cast<uint16_t>(output << 6);
+            };
+            for (uint32_t y = 0; y < srcLayout.height; ++y) {
+                const auto* srcRow = reinterpret_cast<const int16_t*>(
+                    srcData + srcLayout.planeOffsets[0] + y * srcLayout.rowStrides[0]);
+                auto* dstRow = reinterpret_cast<uint16_t*>(dstData + dstLayout.planeOffsets[0] +
+                                                           y * dstLayout.rowStrides[0]);
+                for (uint32_t x = 0; x < srcLayout.width; ++x) {
+                    dstRow[x] = toP010(srcRow[x]);
+                }
+            }
+            const uint32_t chromaWidth = srcLayout.width >> 1;
+            const uint32_t chromaHeight = srcLayout.height >> 1;
+            for (uint32_t y = 0; y < chromaHeight; ++y) {
+                const auto* srcURow = reinterpret_cast<const int16_t*>(
+                    srcData + srcLayout.planeOffsets[1] + y * srcLayout.rowStrides[1]);
+                const auto* srcVRow = reinterpret_cast<const int16_t*>(
+                    srcData + srcLayout.planeOffsets[2] + y * srcLayout.rowStrides[2]);
+                auto* dstUVRow = reinterpret_cast<uint16_t*>(dstData + dstLayout.planeOffsets[1] +
+                                                             y * dstLayout.rowStrides[1]);
+                for (uint32_t x = 0; x < chromaWidth; ++x) {
+                    dstUVRow[2 * x] = toP010(srcURow[x]);
+                    dstUVRow[2 * x + 1] = toP010(srcVRow[x]);
+                }
+            }
+            return;
+        }
+
         const bool srcIsNV12 = isNV12Format(srcFormat);
         const bool dstIsNV12 = isNV12Format(dstFormat);
         const bool nv12 = srcIsNV12 || dstIsNV12;
@@ -373,7 +410,8 @@ protected:
             for (uint8_t comp = 0; comp < 2; ++comp) {
                 // comp 0 = U, comp 1 = V
                 const uint8_t planarPlane = comp + 1; // plane 1=U, plane 2=V in I420
-                const uint8_t componentOffset = comp; // byte offset within UV pair in NV12
+                const uint8_t componentOffset =
+                    (ldpPictureLayoutFormat(&nv12Layout) == LdpColorFormatNV21_8) ? 1 - comp : comp;
 
                 // The NV12 scalar function (copyU8ToS16Nv12 / copyS16ToU8Nv12) handles
                 // the x2 stride internally (srcPixel += 2 or dstPixel += 2).
@@ -486,6 +524,137 @@ TEST_P(PipelineVulkanConversionTest, CompareGPUvsCPUScalar)
     }
 }
 
+class PipelineVulkanConversionSharpenTest : public PipelineVulkanConversionTest
+{};
+
+TEST_P(PipelineVulkanConversionSharpenTest, SpecializedPipelineMatchesReference)
+{
+    constexpr uint32_t kWidth = 8;
+    constexpr uint32_t kHeight = 6;
+    constexpr float kSharpenStrength = 0.5f;
+    constexpr int64_t kSharpenStrengthU16 = 32767;
+    const auto& params = GetParam();
+    const LdpColorFormat internalFormat = internalFormatForChroma(LdeChroma::CT420);
+
+    LdpPictureLayout srcLayout{};
+    LdpPictureLayout dstLayout{};
+    ldpPictureLayoutInitialize(&srcLayout, internalFormat, kWidth, kHeight, kBufferRowAlignment);
+    ldpPictureLayoutInitialize(&dstLayout, params.externalFormat, kWidth, kHeight, kBufferRowAlignment);
+
+    std::vector<uint8_t> srcData(ldpPictureLayoutSize(&srcLayout), 0);
+    std::vector<uint8_t> yValues(kWidth * kHeight);
+    std::vector<uint8_t> uValues((kWidth >> 1) * (kHeight >> 1));
+    std::vector<uint8_t> vValues((kWidth >> 1) * (kHeight >> 1));
+    const auto writeInternal = [&srcData, &srcLayout](uint8_t plane, uint32_t x, uint32_t y, uint8_t value) {
+        auto* row =
+            reinterpret_cast<int16_t*>(srcData.data() + ldpPictureLayoutPlaneOffset(&srcLayout, plane) +
+                                       y * ldpPictureLayoutRowStride(&srcLayout, plane));
+        row[x] = static_cast<int16_t>((static_cast<int>(value) << 7) - 0x4000);
+    };
+
+    for (uint32_t y = 0; y < kHeight; ++y) {
+        for (uint32_t x = 0; x < kWidth; ++x) {
+            const uint8_t value = static_cast<uint8_t>(32 + ((x * 37 + y * 19 + x * y * 7) % 192));
+            yValues[y * kWidth + x] = value;
+            writeInternal(0, x, y, value);
+        }
+    }
+    for (uint32_t y = 0; y < (kHeight >> 1); ++y) {
+        for (uint32_t x = 0; x < (kWidth >> 1); ++x) {
+            const uint32_t index = y * (kWidth >> 1) + x;
+            uValues[index] = static_cast<uint8_t>(72 + x * 17 + y * 9);
+            vValues[index] = static_cast<uint8_t>(184 - x * 13 - y * 11);
+            writeInternal(1, x, y, uValues[index]);
+            writeInternal(2, x, y, vValues[index]);
+        }
+    }
+
+    const std::vector<uint8_t> gpuDst = runGPUConversion(
+        srcData.data(), static_cast<uint32_t>(srcData.size()), internalFormat, params.externalFormat,
+        kWidth, kHeight, false, params.bitDepth, LdeChroma::CT420, kSharpenStrength);
+
+    const int outputScale = 1 << (params.bitDepth - 8);
+    const int outputMax = (1 << params.bitDepth) - 1;
+    const auto convertedY = [&](uint32_t x, uint32_t y) {
+        return static_cast<int>(yValues[y * kWidth + x]) * outputScale;
+    };
+    const auto expectedY = [&](uint32_t x, uint32_t y) {
+        const int center = convertedY(x, y);
+        if (x == 0 || x + 1 == kWidth || y == 0 || y + 1 == kHeight) {
+            return center;
+        }
+        const int weight = 4 * center - convertedY(x - 1, y) - convertedY(x + 1, y) -
+                           convertedY(x, y - 1) - convertedY(x, y + 1);
+        const int coefficient = static_cast<int>((kSharpenStrengthU16 * weight + 32768) >> 16);
+        return std::clamp(center + coefficient, 0, outputMax);
+    };
+
+    const bool output16Bit = params.bitDepth > 8;
+    const bool p010 = params.externalFormat == LdpColorFormatP010_10;
+    const uint32_t yStride = ldpPictureLayoutRowStride(&dstLayout, 0);
+    const uint32_t yOffset = ldpPictureLayoutPlaneOffset(&dstLayout, 0);
+    for (uint32_t y = 0; y < kHeight; ++y) {
+        for (uint32_t x = 0; x < kWidth; ++x) {
+            if (output16Bit) {
+                const auto* row = reinterpret_cast<const uint16_t*>(gpuDst.data() + yOffset + y * yStride);
+                const uint16_t expected = static_cast<uint16_t>(expectedY(x, y) << (p010 ? 6 : 0));
+                EXPECT_EQ(row[x], expected) << "luma mismatch at (" << x << ", " << y << ")";
+            } else {
+                const auto* row = gpuDst.data() + yOffset + y * yStride;
+                EXPECT_EQ(row[x], expectedY(x, y)) << "luma mismatch at (" << x << ", " << y << ")";
+            }
+        }
+    }
+
+    if (params.externalFormat == LdpColorFormatI420_8 || params.externalFormat == LdpColorFormatI420_10_LE) {
+        for (uint8_t plane = 1; plane < 3; ++plane) {
+            const auto& values = (plane == 1) ? uValues : vValues;
+            const uint32_t stride = ldpPictureLayoutRowStride(&dstLayout, plane);
+            const uint32_t offset = ldpPictureLayoutPlaneOffset(&dstLayout, plane);
+            for (uint32_t y = 0; y < (kHeight >> 1); ++y) {
+                for (uint32_t x = 0; x < (kWidth >> 1); ++x) {
+                    const int expected = values[y * (kWidth >> 1) + x] * outputScale;
+                    if (output16Bit) {
+                        const auto* row =
+                            reinterpret_cast<const uint16_t*>(gpuDst.data() + offset + y * stride);
+                        EXPECT_EQ(row[x], expected);
+                    } else {
+                        EXPECT_EQ(gpuDst[offset + y * stride + x], expected);
+                    }
+                }
+            }
+        }
+    } else {
+        const uint32_t stride = ldpPictureLayoutRowStride(&dstLayout, 1);
+        const uint32_t offset = ldpPictureLayoutPlaneOffset(&dstLayout, 1);
+        for (uint32_t y = 0; y < (kHeight >> 1); ++y) {
+            for (uint32_t x = 0; x < (kWidth >> 1); ++x) {
+                const uint32_t index = y * (kWidth >> 1) + x;
+                const int expectedU = uValues[index] * outputScale;
+                const int expectedV = vValues[index] * outputScale;
+                if (p010) {
+                    const auto* row =
+                        reinterpret_cast<const uint16_t*>(gpuDst.data() + offset + y * stride);
+                    EXPECT_EQ(row[2 * x], expectedU << 6);
+                    EXPECT_EQ(row[2 * x + 1], expectedV << 6);
+                } else {
+                    const auto* row = gpuDst.data() + offset + y * stride;
+                    EXPECT_EQ(row[2 * x], expectedU);
+                    EXPECT_EQ(row[2 * x + 1], expectedV);
+                }
+            }
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BufferFormats, PipelineVulkanConversionSharpenTest,
+    testing::Values(ConversionTestParams{LdpColorFormatI420_8, false, 8, LdeChroma::CT420, {8, 6}},
+                    ConversionTestParams{LdpColorFormatI420_10_LE, false, 10, LdeChroma::CT420, {8, 6}},
+                    ConversionTestParams{LdpColorFormatNV12_8, false, 8, LdeChroma::CT420, {8, 6}},
+                    ConversionTestParams{LdpColorFormatP010_10, false, 10, LdeChroma::CT420, {8, 6}}),
+    ConversionTestName);
+
 #if VN_OS(ANDROID)
 namespace {
 
@@ -516,10 +685,33 @@ std::array<uint8_t, 4> expectedYuvToRgba(uint8_t y, uint8_t u, uint8_t v)
 
 } // namespace
 
-TEST(PipelineVulkanConversionAhbTest, ConvertOutRgba8Image)
+class PipelineVulkanConversionAhbTest : public testing::TestWithParam<LdeChroma>
+{};
+
+TEST_P(PipelineVulkanConversionAhbTest, ConvertOutRgba8Image)
 {
     constexpr uint32_t kWidth = 8;
     constexpr uint32_t kHeight = 8;
+    const LdeChroma chroma = GetParam();
+
+    LdpColorFormat srcFormat{};
+    uint32_t chromaWidthShift{};
+    uint32_t chromaHeightShift{};
+    switch (chroma) {
+        case LdeChroma::CT420:
+            srcFormat = LdpColorFormatI420_16_LE;
+            chromaWidthShift = 1;
+            chromaHeightShift = 1;
+            break;
+        case LdeChroma::CT422:
+            srcFormat = LdpColorFormatI422_16_LE;
+            chromaWidthShift = 1;
+            break;
+        case LdeChroma::CT444: srcFormat = LdpColorFormatI444_16_LE; break;
+        default: FAIL() << "Unsupported chroma mode";
+    }
+    const uint32_t chromaWidth = kWidth >> chromaWidthShift;
+    const uint32_t chromaHeight = kHeight >> chromaHeightShift;
 
     auto* pipelineBuilder = new PipelineBuilderVulkan(ldcMemoryAllocatorMalloc());
     ASSERT_TRUE(pipelineBuilder);
@@ -533,17 +725,14 @@ TEST(PipelineVulkanConversionAhbTest, ConvertOutRgba8Image)
         GTEST_SKIP() << "Skipping test due to lack of Vulkan support";
     }
 
-    auto* src = vulkan_test_util::allocateTestPictureAndBuffer(vulkanPipeline, LdpColorFormatI420_16_LE,
-                                                               kWidth, kHeight);
+    auto* src = vulkan_test_util::allocateTestPictureAndBuffer(vulkanPipeline, srcFormat, kWidth, kHeight);
     auto* srcBuffer = static_cast<BufferVulkan*>(src->buffer);
-
-    LdpPictureLayout srcLayout{};
-    ldpPictureLayoutInitialize(&srcLayout, LdpColorFormatI420_16_LE, kWidth, kHeight, kBufferRowAlignment);
+    const LdpPictureLayout& srcLayout = src->layout;
     std::vector<uint8_t> srcData(ldpPictureLayoutSize(&srcLayout), 0);
 
-    std::array<uint8_t, kWidth * kHeight> yValues{};
-    std::array<uint8_t, (kWidth / 2) * (kHeight / 2)> uValues{};
-    std::array<uint8_t, (kWidth / 2) * (kHeight / 2)> vValues{};
+    std::vector<uint8_t> yValues(kWidth * kHeight);
+    std::vector<uint8_t> uValues(chromaWidth * chromaHeight);
+    std::vector<uint8_t> vValues(chromaWidth * chromaHeight);
 
     for (uint32_t y = 0; y < kHeight; ++y) {
         for (uint32_t x = 0; x < kWidth; ++x) {
@@ -552,12 +741,12 @@ TEST(PipelineVulkanConversionAhbTest, ConvertOutRgba8Image)
             writeInternalSample(srcData, srcLayout, 0, x, y, value);
         }
     }
-    for (uint32_t y = 0; y < kHeight / 2; ++y) {
-        for (uint32_t x = 0; x < kWidth / 2; ++x) {
+    for (uint32_t y = 0; y < chromaHeight; ++y) {
+        for (uint32_t x = 0; x < chromaWidth; ++x) {
             const uint8_t u = static_cast<uint8_t>(80 + x * 20 + y * 7);
             const uint8_t v = static_cast<uint8_t>(160 - x * 11 + y * 13);
-            uValues[y * (kWidth / 2) + x] = u;
-            vValues[y * (kWidth / 2) + x] = v;
+            uValues[y * chromaWidth + x] = u;
+            vValues[y * chromaWidth + x] = v;
             writeInternalSample(srcData, srcLayout, 1, x, y, u);
             writeInternalSample(srcData, srcLayout, 2, x, y, v);
         }
@@ -598,7 +787,7 @@ TEST(PipelineVulkanConversionAhbTest, ConvertOutRgba8Image)
     args.src = src;
     args.dst = dst;
     args.bitDepth = 8;
-    args.chroma = LdeChroma::CT420;
+    args.chroma = chroma;
     args.context = frameContext;
     EXPECT_TRUE(vulkanPipeline->backend().convertOut(&args));
 
@@ -616,11 +805,11 @@ TEST(PipelineVulkanConversionAhbTest, ConvertOutRgba8Image)
     const auto* pixels = static_cast<const uint8_t*>(lockedData);
     for (uint32_t y = 0; y < kHeight; ++y) {
         for (uint32_t x = 0; x < kWidth; ++x) {
-            const uint32_t chromaX = x / 2;
-            const uint32_t chromaY = y / 2;
+            const uint32_t chromaX = x >> chromaWidthShift;
+            const uint32_t chromaY = y >> chromaHeightShift;
             const auto expected =
-                expectedYuvToRgba(yValues[y * kWidth + x], uValues[chromaY * (kWidth / 2) + chromaX],
-                                  vValues[chromaY * (kWidth / 2) + chromaX]);
+                expectedYuvToRgba(yValues[y * kWidth + x], uValues[chromaY * chromaWidth + chromaX],
+                                  vValues[chromaY * chromaWidth + chromaX]);
             const uint8_t* actual = pixels + (y * lockedDesc.stride + x) * 4;
             for (uint32_t c = 0; c < 4; ++c) {
                 EXPECT_LE(std::abs(static_cast<int>(actual[c]) - static_cast<int>(expected[c])), 1)
@@ -636,6 +825,17 @@ TEST(PipelineVulkanConversionAhbTest, ConvertOutRgba8Image)
     vulkanPipeline->freePicture(dst);
     AHardwareBuffer_release(ahb);
 }
+
+INSTANTIATE_TEST_SUITE_P(ChromaFormats, PipelineVulkanConversionAhbTest,
+                         testing::Values(LdeChroma::CT420, LdeChroma::CT422, LdeChroma::CT444),
+                         [](const testing::TestParamInfo<LdeChroma>& info) {
+                             switch (info.param) {
+                                 case LdeChroma::CT420: return "420";
+                                 case LdeChroma::CT422: return "422";
+                                 case LdeChroma::CT444: return "444";
+                                 default: return "Unknown";
+                             }
+                         });
 
 #endif // VN_OS(ANDROID)
 
@@ -668,12 +868,47 @@ std::vector<ConversionTestParams> generateI420Params()
     return params;
 }
 
-std::vector<ConversionTestParams> generateNV12Params()
+std::vector<ConversionTestParams> generateSemiplanarParams()
 {
     std::vector<ConversionTestParams> params;
     for (const auto& res : kResolutions) {
         params.push_back({LdpColorFormatNV12_8, true, 8, LdeChroma::CT420, res});
         params.push_back({LdpColorFormatNV12_8, false, 8, LdeChroma::CT420, res});
+        params.push_back({LdpColorFormatNV21_8, true, 8, LdeChroma::CT420, res});
+        params.push_back({LdpColorFormatNV21_8, false, 8, LdeChroma::CT420, res});
+        params.push_back({LdpColorFormatP010_10, false, 10, LdeChroma::CT420, res});
+    }
+    return params;
+}
+
+std::vector<ConversionTestParams> generatePlanarComplianceParams()
+{
+    struct FormatEntry
+    {
+        LdpColorFormat format;
+        uint8_t bitDepth;
+        LdeChroma chroma;
+    };
+    const FormatEntry formats[] = {
+        {LdpColorFormatI422_8, 8, LdeChroma::CT422},
+        {LdpColorFormatI422_10_LE, 10, LdeChroma::CT422},
+        {LdpColorFormatI422_12_LE, 12, LdeChroma::CT422},
+        {LdpColorFormatI422_14_LE, 14, LdeChroma::CT422},
+        {LdpColorFormatI444_8, 8, LdeChroma::CT444},
+        {LdpColorFormatI444_10_LE, 10, LdeChroma::CT444},
+        {LdpColorFormatI444_12_LE, 12, LdeChroma::CT444},
+        {LdpColorFormatI444_14_LE, 14, LdeChroma::CT444},
+        {LdpColorFormatGRAY_8, 8, LdeChroma::CTMonochrome},
+        {LdpColorFormatGRAY_10_LE, 10, LdeChroma::CTMonochrome},
+        {LdpColorFormatGRAY_12_LE, 12, LdeChroma::CTMonochrome},
+        {LdpColorFormatGRAY_14_LE, 14, LdeChroma::CTMonochrome},
+    };
+
+    std::vector<ConversionTestParams> params;
+    for (const auto& res : kResolutions) {
+        for (const auto& fmt : formats) {
+            params.push_back({fmt.format, false, fmt.bitDepth, fmt.chroma, res});
+        }
     }
     return params;
 }
@@ -684,6 +919,10 @@ std::vector<ConversionTestParams> generateNV12Params()
 INSTANTIATE_TEST_SUITE_P(I420Conversions, PipelineVulkanConversionTest,
                          testing::ValuesIn(generateI420Params()), ConversionTestName);
 
-// NV12 conversions at various resolutions
-INSTANTIATE_TEST_SUITE_P(NV12Conversions, PipelineVulkanConversionTest,
-                         testing::ValuesIn(generateNV12Params()), ConversionTestName);
+// NV12, NV21, and P010 conversions at various resolutions
+INSTANTIATE_TEST_SUITE_P(SemiplanarConversions, PipelineVulkanConversionTest,
+                         testing::ValuesIn(generateSemiplanarParams()), ConversionTestName);
+
+// Planar 4:2:2, 4:4:4, and monochrome buffer output paths.
+INSTANTIATE_TEST_SUITE_P(PlanarComplianceConversions, PipelineVulkanConversionTest,
+                         testing::ValuesIn(generatePlanarComplianceParams()), ConversionTestName);
