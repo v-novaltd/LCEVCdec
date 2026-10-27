@@ -18,8 +18,7 @@
 
 #include "specialization_ids.h"
 
-layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
-       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X, local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
 #include "convert_out_common.glsl"

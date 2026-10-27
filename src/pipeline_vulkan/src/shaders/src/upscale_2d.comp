@@ -19,10 +19,10 @@
 
 #include "specialization_ids.h"
 
-layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
-       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X, local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
+// clang-format off
 layout(std430, set = 0, binding = 0) buffer readonly SrcImageBuffer {
     uint samples[];
 } src;
@@ -34,6 +34,7 @@ layout(std430, set = 0, binding = 1) buffer restrict writeonly DstImageBuffer {
 layout(std430, set = 0, binding = 2) buffer readonly BaseImageBuffer {
     uint samples[];
 } base;
+// clang-format on
 
 layout(constant_id = SPECID_PA) const int pa = 0;
 
@@ -56,8 +57,8 @@ int readSrcSample(int x, int y)
 
 int readBaseSample(int x, int y)
 {
-    const ivec2 pels = unpack16bitInternals(
-        base.samples[containerOffsetBase + y * containerStrideBase + (x >> 1)]);
+    const ivec2 pels =
+        unpack16bitInternals(base.samples[containerOffsetBase + y * containerStrideBase + (x >> 1)]);
     return ((x & 1) == 0) ? pels.x : pels.y;
 }
 
@@ -89,16 +90,14 @@ void filterVerticalTile(int groupSourceX, int groupSourceY, uint localIndex)
         const ivec2 row3 = readSrcPair(sourceX, sourceY + 1);
         const ivec2 row4 = readSrcPair(sourceX, sourceY + 2);
 
-        const ivec2 phase0 = ivec2(
-            clamp_s15(ds + kernel[3] * row0.x + kernel[2] * row1.x +
-                      kernel[1] * row2.x + kernel[0] * row3.x),
-            clamp_s15(ds + kernel[0] * row1.x + kernel[1] * row2.x +
-                      kernel[2] * row3.x + kernel[3] * row4.x));
-        const ivec2 phase1 = ivec2(
-            clamp_s15(ds + kernel[3] * row0.y + kernel[2] * row1.y +
-                      kernel[1] * row2.y + kernel[0] * row3.y),
-            clamp_s15(ds + kernel[0] * row1.y + kernel[1] * row2.y +
-                      kernel[2] * row3.y + kernel[3] * row4.y));
+        const ivec2 phase0 = ivec2(clamp_s15(ds + kernel[3] * row0.x + kernel[2] * row1.x +
+                                             kernel[1] * row2.x + kernel[0] * row3.x),
+                                   clamp_s15(ds + kernel[0] * row1.x + kernel[1] * row2.x +
+                                             kernel[2] * row3.x + kernel[3] * row4.x));
+        const ivec2 phase1 = ivec2(clamp_s15(ds + kernel[3] * row0.y + kernel[2] * row1.y +
+                                             kernel[1] * row2.y + kernel[0] * row3.y),
+                                   clamp_s15(ds + kernel[0] * row1.y + kernel[1] * row2.y +
+                                             kernel[2] * row3.y + kernel[3] * row4.y));
 
         verticalTile[tileY][tilePairX * 2] = pack16bitInternals(phase0);
         verticalTile[tileY][tilePairX * 2 + 1] = pack16bitInternals(phase1);
@@ -149,15 +148,15 @@ void main()
 
     if (pa == 2) {
         const int base0 = readBaseSample(sourceX, sourceY);
-        const int adjust0 = base0 -
-            ((outputRow0.x + outputRow0.y + outputRow1.x + outputRow1.y + 2) >> 2);
+        const int adjust0 =
+            base0 - ((outputRow0.x + outputRow0.y + outputRow1.x + outputRow1.y + 2) >> 2);
         outputRow0.xy = saturateS16(outputRow0.xy + adjust0);
         outputRow1.xy = saturateS16(outputRow1.xy + adjust0);
 
         if (sourceX + 1 < srcWidth) {
             const int base1 = readBaseSample(sourceX + 1, sourceY);
-            const int adjust1 = base1 -
-                ((outputRow0.z + outputRow0.w + outputRow1.z + outputRow1.w + 2) >> 2);
+            const int adjust1 =
+                base1 - ((outputRow0.z + outputRow0.w + outputRow1.z + outputRow1.w + 2) >> 2);
             outputRow0.zw = saturateS16(outputRow0.zw + adjust1);
             outputRow1.zw = saturateS16(outputRow1.zw + adjust1);
         }

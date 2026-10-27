@@ -12,6 +12,7 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
+// clang-format off
 layout(push_constant) uniform consts {
     int kernel[4];
     int srcWidth;
@@ -23,5 +24,6 @@ layout(push_constant) uniform consts {
     int containerStrideBase;
     int containerOffsetBase;
 };
+// clang-format on
 
 const int ds = 0x2000; // Output pixel range bias

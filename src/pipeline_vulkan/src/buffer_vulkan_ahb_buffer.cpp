@@ -18,9 +18,11 @@
 
 #include "backend_vulkan.h"
 
+#include <android/hardware_buffer.h>
 #include <dlfcn.h>
 #include <LCEVC/common/log.h>
 #include <LCEVC/pipeline/picture_layout.h>
+#include <vulkan/vulkan.h>
 
 namespace lcevc_dec::pipeline_vulkan {
 

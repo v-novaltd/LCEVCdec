@@ -313,7 +313,7 @@ void TimestampVulkan::report() const
                     }
                     const uint64_t beginTs = results[m_events[j].queryIndex * 2];
                     const float ms = static_cast<float>(timestamp - beginTs) / 1e6f * m_timestampPeriod;
-                    const uint64_t endTimestampNs = toMonotonicNs(timestamp);
+                    [[maybe_unused]] const uint64_t endTimestampNs = toMonotonicNs(timestamp);
 
                     VNLogInfo("%3zu,%3zu: %8.3gms %-32s %" PRIu64 "%s", j, i, ms, evt.label,
                               endTimestampNs, calibrated ? "ns" : "ns (approximately aligned)");

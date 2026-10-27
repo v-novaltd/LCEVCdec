@@ -31,14 +31,18 @@ namespace lcevc_dec::pipeline_vulkan {
 
 struct DescriptorSetSpec
 {
-    VkDescriptorSetLayout layout;
+    ComputeLayoutId layout;
     VkDescriptorSet* destination;
-    uint32_t storageBuffers;
-    uint32_t storageImages;
-    uint32_t uniformBuffers;
 };
 
-VulkanFrameContext::~VulkanFrameContext() { freeTmpCmdBuffers(); }
+VulkanFrameContext::~VulkanFrameContext()
+{
+    if (m_backend != nullptr) {
+        destroy();
+    } else {
+        freeTmpCmdBuffers();
+    }
+}
 
 bool VulkanFrameContext::init()
 {
@@ -116,10 +120,7 @@ void VulkanFrameContext::destroy()
 
     m_timestamps = TimestampVulkan();
 
-    if (m_descriptorPool) {
-        vkDestroyDescriptorPool(device, m_descriptorPool, nullptr);
-        m_descriptorPool = VK_NULL_HANDLE;
-    }
+    m_descriptorSets.reset();
 
     if (m_commandBuffer) {
         vkFreeCommandBuffers(device, m_commandPool, 1, &m_commandBuffer);
@@ -134,61 +135,86 @@ void VulkanFrameContext::destroy()
     freeTmpCmdBuffers();
 }
 
-bool VulkanFrameContext::allocateDescriptorSets(const DescriptorSetLayouts& layouts)
+bool VulkanFrameContext::DescriptorSets::init(VkDevice device, const DescriptorSetLayouts& layouts)
 {
     const std::array specs{
-        DescriptorSetSpec{layouts.upscale, &m_descriptorSetUpscaleLoq1, 3, 0, 0},
-        DescriptorSetSpec{layouts.upscale, &m_descriptorSetUpscaleLoq0, 3, 0, 0},
-        DescriptorSetSpec{layouts.conversion, &m_descriptorSetConversionTo, 3, 0, 0},
-        DescriptorSetSpec{layouts.conversion, &m_descriptorSetConversionFrom, 3, 0, 0},
-        DescriptorSetSpec{layouts.convertOutImage, &m_descriptorSetConversionFromImage, 2, 2, 0},
-        DescriptorSetSpec{layouts.apply, &m_descriptorSetApply[LOQ0], 2, 0, 0},
-        DescriptorSetSpec{layouts.apply, &m_descriptorSetApply[LOQ1], 2, 0, 0},
-        DescriptorSetSpec{layouts.dequantTransform, &m_descriptorSetDequantTransform, 2, 0, 1},
+        DescriptorSetSpec{ComputeLayoutId::Upscale, &upscale[LOQ1]},
+        DescriptorSetSpec{ComputeLayoutId::Upscale, &upscale[LOQ0]},
+        DescriptorSetSpec{ComputeLayoutId::Conversion, &conversionTo},
+        DescriptorSetSpec{ComputeLayoutId::Conversion, &conversionFrom},
+        DescriptorSetSpec{ComputeLayoutId::ConvertOutImage, &conversionFromImage},
+        DescriptorSetSpec{ComputeLayoutId::Apply, &apply[LOQ0]},
+        DescriptorSetSpec{ComputeLayoutId::Apply, &apply[LOQ1]},
+        DescriptorSetSpec{ComputeLayoutId::DequantTransform, &dequantTransform},
     };
 
     std::array<VkDescriptorSetLayout, specs.size()> setLayouts{};
-    std::array poolSizes{
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0},
-    };
+    std::array<VkDescriptorPoolSize, specs.size() * kMaxComputeDescriptorBindings> poolSizes{};
+    size_t poolSizeCount{};
     for (size_t i = 0; i < specs.size(); ++i) {
-        setLayouts[i] = specs[i].layout;
-        poolSizes[0].descriptorCount += specs[i].storageBuffers;
-        poolSizes[1].descriptorCount += specs[i].storageImages;
-        poolSizes[2].descriptorCount += specs[i].uniformBuffers;
+        const DescriptorSetLayoutInfo& layout = layouts[toIndex(specs[i].layout)];
+        if (layout.handle == VK_NULL_HANDLE || layout.descriptorTypeCount > layout.descriptorTypes.size()) {
+            VNLogError("invalid compute descriptor set layout");
+            return false;
+        }
+
+        setLayouts[i] = layout.handle;
+        for (size_t binding = 0; binding < layout.descriptorTypeCount; ++binding) {
+            const VkDescriptorType type = layout.descriptorTypes[binding];
+            size_t poolSizeIndex = 0;
+            while (poolSizeIndex < poolSizeCount && poolSizes[poolSizeIndex].type != type) {
+                ++poolSizeIndex;
+            }
+            if (poolSizeIndex == poolSizeCount) {
+                poolSizes[poolSizeCount].type = type;
+                ++poolSizeCount;
+            }
+            ++poolSizes[poolSizeIndex].descriptorCount;
+        }
     }
 
     VkDescriptorPoolCreateInfo descriptorPoolCreateInfo{};
     descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     descriptorPoolCreateInfo.maxSets = static_cast<uint32_t>(specs.size());
-    descriptorPoolCreateInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    descriptorPoolCreateInfo.poolSizeCount = static_cast<uint32_t>(poolSizeCount);
     descriptorPoolCreateInfo.pPoolSizes = poolSizes.data();
-    if (vkCreateDescriptorPool(m_backend->getDevice(), &descriptorPoolCreateInfo, nullptr,
-                               &m_descriptorPool) != VK_SUCCESS) {
+
+    UniqueDescriptorPool candidatePool;
+    if (vkCreateDescriptorPool(device, &descriptorPoolCreateInfo, nullptr, candidatePool.put(device)) !=
+        VK_SUCCESS) {
         VNLogError("failed to create descriptor pool");
         return false;
     }
 
     VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
     descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.descriptorPool = m_descriptorPool;
+    descriptorSetAllocateInfo.descriptorPool = candidatePool.get();
     descriptorSetAllocateInfo.descriptorSetCount = static_cast<uint32_t>(specs.size());
     descriptorSetAllocateInfo.pSetLayouts = setLayouts.data();
 
     std::array<VkDescriptorSet, specs.size()> descriptorSets{};
-    if (vkAllocateDescriptorSets(m_backend->getDevice(), &descriptorSetAllocateInfo,
-                                 descriptorSets.data()) != VK_SUCCESS) {
+    if (vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo, descriptorSets.data()) != VK_SUCCESS) {
         VNLogError("failed to allocate descriptor sets");
         return false;
     }
 
+    pool = std::move(candidatePool);
     for (size_t i = 0; i < specs.size(); ++i) {
         *specs[i].destination = descriptorSets[i];
     }
 
     return true;
+}
+
+void VulkanFrameContext::DescriptorSets::reset()
+{
+    pool.reset();
+    upscale.fill(VK_NULL_HANDLE);
+    apply.fill(VK_NULL_HANDLE);
+    conversionTo = VK_NULL_HANDLE;
+    conversionFrom = VK_NULL_HANDLE;
+    conversionFromImage = VK_NULL_HANDLE;
+    dequantTransform = VK_NULL_HANDLE;
 }
 
 bool VulkanFrameContext::begin(const DescriptorSetLayouts& layouts)
@@ -197,12 +223,11 @@ bool VulkanFrameContext::begin(const DescriptorSetLayouts& layouts)
 
     m_eventPrevAtBegin = m_eventPrev;
 
-    if (!m_descriptorSetsAllocated) {
-        if (!allocateDescriptorSets(layouts)) {
+    if (!m_descriptorSets) {
+        if (!m_descriptorSets.init(m_backend->getDevice(), layouts)) {
             VNLogError("Failed to allocate descriptor sets!");
             return false;
         }
-        m_descriptorSetsAllocated = true;
     }
 
     VkCommandBufferBeginInfo beginInfo{};
@@ -264,13 +289,14 @@ void VulkanFrameContext::bind(const ComputePipelineLayout* computePipelineLayout
     m_computePipeline = computePipeline;
     m_computePipelineLayout = computePipelineLayout;
 
-    vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipeline->pipeline);
+    vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipeline->pipeline.get());
 
     vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            m_computePipelineLayout->pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+                            m_computePipelineLayout->pipelineLayout.get(), 0, 1, &descriptorSet, 0,
+                            nullptr);
 }
 
-void VulkanFrameContext::dispatch(uint32_t width, uint32_t height, const char* label)
+void VulkanFrameContext::dispatch(uint32_t width, uint32_t height, const char* label, uint32_t depth)
 {
     assert(m_computePipeline);
 
@@ -282,7 +308,7 @@ void VulkanFrameContext::dispatch(uint32_t width, uint32_t height, const char* l
     const uint32_t numGroupsY = (height + (bh - 1)) / bh;
 
     m_timestamps.begin(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, label);
-    vkCmdDispatch(m_commandBuffer, numGroupsX, numGroupsY, 1);
+    vkCmdDispatch(m_commandBuffer, numGroupsX, numGroupsY, depth);
     m_timestamps.end(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, label);
 }
 

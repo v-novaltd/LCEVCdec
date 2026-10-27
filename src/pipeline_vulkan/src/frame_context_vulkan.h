@@ -17,10 +17,12 @@
 
 #include "compute_vulkan.h"
 #include "timestamp_vulkan.h"
+#include "vulkan_handle.h"
 
 #include <LCEVC/enhancement/bitstream_types.h>
 #include <vulkan/vulkan.h>
 //
+#include <array>
 #include <cstdint>
 
 namespace lcevc_dec::pipeline_vulkan {
@@ -38,8 +40,8 @@ class VulkanFrameContext
 public:
     VulkanFrameContext() = default;
     ~VulkanFrameContext();
-    VulkanFrameContext(VulkanFrameContext&&) noexcept = default;
-    VulkanFrameContext& operator=(VulkanFrameContext&&) noexcept = default;
+    VulkanFrameContext(VulkanFrameContext&&) = delete;
+    VulkanFrameContext& operator=(VulkanFrameContext&&) = delete;
     VulkanFrameContext(const VulkanFrameContext&) = delete;
     VulkanFrameContext& operator=(const VulkanFrameContext&) = delete;
 
@@ -60,7 +62,7 @@ public:
               const ComputePipeline* computePipeline, VkDescriptorSet descriptorSet);
 
     // Dispatch
-    void dispatch(uint32_t width, uint32_t height, const char* label);
+    void dispatch(uint32_t width, uint32_t height, const char* label, uint32_t depth);
 
     // Events sequence access to the temporal buffer between frames.
     void waitEvent();
@@ -80,7 +82,20 @@ public:
 private:
     friend class ComputeVulkan;
 
-    bool allocateDescriptorSets(const DescriptorSetLayouts& layouts);
+    struct DescriptorSets
+    {
+        bool init(VkDevice device, const DescriptorSetLayouts& layouts);
+        void reset();
+        explicit operator bool() const { return static_cast<bool>(pool); }
+
+        UniqueDescriptorPool pool;
+        std::array<VkDescriptorSet, LOQEnhancedCount> upscale{};
+        std::array<VkDescriptorSet, LOQEnhancedCount> apply{};
+        VkDescriptorSet conversionTo{};
+        VkDescriptorSet conversionFrom{};
+        VkDescriptorSet conversionFromImage{};
+        VkDescriptorSet dequantTransform{};
+    };
 
     BackendVulkan* m_backend{};
 
@@ -89,17 +104,7 @@ private:
     VkFence m_fence{};
     FrameVulkan* m_frame{};
 
-    bool m_descriptorSetsAllocated{};
-    VkDescriptorPool m_descriptorPool{};
-
-    VkDescriptorSet m_descriptorSetUpscaleLoq1{}; // 3 buffers: source, destination, and PA base
-    VkDescriptorSet m_descriptorSetUpscaleLoq0{}; // 3 buffers: source, destination, and PA base
-    VkDescriptorSet m_descriptorSetConversionTo{}; // 2 buffers: 1.input -> CONVERSION -> 2.output plane
-    VkDescriptorSet m_descriptorSetConversionFrom{}; // 2 buffers: 1.input -> CONVERSION -> 2.output plane
-    VkDescriptorSet m_descriptorSetConversionFromImage{}; // 1 buffer + 1 storage image output
-    VkDescriptorSet m_descriptorSetDequantTransform{}; // coefficients + dequant params -> residuals
-
-    VkDescriptorSet m_descriptorSetApply[LOQEnhancedCount]{}; // LOQ0: 1.merged commands -> APPLY -> 2.output plane
+    DescriptorSets m_descriptorSets;
 
     BufferVulkan* m_gpuCommandBuffer[LOQEnhancedCount] = {}; // merged command buffers for LOQ apply tiles
     uint32_t m_gpuCommandBufferOffset[LOQEnhancedCount] = {}; // current write offset (bytes) into LOQ apply cmd buffer

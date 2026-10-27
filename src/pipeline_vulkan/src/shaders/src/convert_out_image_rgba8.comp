@@ -18,8 +18,7 @@
 
 #include "specialization_ids.h"
 
-layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
-       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X, local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
 layout(rgba8, set = 0, binding = 1) uniform restrict writeonly image2D dstImage;
@@ -43,8 +42,7 @@ void main()
                                       containerStrideTemporalY, containerOffsetTemporalY);
 
     const vec2 uv = loadChroma(blockX, blockY, 7, 255);
-    imageStore(dstImage, ivec2(x, y),
-               vec4(yuvToRgb601(internalToUnorm(y0.x, 7, 255), uv.x, uv.y), 1.0));
+    imageStore(dstImage, ivec2(x, y), vec4(yuvToRgb601(internalToUnorm(y0.x, 7, 255), uv.x, uv.y), 1.0));
     imageStore(dstImage, ivec2(x + 1, y),
                vec4(yuvToRgb601(internalToUnorm(y0.y, 7, 255), uv.x, uv.y), 1.0));
     imageStore(dstImage, ivec2(x, y + 1),

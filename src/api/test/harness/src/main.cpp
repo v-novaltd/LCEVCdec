@@ -60,6 +60,7 @@ struct Config
     LCEVC_ColorFormat outputColorFormat{LCEVC_ColorFormat_Unknown};
     uint32_t outputFrameLimit{0};
     bool outputExternal{false};
+    bool outputExternalPlanes{false};
     uint32_t pendingLimit{0};
     // Decoding config. Avoiding adding direct command-line interface for configs that are already
     // available via the JSON.
@@ -102,6 +103,9 @@ struct OutputPicData
     LCEVC_PictureBufferDesc bufferDesc = {};
     LCEVC_PictureDesc desc{};
     std::unique_ptr<uint8_t[]> extBuffer = nullptr;
+    // Planes-only external output: one allocation per plane, described without a buffer.
+    std::unique_ptr<uint8_t[]> extPlanes[PictureLayout::kMaxNumPlanes];
+    LCEVC_PicturePlaneDesc planeDescs[PictureLayout::kMaxNumPlanes] = {};
     std::vector<uint64_t> pendingTimestamps;
     bool valid = false;
 };
@@ -144,7 +148,9 @@ int setupConfig(int argc, char** argv, Config& cfgOut)
                    "Output color format. Not currently implemented by decoder.");
     app.add_option("--output-limit", cfgOut.outputFrameLimit, "Output frame limit");
     app.add_flag("--output-external", cfgOut.outputExternal,
-                 "Use externally allocated memory for output pictures.");
+                 "Use externally allocated memory for output pictures via buffers");
+    app.add_flag("--output-external-planes", cfgOut.outputExternalPlanes,
+                 "Use externally allocated memory for output pictures via plane arrays");
     app.add_option("-t,--hash-type", cfgOut.hashType, "Type of hash to use: xxhash or md5")->default_val("xxhash");
     // Decoding config
     app.add_option("-c,--configuration", cfgOut.configurationJson,
@@ -161,9 +167,13 @@ int setupConfig(int argc, char** argv, Config& cfgOut)
     }
 
     // Validate
-    if (cfgOut.simulatePadding && !cfgOut.baseExternal) {
-        fmt::print("base-external must be enabled when using simulate-padding\n");
+    if (cfgOut.simulatePadding && !cfgOut.baseExternal && !cfgOut.outputExternalPlanes) {
+        fmt::print("base-external or output-external-planes must be enabled when using "
+                   "simulate-padding\n");
         return EXIT_FAILURE;
+    }
+    if (cfgOut.outputExternalPlanes) {
+        cfgOut.outputExternal = true;
     }
 
     return EXIT_SUCCESS;
@@ -225,7 +235,52 @@ static int createAndInitDecoder(const std::string_view configurationJson, bool v
     return EXIT_SUCCESS;
 }
 
-static void updateExternalOutputPic(LCEVC_DecoderHandle decoder, OutputPicData& output)
+// Wrap the current external output storage in a new picture handle
+static void allocExternalOutputPic(LCEVC_DecoderHandle decoder, OutputPicData& output, const Config& cfg)
+{
+    if (cfg.outputExternalPlanes) {
+        VN_LCEVC_CHECK(LCEVC_AllocPictureExternal(decoder, &output.desc, nullptr, output.planeDescs,
+                                                  &output.handle));
+    } else {
+        VN_LCEVC_CHECK(LCEVC_AllocPictureExternal(decoder, &output.desc, &output.bufferDesc,
+                                                  nullptr, &output.handle));
+    }
+}
+
+// (Re)allocate external output storage for the current output picture description
+static void resizeExternalOutputStorage(OutputPicData& output, const Config& cfg)
+{
+    if (!cfg.outputExternalPlanes) {
+        const PictureLayout layout(output.desc);
+        output.bufferDesc.byteSize = layout.size();
+        output.extBuffer = std::make_unique<uint8_t[]>(output.bufferDesc.byteSize);
+        output.bufferDesc.data = output.extBuffer.get();
+        return;
+    }
+
+    uint32_t rowStrides[PictureLayout::kMaxNumPlanes] = {0};
+    if (cfg.simulatePadding) {
+        VN_UTILITY_CHECK(PictureLayout::getPaddedStrides(output.desc, rowStrides));
+    } else {
+        const PictureLayout defaultLayout(output.desc);
+        for (uint32_t plane = 0; plane < defaultLayout.planes(); ++plane) {
+            rowStrides[plane] = defaultLayout.rowStride(plane);
+        }
+    }
+    const PictureLayout layout(output.desc, rowStrides);
+    for (uint32_t plane = 0; plane < PictureLayout::kMaxNumPlanes; ++plane) {
+        output.extPlanes[plane].reset();
+        output.planeDescs[plane] = {};
+    }
+    for (uint32_t plane = 0; plane < layout.planes(); ++plane) {
+        const size_t planeSize = static_cast<size_t>(layout.rowStride(plane)) * layout.planeHeight(plane);
+        output.extPlanes[plane] = std::make_unique<uint8_t[]>(planeSize);
+        output.planeDescs[plane].firstSample = output.extPlanes[plane].get();
+        output.planeDescs[plane].rowByteStride = layout.rowStride(plane);
+    }
+}
+
+static void updateExternalOutputPic(LCEVC_DecoderHandle decoder, OutputPicData& output, const Config& cfg)
 {
     // Resize output based on enhancement info
     uint32_t newWidth = 0;
@@ -239,12 +294,8 @@ static void updateExternalOutputPic(LCEVC_DecoderHandle decoder, OutputPicData& 
             if (newWidth != output.desc.width || newHeight != output.desc.height) {
                 output.desc.width = newWidth;
                 output.desc.height = newHeight;
-                const PictureLayout layout(output.desc);
-                output.bufferDesc.byteSize = layout.size();
-                output.extBuffer = std::make_unique<uint8_t[]>(output.bufferDesc.byteSize);
-                output.bufferDesc.data = output.extBuffer.get();
-                VN_LCEVC_CHECK(LCEVC_AllocPictureExternal(decoder, &output.desc, &output.bufferDesc,
-                                                          nullptr, &output.handle));
+                resizeExternalOutputStorage(output, cfg);
+                allocExternalOutputPic(decoder, output, cfg);
             }
             output.pendingTimestamps.erase(output.pendingTimestamps.begin() + i);
             break;
@@ -273,7 +324,7 @@ static bool receiveDecodedPicture(LCEVC_DecoderHandle decoder, Stats& stats, Has
                                   uint32_t& part, const Config& cfg, OutputPicData& outputPic)
 {
     if (cfg.outputExternal) {
-        updateExternalOutputPic(decoder, outputPic);
+        updateExternalOutputPic(decoder, outputPic, cfg);
     }
     // Has decoder produced a picture?
     LCEVC_PictureHandle decodedPicture;
@@ -530,8 +581,7 @@ static int decode(const Config& cfg)
             VN_LCEVC_AGAIN(LCEVC_SendDecoderPicture(decoder, outputPic.handle))) {
             // Allocate next output
             if (cfg.outputExternal) {
-                VN_LCEVC_CHECK(LCEVC_AllocPictureExternal(
-                    decoder, &outputPic.desc, &outputPic.bufferDesc, nullptr, &outputPic.handle));
+                allocExternalOutputPic(decoder, outputPic, cfg);
             } else {
                 VN_LCEVC_CHECK(LCEVC_AllocPicture(decoder, &outputPic.desc, &outputPic.handle));
             }

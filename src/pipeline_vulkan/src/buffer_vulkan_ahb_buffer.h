@@ -18,8 +18,9 @@
 #include <LCEVC/build_config.h>
 
 #if VN_OS(ANDROID)
-
 #include "buffer_vulkan_ahb.h"
+
+#include <vulkan/vulkan_android.h>
 
 namespace lcevc_dec::pipeline_vulkan {
 
@@ -27,11 +28,10 @@ namespace lcevc_dec::pipeline_vulkan {
 //
 // Used for two paths:
 //   - BLOB-format AHBs (raw byte storage).
-//   - YUV AHBs that the image-import path can't (or can't safely) handle, where
-//     shaders read the AHB as a linear storage buffer.  In that case the
-//     populateLayout() override fills in the actual per-plane row strides /
-//     offsets reported by AHardwareBuffer_lockPlanes() so shader offsets line
-//     up with the underlying memory.
+//   - YUV AHBs that the image-import path can't (or can't safely) handle, where shaders read the
+//     AHB as a linear storage buffer. In that case the populateLayout() override fills in the
+//     actual per-plane row strides/offsets reported by AHardwareBuffer_lockPlanes() so shader
+//     offsets line up with the underlying memory.
 class BufferVulkanAhbBuffer : public BufferVulkanAhb
 {
 public:

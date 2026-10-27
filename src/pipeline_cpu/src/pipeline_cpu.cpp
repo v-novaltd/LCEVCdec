@@ -14,9 +14,9 @@
 
 #include "pipeline_cpu.h"
 //
+#include "buffer_cpu_ahb.h"
 #include "frame_cpu.h"
 #include "from_base.h"
-#include "hardware_buffer_cpu.h"
 
 #include <LCEVC/common/log.h>
 
@@ -147,8 +147,8 @@ void PipelineCPU::releasePicture(pipeline::PictureBase* picture)
     if (picture->isExternalBuffer() && picture->buffer != nullptr) {
         // The only external BufferBase attached by this pipeline is the
         // AHardwareBuffer wrapper from storeAccelBuffer() - unlock and free it.
-        bufferAHardwareDestroy(m_allocator, static_cast<BufferAHardware*>(
-                                                static_cast<pipeline::BufferBase*>(picture->buffer)));
+        BufferCPUAhb::destroy(m_allocator, static_cast<BufferCPUAhb*>(
+                                               static_cast<pipeline::BufferBase*>(picture->buffer)));
         picture->setExternalBuffer(nullptr);
     }
 
@@ -165,7 +165,7 @@ LdcReturnCode PipelineCPU::storeAccelBuffer(pipeline::PictureBase* picture,
         reinterpret_cast<AHardwareBuffer*>(accelBuffer); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
 
     LdpPicturePlaneDesc planes[kLdpPictureMaxNumPlanes] = {};
-    BufferAHardware* buffer = bufferAHardwareCreate(m_allocator, hardwareBuffer, desc, planes);
+    BufferCPUAhb* buffer = BufferCPUAhb::create(m_allocator, hardwareBuffer, desc, planes);
     if (buffer == nullptr) {
         return LdcReturnCodeNotSupported;
     }
@@ -249,10 +249,14 @@ LdcReturnCode PipelineCPU::renderSendPicture(uint64_t timestamp, LdpPicture* out
                                              uint64_t delayUs)
 {
     VNUnused(timestamp);
-    VNUnused(renderSendInformation);
 
     if (outputPicture == nullptr) {
         return LdcReturnCodeInvalidParam;
+    }
+    if (renderSendInformation != nullptr && renderSendInformation->rotation != 0) {
+        VNLogWarning(
+            "renderSendPicture rotation is unused by the CPU pipeline, the system compositor "
+            "rotates for the display");
     }
     if (delayUs > 0) {
         VNLogWarning("renderSendPicture delayUs is not implemented yet, rendering with zero delay");

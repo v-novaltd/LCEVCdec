@@ -21,6 +21,8 @@
 
 #include "buffer_vulkan_ahb.h"
 
+#include <vulkan/vulkan_android.h>
+
 namespace lcevc_dec::pipeline_vulkan {
 
 // AHardwareBuffer wrapper that imports the underlying allocation as a 2D VkImage.
@@ -28,7 +30,7 @@ namespace lcevc_dec::pipeline_vulkan {
 // Used for RGB AHBs and for 2-plane YUV AHBs (NV12, P010-style) whose imported
 // VkFormat exposes per-plane STORAGE-capable views.  For YUV the wrapper
 // creates per-plane R8/R8G8 (or R16/R16G16) image views; for single-plane
-// images a single colour image view is created.
+// images a single color image view is created.
 class BufferVulkanAhbImage : public BufferVulkanAhb
 {
 public:

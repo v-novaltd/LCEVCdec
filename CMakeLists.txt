@@ -30,7 +30,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/CMakeSetup.cmake")
 project(
     LCEVCdec_SDK
     DESCRIPTION "The Open Source LCEVC Decoder SDK"
-    VERSION 4.3.0
+    VERSION 4.3.1
     LANGUAGES CXX C)
 
 list(APPEND CMAKE_MODULE_PATH "${LCEVC_ROOT_DIR}/cmake/modules")

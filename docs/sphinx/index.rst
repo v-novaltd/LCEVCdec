@@ -10,6 +10,7 @@ Release |release|
    introduction
    overview
    api
+   android_integration
    example_code
    enhancement
    extract

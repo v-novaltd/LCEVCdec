@@ -26,13 +26,10 @@ static const auto kVulkanBufferRowAlignment = 4;
 
 // Abstract interface for Vulkan-backed buffers in the pipeline.
 //
-// Concrete implementations:
-//   - BufferVulkanVma        — VMA-allocated buffer used for normal pipeline
-//                                buffers.
-//   - BufferVulkanAhbBuffer  — externally-supplied AHardwareBuffer imported
-//                                as a VkBuffer (Android).
-//   - BufferVulkanAhbImage   — externally-supplied AHardwareBuffer imported
-//                                as a 2D VkImage (Android).
+// Implementations:
+//   - BufferVulkanVma - VMA-allocated buffer used for normal pipeline buffers
+//   - BufferVulkanAhbBuffer - externally-supplied AHardwareBuffer imported as a VkBuffer (Android)
+//   - BufferVulkanAhbImage - externally-supplied AHardwareBuffer imported as a 2D VkImage (Android)
 class BufferVulkan : public pipeline::BufferBase
 {
 public:

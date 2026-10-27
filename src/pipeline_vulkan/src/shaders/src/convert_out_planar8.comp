@@ -18,8 +18,7 @@
 
 #include "specialization_ids.h"
 
-layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
-       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X, local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
 #include "convert_out_common.glsl"
@@ -30,18 +29,15 @@ void writeRow(int packedX, int py)
     if (sharpen) {
         const int px = packedX << 2;
         outputValues = uvec4(sharpenPixel(px, py, 7), sharpenPixel(px + 1, py, 7),
-                            sharpenPixel(px + 2, py, 7), sharpenPixel(px + 3, py, 7));
+                             sharpenPixel(px + 2, py, 7), sharpenPixel(px + 3, py, 7));
     } else {
-        const ivec2 values0 = loadInternalPair(packedX << 1, py, containerStrideIn,
-                                               containerOffsetIn, containerStrideTemporal0,
-                                               containerOffsetTemporal0);
-        const ivec2 values1 = loadInternalPair((packedX << 1) + 1, py, containerStrideIn,
-                                               containerOffsetIn, containerStrideTemporal0,
-                                               containerOffsetTemporal0);
+        const ivec2 values0 = loadInternalPair(packedX << 1, py, containerStrideIn, containerOffsetIn,
+                                               containerStrideTemporal0, containerOffsetTemporal0);
+        const ivec2 values1 = loadInternalPair((packedX << 1) + 1, py, containerStrideIn, containerOffsetIn,
+                                               containerStrideTemporal0, containerOffsetTemporal0);
         outputValues = fromInternalTo8bit(ivec4(values0, values1));
     }
-    dst.samples[uint(containerOffsetOut + py * containerStrideOut + packedX)] =
-        pack8bit(outputValues);
+    dst.samples[uint(containerOffsetOut + py * containerStrideOut + packedX)] = pack8bit(outputValues);
 }
 
 void main()

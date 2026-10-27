@@ -110,6 +110,16 @@ typedef enum LdpColorFormat
     LdpColorFormatForceInt32 = 0x7fffffff,
 } LdpColorFormat;
 
+// Bits identify logical component indices, independent of color space or packing.
+typedef enum LdpColorComponentMask
+{
+    LdpColorComponentMaskNone = 0,
+    LdpColorComponentMaskC0 = 1u << 0,
+    LdpColorComponentMaskC1 = 1u << 1,
+    LdpColorComponentMaskC2 = 1u << 2,
+    LdpColorComponentMaskC3 = 1u << 3,
+} LdpColorComponentMask;
+
 // Matches LCEVC_ColorRange
 typedef enum LdpColorPrimaries
 {

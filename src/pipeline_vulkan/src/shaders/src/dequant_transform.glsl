@@ -24,13 +24,12 @@ ivec4 dequantizeCoefficients(ivec4 coefficients, ivec4 stepWidths, ivec4 offsets
     return clamp(results, ivec4(-32768), ivec4(32767));
 }
 
-ivec4 dequantInverseTransformDD(ivec4 coefficients, ivec4 stepWidths, ivec4 offsets,
-                                uint scalingMode)
+ivec4 dequantInverseTransformDD(ivec4 coefficients, ivec4 stepWidths, ivec4 offsets, uint scalingMode)
 {
     const ivec4 c = dequantizeCoefficients(coefficients, stepWidths, offsets);
     ivec4 residuals;
 
-    if(scalingMode == kDequantTransformScale1D) {
+    if (scalingMode == kDequantTransformScale1D) {
         residuals.x = saturateS16(c.x + c.y + c.z);
         residuals.y = saturateS16(c.x - c.y - c.z);
         residuals.z = saturateS16(c.w + c.y - c.z);
@@ -47,14 +46,16 @@ ivec4 dequantInverseTransformDD(ivec4 coefficients, ivec4 stepWidths, ivec4 offs
 ivec4 dequantInverseTransformDDSFirstPass(ivec4 coefficients, ivec4 stepWidths, ivec4 offsets)
 {
     const ivec4 c = dequantizeCoefficients(coefficients, stepWidths, offsets);
-    return ivec4(c.x + c.y + c.z + c.w, c.x - c.y + c.z - c.w,
-                 c.x + c.y - c.z - c.w, c.x - c.y - c.z + c.w);
+    return ivec4(c.x + c.y + c.z + c.w, //
+                 c.x - c.y + c.z - c.w, //
+                 c.x + c.y - c.z - c.w, //
+                 c.x - c.y - c.z + c.w);
 }
 
 ivec4 inverseTransformDDSSecondPass(ivec4 firstPass, uint scalingMode)
 {
     ivec4 residuals;
-    if(scalingMode == kDequantTransformScale1D) {
+    if (scalingMode == kDequantTransformScale1D) {
         residuals.x = saturateS16(firstPass.x + firstPass.y + firstPass.w);
         residuals.y = saturateS16(firstPass.x - firstPass.y - firstPass.w);
         residuals.z = saturateS16(firstPass.y + firstPass.z - firstPass.w);
@@ -76,8 +77,7 @@ int deblockResidual(int residual, uint coefficient)
     return truncated >= 0x8000 ? truncated - 0x10000 : truncated;
 }
 
-void deblockDDS(inout ivec4 output0, inout ivec4 output1,
-                inout ivec4 output2, inout ivec4 output3,
+void deblockDDS(inout ivec4 output0, inout ivec4 output1, inout ivec4 output2, inout ivec4 output3,
                 uint corner, uint side)
 {
     output0.x = deblockResidual(output0.x, corner);

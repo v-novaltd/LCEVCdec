@@ -20,25 +20,30 @@
 #include "common.glsl"
 
 // Spcialization for adding temporal.
-layout (constant_id = SPECID_ADD_TEMPORAL) const bool addTemporal = false;
+layout(constant_id = SPECID_ADD_TEMPORAL) const bool addTemporal = false;
 
 // Source: internal 16-bit signed samples, packed two-per-uint via
 // pack16bitInternals (see common.glsl).
+// clang-format off
 layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
     uint samples[];
 } src;
+// clang-format on
 
 // Ttemporal residuals: same internal s16 packed format as src.
 // Bound to src when addTemporal is false (read is spec-constant-eliminated).
+// clang-format off
 layout(std430, set = 0, binding = 3) buffer restrict readonly TemporalBuffer {
     uint samples[];
 } temporal;
+// clang-format on
 
 // Push constants are shared by every image-output shader. The generic RGBA
 // variants reuse the slots `shift` and `sharpenStrength` (used by planar buffer conversion)
 // as chromaWidthShift / chromaHeightShift. Fixed 4:2:0 image shaders do not read
 // those fields. `nv21Swap` is retained for host-struct
 // layout parity; NV21 image output is selected by swapping source chroma planes.
+// clang-format off
 layout(push_constant) uniform consts {
     int width;
     int height;
@@ -58,6 +63,7 @@ layout(push_constant) uniform consts {
     int containerStrideTemporalV;
     int containerOffsetTemporalV;
 };
+// clang-format on
 
 // Read two adjacent signed internal samples from the source SSBO, folding in
 // co-located temporal residuals with signed-16 saturation when enabled.
@@ -97,20 +103,19 @@ float internalToUnorm(int internalVal, int shift, int maxVal)
 vec2 loadChroma(int px, int py, int shift, int maxVal)
 {
     const float u = internalToUnorm(loadInternalValue(px, py, containerStrideU, containerOffsetU,
-                                                       containerStrideTemporalU, containerOffsetTemporalU),
+                                                      containerStrideTemporalU, containerOffsetTemporalU),
                                     shift, maxVal);
     const float v = internalToUnorm(loadInternalValue(px, py, containerStrideV, containerOffsetV,
-                                                       containerStrideTemporalV, containerOffsetTemporalV),
+                                                      containerStrideTemporalV, containerOffsetTemporalV),
                                     shift, maxVal);
     return vec2(u, v) - vec2(0.5);
 }
 
-
 // BT.601 limited-range YUV -> RGB.  uf/vf must already have 0.5 subtracted.
 vec3 yuvToRgb601(float yf, float uf, float vf)
 {
-    return clamp(vec3(yf + 1.403 * vf,
-                      yf - 0.344 * uf - 0.714 * vf,
+    return clamp(vec3(yf + 1.403 * vf,              //
+                      yf - 0.344 * uf - 0.714 * vf, //
                       yf + 1.770 * uf),
                  vec3(0.0), vec3(1.0));
 }

@@ -76,8 +76,13 @@ LCEVC_API void LCEVC_DestroyDecoder(LCEVC_DecoderHandle decHandle)
 
     std::unique_ptr<DecoderContext> ptr = DecoderContext::decoderPoolRemove(decHandle.hdl);
 
-    // Clear out pools
     ptr->lock();
+    // Stop pending work and wait for active frames before releasing their picture buffers.
+    if (ptr->isPipelineValid()) {
+        ptr->pipeline()->synchronizeDecoder(kInvalidTimestamp, true);
+    }
+
+    // Clear out pools while the pipeline is still available to free pictures.
     ptr->releasePools();
     ptr->unlock();
 
@@ -697,20 +702,9 @@ LCEVC_API
 LCEVC_ReturnCode LCEVC_RenderReceivePicture(LCEVC_DecoderHandle decHandle, LCEVC_PictureHandle* output,
                                             LCEVC_RenderReceiveInformation* renderReceiveInformation)
 {
-    if ((output == nullptr) || (renderReceiveInformation == nullptr)) {
-        return LCEVC_InvalidParam;
-    }
-
-    return withLockedDecoder(decHandle.hdl, [&output, renderReceiveInformation](DecoderContext* context) {
-        LdpRenderReceiveInformation receiveInfo;
-        const LdpPicture* const outputPicture = context->pipeline()->renderReceivePicture(receiveInfo);
-        if (outputPicture == nullptr) {
-            return LCEVC_Again;
-        }
-
-        VNTraceInstant("RenderReceivePicture");
-        *toLdpRenderReceiveInformationPtr(renderReceiveInformation) = receiveInfo;
-        output->hdl = context->picturePool().reverseLookup(outputPicture).handle;
-        return LCEVC_Success;
-    });
+    // Not yet implemented - no pipeline returns rendered pictures
+    VNUnused(decHandle);
+    VNUnused(output);
+    VNUnused(renderReceiveInformation);
+    return LCEVC_NotSupported;
 }

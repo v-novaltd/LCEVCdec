@@ -16,16 +16,17 @@
 
 #include "specialization_ids.h"
 
-layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
-       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X, local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
 const uint kTemporalStateCount = 2; // Inter and intra.
 
 // Each uvec2 contains four packed signed-16 values, matching one DD TU or one DDS group.
+// clang-format off
 layout(std430, set = 0, binding = 0) buffer restrict readonly CoefficientBuffer {
     uvec2 coefficients[];
 };
+// clang-format on
 
 struct DequantParameterGroups
 {
@@ -37,15 +38,20 @@ struct DequantParameterGroups
 
 // Dequant::stepWidth then Dequant::offset, each arranged as [temporal state][transform layer].
 // Four packed signed-16 values form each group; the layout exactly matches the CPU structure.
+// clang-format off
 layout(std140, set = 0, binding = 1) uniform DequantBuffer {
     DequantParameterGroups stepWidths[kTemporalStateCount];
     DequantParameterGroups offsets[kTemporalStateCount];
 };
+// clang-format on
 
+// clang-format off
 layout(std430, set = 0, binding = 2) buffer restrict writeonly ResidualBuffer {
     uvec2 residuals[];
 };
+// clang-format on
 
+// clang-format off
 layout(push_constant) uniform consts {
     uint transformUnitCount; // Number of TUs dispatched.
     uint layerCount;         // 4 for DD, 16 for DDS.
@@ -55,6 +61,7 @@ layout(push_constant) uniform consts {
     uint deblockCorner;      // DDS corner coefficient.
     uint deblockSide;        // DDS side coefficient.
 };
+    // clang-format on
 
 #include "common.glsl"
 #include "dequant_transform.glsl"
@@ -72,23 +79,20 @@ uvec2 packS16x4(ivec4 values)
 void processDD(uint payloadIndex)
 {
     residuals[payloadIndex] = packS16x4(dequantInverseTransformDD(
-        unpackS16x4(coefficients[payloadIndex]),
-        unpackS16x4(stepWidths[temporalSignal].group0),
+        unpackS16x4(coefficients[payloadIndex]), unpackS16x4(stepWidths[temporalSignal].group0),
         unpackS16x4(offsets[temporalSignal].group0), scalingMode));
 }
 
-ivec4 dequantInverseTransformDDSGroup(uint payloadIndex, uvec2 packedStepWidths,
-                                      uvec2 packedOffsets)
+ivec4 dequantInverseTransformDDSGroup(uint payloadIndex, uvec2 packedStepWidths, uvec2 packedOffsets)
 {
     return dequantInverseTransformDDSFirstPass(unpackS16x4(coefficients[payloadIndex]),
-                                               unpackS16x4(packedStepWidths),
-                                               unpackS16x4(packedOffsets));
+                                               unpackS16x4(packedStepWidths), unpackS16x4(packedOffsets));
 }
 
 void processDDS(uint payloadIndex)
 {
-    const ivec4 group0 = dequantInverseTransformDDSGroup(
-        payloadIndex, stepWidths[temporalSignal].group0, offsets[temporalSignal].group0);
+    const ivec4 group0 = dequantInverseTransformDDSGroup(payloadIndex, stepWidths[temporalSignal].group0,
+                                                         offsets[temporalSignal].group0);
     const ivec4 group1 = dequantInverseTransformDDSGroup(
         payloadIndex + 1, stepWidths[temporalSignal].group1, offsets[temporalSignal].group1);
     const ivec4 group2 = dequantInverseTransformDDSGroup(
@@ -98,14 +102,14 @@ void processDDS(uint payloadIndex)
 
     // Transpose the first-pass groups so each second pass receives one transform component from
     // every group. Values remain signed 32-bit because DDS does not saturate between its passes.
-    ivec4 output0 = inverseTransformDDSSecondPass(
-        ivec4(group0.x, group1.x, group2.x, group3.x), scalingMode);
-    ivec4 output1 = inverseTransformDDSSecondPass(
-        ivec4(group0.y, group1.y, group2.y, group3.y), scalingMode);
-    ivec4 output2 = inverseTransformDDSSecondPass(
-        ivec4(group0.z, group1.z, group2.z, group3.z), scalingMode);
-    ivec4 output3 = inverseTransformDDSSecondPass(
-        ivec4(group0.w, group1.w, group2.w, group3.w), scalingMode);
+    ivec4 output0 =
+        inverseTransformDDSSecondPass(ivec4(group0.x, group1.x, group2.x, group3.x), scalingMode);
+    ivec4 output1 =
+        inverseTransformDDSSecondPass(ivec4(group0.y, group1.y, group2.y, group3.y), scalingMode);
+    ivec4 output2 =
+        inverseTransformDDSSecondPass(ivec4(group0.z, group1.z, group2.z, group3.z), scalingMode);
+    ivec4 output3 =
+        inverseTransformDDSSecondPass(ivec4(group0.w, group1.w, group2.w, group3.w), scalingMode);
 
     if (deblockEnabled != 0u) {
         deblockDDS(output0, output1, output2, output3, deblockCorner, deblockSide);
@@ -120,14 +124,14 @@ void processDDS(uint payloadIndex)
 void main()
 {
     const uint transformUnit = gl_GlobalInvocationID.x;
-    if(transformUnit >= transformUnitCount) {
+    if (transformUnit >= transformUnitCount) {
         return;
     }
 
     const uint payloadVectorsPerTransformUnit = layerCount >> 2;
     const uint payloadIndex = transformUnit * payloadVectorsPerTransformUnit;
 
-    if(layerCount == kDequantTransformDDLayerCount) {
+    if (layerCount == kDequantTransformDDLayerCount) {
         processDD(payloadIndex);
     } else {
         processDDS(payloadIndex);

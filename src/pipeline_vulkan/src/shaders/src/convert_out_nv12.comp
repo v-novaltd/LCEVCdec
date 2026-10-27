@@ -19,8 +19,7 @@
 
 #include "specialization_ids.h"
 
-layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
-       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X, local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
 #include "convert_out_common.glsl"
@@ -45,15 +44,12 @@ void main()
     } else {
         const ivec2 y00 = loadInternalPair(blockX << 1, y, containerStrideIn, containerOffsetIn,
                                            containerStrideTemporal0, containerOffsetTemporal0);
-        const ivec2 y01 = loadInternalPair((blockX << 1) + 1, y, containerStrideIn,
-                                           containerOffsetIn, containerStrideTemporal0,
-                                           containerOffsetTemporal0);
-        const ivec2 y10 = loadInternalPair(blockX << 1, y + 1, containerStrideIn,
-                                           containerOffsetIn, containerStrideTemporal0,
-                                           containerOffsetTemporal0);
-        const ivec2 y11 = loadInternalPair((blockX << 1) + 1, y + 1, containerStrideIn,
-                                           containerOffsetIn, containerStrideTemporal0,
-                                           containerOffsetTemporal0);
+        const ivec2 y01 = loadInternalPair((blockX << 1) + 1, y, containerStrideIn, containerOffsetIn,
+                                           containerStrideTemporal0, containerOffsetTemporal0);
+        const ivec2 y10 = loadInternalPair(blockX << 1, y + 1, containerStrideIn, containerOffsetIn,
+                                           containerStrideTemporal0, containerOffsetTemporal0);
+        const ivec2 y11 = loadInternalPair((blockX << 1) + 1, y + 1, containerStrideIn, containerOffsetIn,
+                                           containerStrideTemporal0, containerOffsetTemporal0);
         outputY0 = fromInternalTo8bit(ivec4(y00, y01));
         outputY1 = fromInternalTo8bit(ivec4(y10, y11));
     }
@@ -65,6 +61,5 @@ void main()
     const ivec2 v = loadInternalPair(blockX, blockY, containerStrideV, containerOffsetV,
                                      containerStrideTemporal2, containerOffsetTemporal2);
     const uvec4 uv = fromInternalTo8bit(ivec4(u.x, v.x, u.y, v.y));
-    dst.samples[uint(containerOffsetUVOut + blockY * containerStrideUVOut + blockX)] =
-        pack8bit(uv);
+    dst.samples[uint(containerOffsetUVOut + blockY * containerStrideUVOut + blockX)] = pack8bit(uv);
 }

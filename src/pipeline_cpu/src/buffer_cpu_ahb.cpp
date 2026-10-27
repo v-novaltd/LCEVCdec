@@ -12,7 +12,7 @@
  * ANY ONWARD DISTRIBUTION, WHETHER STAND-ALONE OR AS PART OF ANY OTHER PROJECT, REMAINS SUBJECT TO
  * THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE. */
 
-#include "hardware_buffer_cpu.h"
+#include "buffer_cpu_ahb.h"
 
 #include <LCEVC/common/log.h>
 #include <LCEVC/pipeline/picture_layout.h>
@@ -32,9 +32,14 @@
 
 namespace lcevc_dec::pipeline_cpu {
 
-BufferAHardware::~BufferAHardware() = default;
+// HAL_PIXEL_FORMAT_YCrCb_420_SP (NV21), which the NDK AHardwareBuffer enum lacks.
+// Accepted alongside flexible YUV: some MediaTek composers only scan out
+// CPU-written NV21 buffers correctly when allocated with the explicit format.
+static constexpr uint32_t kFormatYCrCb420SP = 0x11;
 
-bool BufferAHardware::map(LdpBufferMapping* mapping, int32_t offset, uint32_t size, LdpAccess access)
+BufferCPUAhb::~BufferCPUAhb() = default;
+
+bool BufferCPUAhb::map(LdpBufferMapping* mapping, int32_t offset, uint32_t size, LdpAccess access)
 {
     // Best effort: luma base only. Use the picture's plane descriptors for
     // plane-accurate access.
@@ -49,26 +54,26 @@ bool BufferAHardware::map(LdpBufferMapping* mapping, int32_t offset, uint32_t si
     return true;
 }
 
-void BufferAHardware::unmap(const LdpBufferMapping* mapping) { VNUnused(mapping); }
+void BufferCPUAhb::unmap(const LdpBufferMapping* mapping) { VNUnused(mapping); }
 
-void BufferAHardware::copyIn(uint32_t dstOffset, const void* src, uint32_t size)
+void BufferCPUAhb::copyIn(uint32_t dstOffset, const void* src, uint32_t size)
 {
     VNUnused(dstOffset);
     VNUnused(src);
     VNUnused(size);
-    VNLogError("BufferAHardware: copyIn is not supported");
+    VNLogError("BufferCPUAhb: copyIn is not supported");
 }
 
-void BufferAHardware::copyOut(void* dst, uint32_t srcOffset, uint32_t size)
+void BufferCPUAhb::copyOut(void* dst, uint32_t srcOffset, uint32_t size)
 {
     VNUnused(dst);
     VNUnused(srcOffset);
     VNUnused(size);
-    VNLogError("BufferAHardware: copyOut is not supported");
+    VNLogError("BufferCPUAhb: copyOut is not supported");
 }
 
-BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareBuffer* hardwareBuffer,
-                                       const LdpPictureDesc& desc, LdpPicturePlaneDesc planesOut[])
+BufferCPUAhb* BufferCPUAhb::create(LdcMemoryAllocator* allocator, AHardwareBuffer* hardwareBuffer,
+                                   const LdpPictureDesc& desc, LdpPicturePlaneDesc planesOut[])
 {
     if (hardwareBuffer == nullptr) {
         return nullptr;
@@ -76,13 +81,13 @@ BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareB
 
     // AHardwareBuffer_lockPlanes requires API 29
     if (AHardwareBuffer_lockPlanes == nullptr) {
-        VNLogDebug("bufferAHardwareCreate: AHardwareBuffer_lockPlanes requires API 29");
+        VNLogDebug("BufferCPUAhb::create: AHardwareBuffer_lockPlanes requires API 29");
         return nullptr;
     }
 
     // Only 8-bit NV12 output is currently supported for direct decode
     if (desc.colorFormat != LdpColorFormatNV12_8) {
-        VNLogWarning("bufferAHardwareCreate: unsupported picture format %d - only NV12_8 is "
+        VNLogWarning("BufferCPUAhb::create: unsupported picture format %d - only NV12_8 is "
                      "supported for direct decode",
                      static_cast<int>(desc.colorFormat));
         return nullptr;
@@ -90,9 +95,9 @@ BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareB
 
     AHardwareBuffer_Desc bufferDesc{};
     AHardwareBuffer_describe(hardwareBuffer, &bufferDesc);
-    if (bufferDesc.format != AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420 || bufferDesc.width < desc.width ||
-        bufferDesc.height < desc.height) {
-        VNLogWarning("bufferAHardwareCreate: buffer %ux%u format 0x%x cannot back a %ux%u NV12 "
+    if ((bufferDesc.format != AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420 && bufferDesc.format != kFormatYCrCb420SP) ||
+        bufferDesc.width < desc.width || bufferDesc.height < desc.height) {
+        VNLogWarning("BufferCPUAhb::create: buffer %ux%u format 0x%x cannot back a %ux%u NV12 "
                      "picture",
                      bufferDesc.width, bufferDesc.height, bufferDesc.format, desc.width, desc.height);
         return nullptr;
@@ -100,14 +105,14 @@ BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareB
 
     AHardwareBuffer_acquire(hardwareBuffer);
 
-    // Request read as well as write: bufferAHardwareDestroy() reads this
+    // Request read as well as write: destroy() reads this
     // mapping back to swap chroma order before unlocking.
     AHardwareBuffer_Planes planes{};
     if (AHardwareBuffer_lockPlanes(hardwareBuffer,
                                    AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
                                    -1, nullptr, &planes) != 0 ||
         planes.planeCount < 3) {
-        VNLogWarning("bufferAHardwareCreate: AHardwareBuffer_lockPlanes failed (planes=%u)",
+        VNLogWarning("BufferCPUAhb::create: AHardwareBuffer_lockPlanes failed (planes=%u)",
                      planes.planeCount);
         AHardwareBuffer_release(hardwareBuffer);
         return nullptr;
@@ -124,7 +129,7 @@ BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareB
     const bool semiPlanar =
         cb.pixelStride == 2 && cr.pixelStride == 2 && (crPtr == cbPtr + 1 || cbPtr == crPtr + 1);
     if (!semiPlanar) {
-        VNLogWarning("bufferAHardwareCreate: buffer chroma layout is not semi-planar "
+        VNLogWarning("BufferCPUAhb::create: buffer chroma layout is not semi-planar "
                      "(pixelStride=%u/%u) - falling back to copied render",
                      cb.pixelStride, cr.pixelStride);
         AHardwareBuffer_unlock(hardwareBuffer, nullptr);
@@ -141,9 +146,9 @@ BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareB
     const uint32_t size = luma.rowStride * desc.height + cb.rowStride * (desc.height / 2);
 
     LdcMemoryAllocation allocation{};
-    VNAllocate(allocator, &allocation, BufferAHardware, "BufferAHardware");
-    auto* buffer = new (VNAllocationPtr(allocation, BufferAHardware))
-        BufferAHardware(hardwareBuffer, lumaBase, size); // NOLINT(cppcoreguidelines-owning-memory)
+    VNAllocate(allocator, &allocation, BufferCPUAhb, "BufferCPUAhb");
+    auto* buffer = new (VNAllocationPtr(allocation, BufferCPUAhb))
+        BufferCPUAhb(hardwareBuffer, lumaBase, size); // NOLINT(cppcoreguidelines-owning-memory)
     buffer->m_allocation = allocation;
     buffer->m_chromaBase = planesOut[1].firstSample;
     buffer->m_chromaRowStride = cb.rowStride;
@@ -151,13 +156,13 @@ BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareB
     buffer->m_chromaRows = desc.height / 2;
     buffer->m_chromaSwap = chromaSwap;
 
-    VNLogDebug("bufferAHardwareCreate: locked %ux%u buffer (lumaStride=%u chromaStride=%u%s)",
+    VNLogDebug("BufferCPUAhb::create: locked %ux%u buffer (lumaStride=%u chromaStride=%u%s)",
                bufferDesc.width, bufferDesc.height, luma.rowStride, cb.rowStride,
                chromaSwap ? " NV21" : "");
     return buffer;
 }
 
-void bufferAHardwareDestroy(LdcMemoryAllocator* allocator, BufferAHardware* buffer)
+void BufferCPUAhb::destroy(LdcMemoryAllocator* allocator, BufferCPUAhb* buffer)
 {
     if (buffer == nullptr) {
         return;
@@ -189,7 +194,7 @@ void bufferAHardwareDestroy(LdcMemoryAllocator* allocator, BufferAHardware* buff
     AHardwareBuffer* hardwareBuffer = buffer->m_hardwareBuffer;
     LdcMemoryAllocation allocation = buffer->m_allocation;
 
-    buffer->~BufferAHardware();
+    buffer->~BufferCPUAhb();
     VNFree(allocator, &allocation);
 
     if (hardwareBuffer != nullptr) {
@@ -204,9 +209,9 @@ void bufferAHardwareDestroy(LdcMemoryAllocator* allocator, BufferAHardware* buff
 
 namespace lcevc_dec::pipeline_cpu {
 
-BufferAHardware::~BufferAHardware() = default;
+BufferCPUAhb::~BufferCPUAhb() = default;
 
-bool BufferAHardware::map(LdpBufferMapping* mapping, int32_t offset, uint32_t size, LdpAccess access)
+bool BufferCPUAhb::map(LdpBufferMapping* mapping, int32_t offset, uint32_t size, LdpAccess access)
 {
     VNUnused(mapping);
     VNUnused(offset);
@@ -224,24 +229,24 @@ bool BufferAHardware::map(LdpBufferMapping* mapping, int32_t offset, uint32_t si
     return false;
 }
 
-void BufferAHardware::unmap(const LdpBufferMapping* mapping) { VNUnused(mapping); }
+void BufferCPUAhb::unmap(const LdpBufferMapping* mapping) { VNUnused(mapping); }
 
-void BufferAHardware::copyIn(uint32_t dstOffset, const void* src, uint32_t size)
+void BufferCPUAhb::copyIn(uint32_t dstOffset, const void* src, uint32_t size)
 {
     VNUnused(dstOffset);
     VNUnused(src);
     VNUnused(size);
 }
 
-void BufferAHardware::copyOut(void* dst, uint32_t srcOffset, uint32_t size)
+void BufferCPUAhb::copyOut(void* dst, uint32_t srcOffset, uint32_t size)
 {
     VNUnused(dst);
     VNUnused(srcOffset);
     VNUnused(size);
 }
 
-BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareBuffer* hardwareBuffer,
-                                       const LdpPictureDesc& desc, LdpPicturePlaneDesc planesOut[])
+BufferCPUAhb* BufferCPUAhb::create(LdcMemoryAllocator* allocator, AHardwareBuffer* hardwareBuffer,
+                                   const LdpPictureDesc& desc, LdpPicturePlaneDesc planesOut[])
 {
     VNUnused(allocator);
     VNUnused(hardwareBuffer);
@@ -250,7 +255,7 @@ BufferAHardware* bufferAHardwareCreate(LdcMemoryAllocator* allocator, AHardwareB
     return nullptr;
 }
 
-void bufferAHardwareDestroy(LdcMemoryAllocator* allocator, BufferAHardware* buffer)
+void BufferCPUAhb::destroy(LdcMemoryAllocator* allocator, BufferCPUAhb* buffer)
 {
     VNUnused(allocator);
     VNUnused(buffer);

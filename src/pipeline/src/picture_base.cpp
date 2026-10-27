@@ -268,6 +268,17 @@ void PictureBase::setExternalPlaneDesc(const LdpPicturePlaneDesc* planeDescArr)
                 ldpPictureLayoutDefaultRowStride(&layout, plane, kBufferRowAlignment);
         }
     }
+
+    if (planeDescArr) {
+        // Keep plane offsets and size consistent with the external strides, as a pipeline may
+        // lay out its own copy of the picture (e.g. a Vulkan output buffer) from this layout.
+        uint32_t offset = 0;
+        for (uint32_t plane = 0; plane < ldpPictureLayoutPlanes(&layout); ++plane) {
+            layout.planeOffsets[plane] = offset;
+            offset += layout.rowStrides[plane] * ldpPictureLayoutPlaneHeight(&layout, plane);
+        }
+        layout.size = offset;
+    }
 }
 
 uint32_t PictureBase::getRequiredSize() const

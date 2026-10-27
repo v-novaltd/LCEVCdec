@@ -15,6 +15,7 @@
 #ifndef VN_LCEVC_PIPELINE_VULKAN_TYPES_VULKAN_H
 #define VN_LCEVC_PIPELINE_VULKAN_TYPES_VULKAN_H
 
+#include <LCEVC/enhancement/bitstream_types.h>
 #include <LCEVC/enhancement/cmdbuffer_gpu.h>
 #include <picture_vulkan.h>
 
@@ -25,67 +26,67 @@ class VulkanFrameContext;
 
 struct VulkanConvertInArgs
 {
-    PictureVulkan* src;
-    PictureVulkan* dst;
-    uint8_t bitDepth; /**< Bit depth of the source picture */
-    LdeChroma chroma;
-    VulkanFrameContext* context{};
-};
-
-struct VulkanConvertOutArgs
-{
-    PictureVulkan* src;
-    PictureVulkan* dst;
-    uint8_t bitDepth; /**< Bit depth of the destination picture */
-    LdeChroma chroma;
-    float sharpenStrength{0.0f}; /**< Sharpen strength for output conversion (plane 0 only) */
-    PictureVulkan* temporal{};   /**< Optional temporal residuals to add before conversion */
-    bool addTemporal{false};
-    uint8_t numEnhancedPlanes{0};
+    PictureVulkan* src{};
+    PictureVulkan* dst{};
+    uint8_t bitDepth{}; // Bit depth of the source picture
+    LdeChroma chroma{CTMonochrome};
     VulkanFrameContext* context{};
 };
 
 struct VulkanUpscaleArgs
 {
-    PictureVulkan* src;
-    PictureVulkan* dst;
-    PictureVulkan* base; /**< Base picture used for predicted-average correction. */
-    uint8_t applyPA;     /**< Indicates that predicted-average should be off, 1D, or 2D. */
-    LdeScalingMode mode; /**< The type of scaling to perform (1D or 2D). */
-    bool loq1;           /**< Selects the descriptor state for LOQ1 or LOQ0. */
-    LdeChroma chroma;
+    PictureVulkan* src{};
+    PictureVulkan* dst{};
+    PictureVulkan* base{};        // Base picture used for predicted-average correction
+    LdeLOQIndex loq{LOQ0};        // Destination LOQ, either LOQ0 or LOQ1
+    LdeScalingMode mode{Scale0D}; // The type of scaling to perform (1D or 2D)
+    bool pa{}; // Enables predicted-average correction for the selected scaling mode
+    LdeChroma chroma{CTMonochrome};
     VulkanFrameContext* context{};
 };
 
 struct VulkanApplyCommonArgs
 {
-    PictureVulkan* picture; // nullptr for temporal apply
-    uint32_t planeWidth;
-    uint32_t planeHeight;
-    uint8_t plane;
-    uint8_t loq; // LOQ index (LOQ0 or LOQ1) for selecting the correct command buffer
-    LdeChroma chroma;
-    bool dds;           // true when layerCount == 16 (DDS), false for DD
-    bool tuRasterOrder; // true when tiles are in raster order
-    PictureVulkan* temporalPicture;
+    PictureVulkan* picture{}; // nullptr for temporal apply
+    uint32_t planeWidth{};
+    uint32_t planeHeight{};
+    uint8_t plane{};
+    LdeLOQIndex loq{LOQ0}; // LOQ index (LOQ0 or LOQ1) for selecting the correct command buffer
+    LdeChroma chroma{CTMonochrome};
+    LdeTransformType transform{TransformDD};
+    bool tuRasterOrder{}; // true when tiles are in raster order
+    PictureVulkan* temporalPicture{};
     VulkanFrameContext* context{};
 };
 
 struct VulkanApplyTileArgs
 {
-    PictureVulkan* picture; // nullptr for temporal apply
-    uint32_t planeWidth;
-    uint32_t planeHeight;
-    LdeCmdBufferGpu bufferGpu;
-    uint16_t tileX;
-    uint16_t tileY;
-    uint16_t tileWidth;
-    uint8_t plane;
-    uint8_t loq; // LOQ index (LOQ0 or LOQ1) for selecting the correct command buffer
-    bool highlightResiduals;
-    bool dds; // true when layerCount == 16 (DDS), false for DD
-    bool tuRasterOrder;
-    PictureVulkan* temporalPicture;
+    PictureVulkan* picture{}; // nullptr for temporal apply
+    uint32_t planeWidth{};
+    uint32_t planeHeight{};
+    LdeCmdBufferGpu bufferGpu{};
+    uint16_t tileX{};
+    uint16_t tileY{};
+    uint16_t tileWidth{};
+    uint8_t plane{};
+    LdeLOQIndex loq{LOQ0}; // LOQ index (LOQ0 or LOQ1) for selecting the correct command buffer
+    bool highlightResiduals{};
+    LdeTransformType transform{TransformDD};
+    bool tuRasterOrder{};
+    PictureVulkan* temporalPicture{};
+    VulkanFrameContext* context{};
+};
+
+struct VulkanConvertOutArgs
+{
+    PictureVulkan* src{};
+    PictureVulkan* dst{};
+    uint8_t bitDepth{}; // Bit depth of the destination picture
+    LdeChroma chroma{CTMonochrome};
+    float sharpenStrength{};   // Sharpen strength for output conversion (plane 0 only)
+    PictureVulkan* temporal{}; // Optional temporal residuals to add before conversion
+    bool addTemporal{false};
+    uint8_t numEnhancedPlanes{};
     VulkanFrameContext* context{};
 };
 

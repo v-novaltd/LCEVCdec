@@ -145,10 +145,10 @@ public:
 
 protected:
     // Run GPU upscale and return the dst buffer contents.
-    std::vector<uint8_t> runGPUUpscale(const uint8_t* srcData, uint32_t srcDataSize,
-                                       uint32_t srcWidth, uint32_t srcHeight, uint32_t dstWidth,
-                                       uint32_t dstHeight, const LdeKernel& kernel,
-                                       LdeScalingMode mode, bool predictedAverage) const
+    std::vector<uint8_t> runGPUUpscale(const uint8_t* srcData, uint32_t srcDataSize, uint32_t srcWidth,
+                                       uint32_t srcHeight, uint32_t dstWidth, uint32_t dstHeight,
+                                       const LdeKernel& kernel, LdeScalingMode mode,
+                                       bool predictedAverage, int selectedPlane = -1) const
     {
         const LdpColorFormat internalFormat = LdpColorFormatI420_16_LE;
 
@@ -160,13 +160,19 @@ protected:
         auto* dst = vulkan_test_util::allocateTestPictureAndBuffer(m_vulkanPipeline, internalFormat,
                                                                    dstWidth, dstHeight);
 
+        if (selectedPlane >= 0) {
+            auto* dstBuffer = static_cast<BufferVulkan*>(dst->buffer);
+            const std::vector<uint8_t> untouched(dstBuffer->size(), 0xa5);
+            dstBuffer->copyIn(0, untouched.data(), static_cast<uint32_t>(untouched.size()));
+        }
+
         VulkanUpscaleArgs upscaleArgs{};
         upscaleArgs.src = src;
         upscaleArgs.dst = dst;
         upscaleArgs.base = src; // base = src for PA
-        upscaleArgs.applyPA = predictedAverage;
+        upscaleArgs.pa = predictedAverage;
         upscaleArgs.mode = mode;
-        upscaleArgs.loq1 = false;
+        upscaleArgs.loq = LOQ0;
         upscaleArgs.chroma = LdeChroma::CT420;
 
         LdeKernel kernelCopy = kernel;
@@ -176,7 +182,13 @@ protected:
         EXPECT_NE(frameContext, nullptr);
         upscaleArgs.context = frameContext;
         compute.beginCompute(frameContext);
-        EXPECT_TRUE(m_vulkanPipeline->backend().upscaleFrame(&kernelCopy, &upscaleArgs));
+        EXPECT_TRUE(m_vulkanPipeline->backend().prepareUpscale(&upscaleArgs));
+        for (uint8_t plane = 0; plane < ldpPictureLayoutPlanes(&src->layout); ++plane) {
+            if (selectedPlane < 0 || plane == selectedPlane) {
+                EXPECT_TRUE(m_vulkanPipeline->backend().upscale(&kernelCopy, &upscaleArgs, plane));
+            }
+        }
+        frameContext->insertComputeBarrier("barrier_after_upscale");
         compute.endCompute(frameContext);
         m_vulkanPipeline->addCompletionContext(frameContext);
         m_vulkanPipeline->waitCompletionContextIdle();
@@ -342,6 +354,52 @@ TEST_P(PipelineVulkanUpscaleTest, CompareGPUvsCPUScalar)
                                               gpuSamples[x], cpuSamples[x]);
                     }
                 }
+            }
+        }
+    }
+}
+
+TEST_P(PipelineVulkanUpscaleTest, UpscalesOnlySelectedPlane)
+{
+    const auto& params = GetParam();
+    const uint32_t srcWidth = params.srcResolution.width;
+    const uint32_t srcHeight = params.srcResolution.height;
+    const uint32_t dstWidth = srcWidth * 2;
+    const uint32_t dstHeight = params.scalingMode == Scale2D ? srcHeight * 2 : srcHeight;
+    LdpPictureLayout srcLayout{};
+    LdpPictureLayout dstLayout{};
+    ldpPictureLayoutInitialize(&srcLayout, LdpColorFormatI420_16_LE, srcWidth, srcHeight,
+                               kBufferRowAlignment);
+    ldpPictureLayoutInitialize(&dstLayout, LdpColorFormatI420_16_LE, dstWidth, dstHeight,
+                               kBufferRowAlignment);
+
+    std::mt19937 rng(123456);
+    std::vector<uint8_t> srcData(ldpPictureLayoutSize(&srcLayout));
+    fillInternalNoise(reinterpret_cast<int16_t*>(srcData.data()),
+                      static_cast<uint32_t>(srcData.size() / sizeof(int16_t)), rng);
+    std::vector<uint8_t> cpuDst(ldpPictureLayoutSize(&dstLayout));
+    runCPUUpscale(srcData.data(), cpuDst.data(), srcLayout, dstLayout, params.kernel,
+                  params.scalingMode, params.predictedAverage);
+
+    for (uint8_t selected = 0; selected < ldpPictureLayoutPlanes(&srcLayout); ++selected) {
+        SCOPED_TRACE(testing::Message() << "selected plane " << unsigned(selected));
+        const auto gpuDst = runGPUUpscale(srcData.data(), static_cast<uint32_t>(srcData.size()),
+                                          srcWidth, srcHeight, dstWidth, dstHeight, params.kernel,
+                                          params.scalingMode, params.predictedAverage, selected);
+        for (uint8_t plane = 0; plane < ldpPictureLayoutPlanes(&dstLayout); ++plane) {
+            SCOPED_TRACE(testing::Message() << "destination plane " << unsigned(plane));
+            const uint32_t offset = dstLayout.planeOffsets[plane];
+            if (plane != selected) {
+                const auto begin = gpuDst.begin() + offset;
+                EXPECT_TRUE(std::all_of(begin, begin + ldpPictureLayoutPlaneSize(&dstLayout, plane),
+                                        [](uint8_t value) { return value == 0xa5; }));
+                continue;
+            }
+            const uint32_t rowBytes = ldpPictureLayoutRowSize(&dstLayout, plane);
+            for (uint32_t y = 0; y < ldpPictureLayoutPlaneHeight(&dstLayout, plane); ++y) {
+                const uint32_t rowOffset = offset + y * dstLayout.rowStrides[plane];
+                ASSERT_EQ(std::memcmp(gpuDst.data() + rowOffset, cpuDst.data() + rowOffset, rowBytes), 0)
+                    << "row " << y;
             }
         }
     }

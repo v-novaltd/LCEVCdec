@@ -57,14 +57,14 @@ BackendVulkan::BackendVulkan(bool renderingEnabled, int32_t deviceOverride,
     , m_deviceOverride(deviceOverride)
     , m_enableValidationLayers(enableValidationLayers)
     , m_timestampsLimit(timestampsLimit)
-    , m_compute(*this, contextCount > 0 ? static_cast<uint32_t>(contextCount) : 1u)
+    , m_compute(std::in_place, *this, contextCount > 0 ? static_cast<uint32_t>(contextCount) : 1u)
     , m_render(*this)
 {}
 
 void BackendVulkan::destroy()
 {
     waitDeviceIdle();
-    m_compute.destroy();
+    m_compute.reset();
     if (m_renderingEnabled) {
         m_render.destroy();
     }
@@ -695,7 +695,8 @@ bool BackendVulkan::initVulkan()
         return false;
     }
 
-    if (!m_compute.init()) {
+    if (!m_compute->init()) {
+        m_compute.reset();
         return false;
     }
 

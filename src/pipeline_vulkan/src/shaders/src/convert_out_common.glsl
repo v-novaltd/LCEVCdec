@@ -19,6 +19,7 @@
 layout(constant_id = SPECID_ADD_TEMPORAL) const bool addTemporal = false;
 layout(constant_id = SPECID_SHARPEN) const bool sharpen = false;
 
+// clang-format off
 layout(std430, set = 0, binding = 0) buffer restrict readonly SrcBuffer {
     uint samples[];
 } src;
@@ -30,9 +31,11 @@ layout(std430, set = 0, binding = 1) buffer restrict writeonly DstBuffer {
 layout(std430, set = 0, binding = 2) buffer restrict readonly TemporalBuffer {
     uint samples[];
 } temporal;
+// clang-format on
 
 // Keep this prefix in lockstep with PushConstantsConversion. The trailing U-source and
 // semiplanar-destination fields are used only by the fused NV12/NV21 and P010 shaders.
+// clang-format off
 layout(push_constant) uniform consts {
     int width;
     int height;
@@ -56,9 +59,9 @@ layout(push_constant) uniform consts {
     int containerStrideUVOut;
     int containerOffsetUVOut;
 };
+// clang-format on
 
-ivec2 loadInternalPair(int packedX, int py, int stride, int offset, int temporalStride,
-                       int temporalOffset)
+ivec2 loadInternalPair(int packedX, int py, int stride, int offset, int temporalStride, int temporalOffset)
 {
     const uint index = uint(offset + py * stride + packedX);
     ivec2 vals = unpack16bitInternals(src.samples[index]);
@@ -71,8 +74,7 @@ ivec2 loadInternalPair(int packedX, int py, int stride, int offset, int temporal
 
 int loadInternalValue(int px, int py, int stride, int offset, int temporalStride, int temporalOffset)
 {
-    const ivec2 vals =
-        loadInternalPair(px >> 1, py, stride, offset, temporalStride, temporalOffset);
+    const ivec2 vals = loadInternalPair(px >> 1, py, stride, offset, temporalStride, temporalOffset);
     return ((px & 1) == 0) ? vals.x : vals.y;
 }
 
@@ -86,29 +88,26 @@ int toOutputValue(int internalValue, int outputShift)
 int sharpenPixel(int px, int py, int outputShift)
 {
     const int center = toOutputValue(loadInternalValue(px, py, containerStrideIn, containerOffsetIn,
-                                                       containerStrideTemporal0,
-                                                       containerOffsetTemporal0),
+                                                       containerStrideTemporal0, containerOffsetTemporal0),
                                      outputShift);
     if (px <= 0 || px + 1 >= width || py <= 0 || py + 1 >= height) {
         return center;
     }
 
     const int left = toOutputValue(loadInternalValue(px - 1, py, containerStrideIn, containerOffsetIn,
-                                                     containerStrideTemporal0,
-                                                     containerOffsetTemporal0),
+                                                     containerStrideTemporal0, containerOffsetTemporal0),
                                    outputShift);
-    const int right = toOutputValue(loadInternalValue(px + 1, py, containerStrideIn, containerOffsetIn,
-                                                      containerStrideTemporal0,
-                                                      containerOffsetTemporal0),
-                                    outputShift);
+    const int right =
+        toOutputValue(loadInternalValue(px + 1, py, containerStrideIn, containerOffsetIn,
+                                        containerStrideTemporal0, containerOffsetTemporal0),
+                      outputShift);
     const int top = toOutputValue(loadInternalValue(px, py - 1, containerStrideIn, containerOffsetIn,
-                                                    containerStrideTemporal0,
-                                                    containerOffsetTemporal0),
+                                                    containerStrideTemporal0, containerOffsetTemporal0),
                                   outputShift);
-    const int bottom = toOutputValue(loadInternalValue(px, py + 1, containerStrideIn,
-                                                       containerOffsetIn, containerStrideTemporal0,
-                                                       containerOffsetTemporal0),
-                                     outputShift);
+    const int bottom =
+        toOutputValue(loadInternalValue(px, py + 1, containerStrideIn, containerOffsetIn,
+                                        containerStrideTemporal0, containerOffsetTemporal0),
+                      outputShift);
     const int weight = (center << 2) - (left + right + top + bottom);
 
     // Preserve the full signed product: 14-bit output can overflow a 32-bit multiply here.

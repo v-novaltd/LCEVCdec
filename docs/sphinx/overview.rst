@@ -442,6 +442,32 @@ The events are generated with the various API functions - and queued up to a sep
 * An event is generated when the decoder is about to be destroyed.
 * An event is generated for any implementation specific log messages.
 
+Events are enabled with the ``events`` configuration option and delivered to a callback registered with :cpp:func:`LCEVC_SetDecoderEventCallback`, both before :cpp:func:`LCEVC_InitializeDecoder`. For example, to route the decoder's log messages to an integration's own logger:
+
+.. code-block:: C++
+
+  void logEventCallback(LCEVC_DecoderHandle decHandle, LCEVC_Event event, LCEVC_PictureHandle picHandle,
+                        const LCEVC_DecodeInformation* decodeInformation, const uint8_t* data,
+                        uint32_t dataSize, void* userData)
+  {
+      if (event != LCEVC_Log) {
+          return;
+      }
+      // 'data' is a null-terminated string prefixed with the log level ('1' Fatal to '6' Verbose)
+      // and a space, e.g. "3 Something went wrong"
+      const std::string_view messageWithLevel(reinterpret_cast<const char*>(data), dataSize);
+      const char level = messageWithLevel.at(0);
+      const std::string_view message = messageWithLevel.substr(2);
+      fprintf(level <= '3' ? stderr : stdout, "LCEVC: %s\n", message.data());
+  }
+
+  const std::array<int32_t, 1> enabledEvents = {LCEVC_Log};
+  LCEVC_ConfigureDecoderIntArray(decoder, "events", enabledEvents.size(), enabledEvents.data());
+  LCEVC_SetDecoderEventCallback(decoder, logEventCallback, nullptr);
+  LCEVC_InitializeDecoder(decoder);
+
+At the Debug and Verbose levels the message also includes the source file and line, e.g. ``"5 decoder.cpp:42: ..."``. The ``log_level`` option controls which messages are generated.
+
 Handles
 -------
 

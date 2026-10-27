@@ -45,18 +45,14 @@ namespace {
         pipeline->releasePicture(picture);
     }
 
-    //// ConvertToInternal
-    //
-    // Copy incoming picture plane to internal fixed point surface format
-    //
-    bool vConvertToInternal(PipelineVulkan* pipeline, VulkanFrameContext* context)
+    // Bind and upload the base picture, compacting external planes when needed.
+    bool vPrepareBaseInput(VulkanFrameContext* context)
     {
-        VNTraceScopedNamedArgs("vulkan:vConvertToInternal", "timestamp", context->getFrame()->timestamp);
         auto* srcPicture = fromPipeline(context->getFrame()->basePicture);
         if (!srcPicture) {
             return false;
         }
-        // external base check
+
         LdpPictureBufferDesc exDesc{};
         const bool hasBufferDesc = srcPicture->getBufferDesc(exDesc);
         LdpPicturePlaneDesc srcPlaneDescs[kLdpPictureMaxNumPlanes]{};
@@ -122,6 +118,26 @@ namespace {
             }
         }
 
+        return true;
+    }
+
+    // Convert the prepared base picture to internal fixed point.
+    bool vConvertToInternal(PipelineVulkan* pipeline, VulkanFrameContext* context,
+                            const std::array<bool, kLdpPictureMaxNumPlanes>& selectedPhysicalPlanes)
+    {
+        VNTraceScopedNamedArgs("vulkan:vConvertToInternal", "timestamp", context->getFrame()->timestamp);
+        auto* srcPicture = fromPipeline(context->getFrame()->basePicture);
+        if (!srcPicture) {
+            return false;
+        }
+        bool conversionNeeded = false;
+        for (uint8_t plane = 0; plane < ldpPictureLayoutPlanes(&srcPicture->layout); ++plane) {
+            conversionNeeded |= selectedPhysicalPlanes[plane];
+        }
+        if (!conversionNeeded) {
+            return true;
+        }
+
         LdpPictureDesc srcDesc;
         srcPicture->getDesc(srcDesc);
         srcDesc.colorFormat = pipeline->chromaToColorFormat(pipeline->getChroma());
@@ -152,22 +168,62 @@ namespace {
         args.chroma = pipeline->getChroma();
         args.context = context;
 
-        const bool converted =
-            VNTraceFuncNamed("vulkan:input.recordConversion", pipeline->backend().convertIn(&args));
-        if (!converted) {
-            VNLogError("Conversion to internal failed");
+        if (!pipeline->backend().prepareConvertIn(&args)) {
+            VNLogError("Failed to prepare ConvertIn descriptors");
             return false;
         }
+        for (uint8_t plane = 0; plane < ldpPictureLayoutPlanes(&srcPicture->layout); ++plane) {
+            if (!selectedPhysicalPlanes[plane]) {
+                continue;
+            }
+            if (!VNTraceFuncNamed("vulkan:input.recordConversion",
+                                  pipeline->backend().convertIn(&args, plane))) {
+                VNLogError("Conversion to internal failed for physical plane %u", plane);
+                return false;
+            }
+        }
+        context->insertComputeBarrier("barrier_after_convert_in");
 
         context->getFrame()->setIntermediatePicture(LOQ2, dstPicture);
 
         return true;
     }
 
-    //// ConvertFromInternal
-    //
-    // Concert a picture plane from internal fixed point to output picture pixel format.
-    //
+    // Allocate the i16 destination once before recording plane upscales.
+    PictureVulkan* vPrepareUpscaleDestination(PipelineVulkan* pipeline, VulkanFrameContext* context,
+                                              PictureVulkan* srcPicture, LdeScalingMode mode,
+                                              uint8_t destination)
+    {
+        if ((mode != Scale1D && mode != Scale2D) || !srcPicture) {
+            return nullptr;
+        }
+        LdpPictureDesc desc{};
+        srcPicture->getDesc(desc);
+        desc.colorFormat = pipeline->chromaToColorFormat(pipeline->getChroma());
+        desc.width *= 2;
+        if (mode == Scale2D) {
+            desc.height *= 2;
+        }
+
+        PictureVulkan* dstPicture = acquireIntermediatePicture(pipeline);
+        if (!dstPicture) {
+            return nullptr;
+        }
+        if (!dstPicture->setDescAndBind(desc, pipeline::BufferUsageInternal)) {
+            discardIntermediatePicture(pipeline, dstPicture);
+            return nullptr;
+        }
+        auto* dstBuffer = fromPipeline(dstPicture->buffer);
+        if (!dstBuffer || dstBuffer->getVkBuffer() == VK_NULL_HANDLE || dstBuffer->size() == 0) {
+            discardIntermediatePicture(pipeline, dstPicture);
+            return nullptr;
+        }
+        context->getFrame()->addIntermediatePicture(dstPicture);
+        context->getFrame()->setIntermediatePicture(destination, dstPicture);
+        return dstPicture;
+    }
+
+    // Convert the internal picture to the requested output format.
     bool vConvertFromInternal(PipelineVulkan* pipeline, VulkanFrameContext* context,
                               uint32_t bitDepth, uint8_t intermediatePtr)
     {
@@ -232,13 +288,7 @@ namespace {
         return true;
     }
 
-    //// Upsample
-    //
-    // Upscale (1D or 2D) for one plane of picture.
-    //
-    // Inputs and outputs may be fixed point or 'external' format if no residuals are being applied.
-    //
-
+    // Upscale an internal picture by one LOQ.
     bool vUpscale(PipelineVulkan* pipeline, VulkanFrameContext* context, LdeLOQIndex loq, uint8_t intermediatePtr)
     {
         VNTraceScopedNamedArgs("vulkan:vUpscale", "timestamp", context->getFrame()->timestamp,
@@ -250,22 +300,21 @@ namespace {
         }
 
         const uint8_t destination = intermediatePtr - 1;
-        PictureVulkan* dstPicture = acquireIntermediatePicture(pipeline);
+        const LdeScalingMode mode = context->getFrame()->globalConfig->scalingModes[loq - 1];
+        PictureVulkan* dstPicture =
+            vPrepareUpscaleDestination(pipeline, context, srcPicture, mode, destination);
         if (dstPicture == nullptr) {
-            VNLogError("allocatePicture failed for Upscale");
+            VNLogError("Failed to prepare Upscale destination");
             return false;
         }
-
-        context->getFrame()->setIntermediatePicture(destination, dstPicture);
-        context->getFrame()->addIntermediatePicture(dstPicture);
 
         VulkanUpscaleArgs upscaleArgs{};
         upscaleArgs.src = srcPicture;
         upscaleArgs.dst = dstPicture;
-        upscaleArgs.applyPA =
-            static_cast<uint8_t>(context->getFrame()->globalConfig->predictedAverageEnabled);
-        upscaleArgs.mode = context->getFrame()->globalConfig->scalingModes[loq - 1];
-        upscaleArgs.loq1 = (loq == 2);
+        upscaleArgs.base = srcPicture;
+        upscaleArgs.pa = context->getFrame()->globalConfig->predictedAverageEnabled;
+        upscaleArgs.mode = mode;
+        upscaleArgs.loq = static_cast<LdeLOQIndex>(loq - 1);
         upscaleArgs.chroma = pipeline->getChroma();
         upscaleArgs.context = context;
 
@@ -273,23 +322,25 @@ namespace {
         VNLogDebug("taskUpsample timestamp:%" PRIx64 " loq:%d", context->getFrame()->timestamp,
                    (uint32_t)loq);
 
-        const bool upscaleRecorded = VNTraceFuncNamed(
-            "vulkan:upscale.recordCommands",
-            pipeline->backend().upscaleFrame(&context->getFrame()->globalConfig->kernel, &upscaleArgs));
-        if (!upscaleRecorded) {
-            VNLogError("Upsample failed");
+        if (!pipeline->backend().prepareUpscale(&upscaleArgs)) {
+            VNLogError("Failed to prepare Upscale descriptors");
             return false;
         }
+        for (uint8_t plane = 0; plane < ldpPictureLayoutPlanes(&srcPicture->layout); ++plane) {
+            if (!VNTraceFuncNamed("vulkan:upscale.recordCommands",
+                                  pipeline->backend().upscale(&context->getFrame()->globalConfig->kernel,
+                                                              &upscaleArgs, plane))) {
+                VNLogError("Upsample failed for plane %u", plane);
+                return false;
+            }
+        }
+        context->insertComputeBarrier(mode == Scale2D ? "barrier_after_upscale_2d"
+                                                      : "barrier_after_upscale_1d");
 
         return true;
     }
 
-    //// ApplyCmdBufferDirect
-    //
-    // Apply a generated GPU command buffer to directly to output plane. (No Temporal)
-    //
-    // NB: The output plane will be in 'internal' fixed' point format
-    //
+    // Bind the resources shared by apply dispatches at this LOQ.
     bool vApplyCommon(PipelineVulkan* pipeline, VulkanFrameContext* context,
                       LdpEnhancementTile* enhancementTile, uint8_t intermediatePtr, bool applyDirect)
     {
@@ -315,6 +366,7 @@ namespace {
         return true;
     }
 
+    // Apply a tile directly to the internal picture.
     bool vApplyCmdBufferDirect(PipelineVulkan* pipeline, VulkanFrameContext* context,
                                LdpEnhancementTile* enhancementTile, uint8_t intermediatePtr)
     {
@@ -338,11 +390,7 @@ namespace {
         return true;
     }
 
-    //// ApplyCmdBufferTemporal
-    //
-    // Apply a generated GPU command buffer to a temporal buffer.
-    //
-
+    // Apply a tile to the temporal buffer.
     bool vApplyCmdBufferTemporal(PipelineVulkan* pipeline, VulkanFrameContext* context,
                                  LdpEnhancementTile* enhancementTile, uint8_t intermediatePtr)
     {
@@ -368,15 +416,20 @@ namespace {
         return true;
     }
 
-    //// VulkanDecode
-    //
-    // Decode the frame
-    //
     struct TaskVulkanDecodeData
     {
         PipelineVulkan* pipeline;
         FrameVulkan* frame;
         uint64_t previousTimestamp;
+    };
+
+    // Every exit must hand off the submission turn, including pre-submission failures.
+    // GPU completion remains responsible for publishing successful frame outcomes.
+    struct ScopedSubmissionTurn
+    {
+        PipelineVulkan* pipeline;
+        FrameVulkan* frame;
+        ~ScopedSubmissionTurn() { pipeline->completeSubmissionTurn(frame); }
     };
 
     void abortVulkanTask(PipelineVulkan* pipeline, FrameVulkan* frame, VulkanFrameContext* frameContext)
@@ -400,6 +453,7 @@ namespace {
         const TaskVulkanDecodeData& data{VNTaskData(task, TaskVulkanDecodeData)};
         PipelineVulkan* const pipeline{data.pipeline};
         FrameVulkan* frame{data.frame};
+        const ScopedSubmissionTurn submissionTurn{pipeline, frame};
         VNTraceScopedNamedArgs("vulkan:taskVulkanDecode", "timestamp", frame->timestamp);
 
         // Skip flushed or skipped frames before admitting them to Vulkan. Once admitted, the task
@@ -471,14 +525,18 @@ namespace {
             return nullptr;
         }
 
-        //// Input conversion
-        if (!vConvertToInternal(pipeline, frameContext)) {
+        if (!vPrepareBaseInput(frameContext)) {
+            VNLogError("vPrepareBaseInput failed");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
+        std::array<bool, kLdpPictureMaxNumPlanes> selectedPhysicalPlanes{};
+        selectedPhysicalPlanes.fill(true);
+        if (!vConvertToInternal(pipeline, frameContext, selectedPhysicalPlanes)) {
             VNLogError("vConvertToInternal failed");
             abortVulkanTask(pipeline, frame, frameContext);
             return nullptr;
         }
-
-        //// LoQ 1
 
         // First upsample
         if (globalConfig.scalingModes[LOQ1] != Scale0D) {
@@ -528,8 +586,6 @@ namespace {
             }
             intermediatePtr--;
         }
-
-        //// LoQ 0
 
         const bool temporalEnabled = globalConfig.temporalEnabled && !frame->isPassthrough();
 
@@ -643,14 +699,8 @@ namespace {
         frame->taskAddSink(inputs, inputsCount, taskVulkanDecode, &data, sizeof(data), "VulkanDecode");
     }
 
-    //// VulkanPassthrough
-    //
-    // Vulkan-native unscaled passthrough: convertIn -> convertOut on the GPU,
-    // skipping upscale/apply.  Used when there's no LCEVC global config (e.g.
-    // VVC-only stream) or pass-through is forced unscaled.  The scaled
-    // pass-through case is handled by the enhancement task graph already
-    // (skipped tiles -> upscale-only).
-    //
+    // Unscaled passthrough converts in and out on the GPU without upscale or apply.
+    // Scaled passthrough uses the enhancement task graph.
     void* taskVulkanPassthrough(LdcTask* task, const LdcTaskPart* /*part*/)
     {
         VNTraceScopedNamed("vulkan:taskVulkanPassthrough");
@@ -658,6 +708,7 @@ namespace {
         const TaskVulkanDecodeData& data{VNTaskData(task, TaskVulkanDecodeData)};
         PipelineVulkan* const pipeline{data.pipeline};
         FrameVulkan* const frame{data.frame};
+        const ScopedSubmissionTurn submissionTurn{pipeline, frame};
 
         if (pipeline->isFlushed(frame) || pipeline->isSkipped(frame)) {
             if (frame->setComputeOutcome(VulkanComputeOutcome::Cancelled)) {
@@ -693,7 +744,14 @@ namespace {
             return nullptr;
         }
 
-        if (!vConvertToInternal(pipeline, frameContext)) {
+        if (!vPrepareBaseInput(frameContext)) {
+            VNLogError("vPrepareBaseInput failed");
+            abortVulkanTask(pipeline, frame, frameContext);
+            return nullptr;
+        }
+        std::array<bool, kLdpPictureMaxNumPlanes> selectedPhysicalPlanes{};
+        selectedPhysicalPlanes.fill(true);
+        if (!vConvertToInternal(pipeline, frameContext, selectedPhysicalPlanes)) {
             VNLogError("vConvertToInternal failed");
             abortVulkanTask(pipeline, frame, frameContext);
             return nullptr;
@@ -729,24 +787,24 @@ namespace {
         VNTraceScopedNamedArgs("vulkan:generateTasksEnhancement", "timestamp", frame->timestamp,
                                "previousTimestamp", previousTimestamp);
 
-        // The event from the vulkan compute work finishing will mark this dependpecy as met via the
-        // pipeline's computeFinish thread
+        // The compute-finish thread marks this dependency when Vulkan work completes.
         LdcTaskDependency computeDone{frame->taskDependencyAdd()};
         frame->setComputeTaskDone(computeDone);
 
-        // Dependencies: base picture + output picture + one generateCmdBuffer task per tile
-        const uint32_t numDeps = 2 + numTiles;
+        // Prepare commands in parallel, but record and submit in frame task-generation order.
+        const uint32_t numDeps = 3 + numTiles;
         LdcTaskDependency* deps =
             static_cast<LdcTaskDependency*>(alloca(numDeps * sizeof(LdcTaskDependency)));
 
         deps[0] = frame->depBasePicture();
         deps[1] = frame->depOutputPicture();
+        deps[2] = pipeline->registerSubmissionTurn(frame);
 
         // Create a separate generateCmdBuffer task for each enhancement tile.
         // These have no input dependencies and can run concurrently.
         for (uint32_t i = 0; i < numTiles; ++i) {
             LdpEnhancementTile* et = frame->getEnhancementTile(i);
-            deps[2 + i] = addTaskGenerateCmdBufferGPU(pipeline, frame, et);
+            deps[3 + i] = addTaskGenerateCmdBufferGPU(pipeline, frame, et);
         }
 
         // The decode task depends on all generateCmdBuffer tasks completing
@@ -757,24 +815,19 @@ namespace {
         pipeline::addTaskBaseDone(pipeline, frame, &computeDone, 1);
     }
 
-    // Fill out a task group for a simple unscaled pass-through configuration.
-    //
-    // Runs a single Vulkan-native task that does convertIn -> convertOut on
-    // the GPU.  The previous implementation used the generic per-plane CPU
-    // passthrough task, which can't read Vulkan-resident base pictures or
-    // write to AHB-imported output images.
-    //
+    // Create a GPU task for unscaled passthrough; CPU tasks cannot access Vulkan pictures.
     void generateTasksPassthrough(PipelineVulkan* pipeline, FrameVulkan* frame)
     {
         VNTraceScopedNamedArgs("vulkan:generateTasksPassthrough", "timestamp", frame->timestamp);
 
-        // Wait for both base and output pictures, then run the GPU passthrough.
+        // Passthrough participates in the same submission order as enhanced frames.
         // Compute completion will signal computeTaskDone, which OutputDone /
         // BaseDone depend on (mirroring the enhancement path).
         LdcTaskDependency computeDone{frame->taskDependencyAdd()};
         frame->setComputeTaskDone(computeDone);
 
-        const LdcTaskDependency inputs[] = {frame->depBasePicture(), frame->depOutputPicture()};
+        const LdcTaskDependency inputs[] = {frame->depBasePicture(), frame->depOutputPicture(),
+                                            pipeline->registerSubmissionTurn(frame)};
         addTaskVulkanPassthrough(pipeline, frame, inputs, static_cast<uint32_t>(VNArraySize(inputs)));
 
         pipeline::addTaskOutputDone(pipeline, frame, &computeDone, 1);
@@ -783,14 +836,9 @@ namespace {
 
 } // anonymous namespace
 
-// Generate task graph for a frame
-//
 void generateTasks(PipelineVulkan* pipeline, FrameVulkan* frame, uint64_t previousTimestamp)
 {
-    // Choose pass-through or enhancement task graph generation.
-    //
-    // If the pass through is 'Scaled', then use the enhancement graph, which
-    // will just end up doing scaling as there is no enhancement data.
+    // Scaled passthrough uses the enhancement graph to run upscale without apply.
     if (frame->isPassthrough() &&
         (pipeline->configuration().passthroughMode != pipeline::PassthroughMode::Scale ||
          !frame->hasGoodConfig())) {

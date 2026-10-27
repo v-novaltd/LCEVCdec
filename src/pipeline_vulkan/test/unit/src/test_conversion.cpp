@@ -240,8 +240,9 @@ protected:
     // Run the GPU conversion and return the dst buffer contents.
     std::vector<uint8_t> runGPUConversion(const uint8_t* srcData, uint32_t srcDataSize,
                                           LdpColorFormat srcFormat, LdpColorFormat dstFormat,
-                                          uint32_t width, uint32_t height, bool toInternal, uint8_t bitDepth,
-                                          LdeChroma chroma, float sharpenStrength = 0.0f) const
+                                          uint32_t width, uint32_t height, bool toInternal,
+                                          uint8_t bitDepth, LdeChroma chroma, float sharpenStrength,
+                                          int selectedPhysicalPlane) const
     {
         auto* src =
             vulkan_test_util::allocateTestPictureAndBuffer(m_vulkanPipeline, srcFormat, width, height);
@@ -251,6 +252,10 @@ protected:
         auto* dst =
             vulkan_test_util::allocateTestPictureAndBuffer(m_vulkanPipeline, dstFormat, width, height);
         auto* dstBuffer = static_cast<BufferVulkan*>(dst->buffer);
+        if (selectedPhysicalPlane >= 0) {
+            const std::vector<uint8_t> untouched(dstBuffer->size(), 0xa5);
+            dstBuffer->copyIn(0, untouched.data(), static_cast<uint32_t>(untouched.size()));
+        }
 
         auto& compute = m_vulkanPipeline->backend().compute();
         VulkanFrameContext* frameContext = compute.acquireFrameContext(nullptr);
@@ -264,7 +269,13 @@ protected:
             args.bitDepth = bitDepth;
             args.chroma = chroma;
             args.context = frameContext;
-            EXPECT_TRUE(m_vulkanPipeline->backend().convertIn(&args));
+            EXPECT_TRUE(m_vulkanPipeline->backend().prepareConvertIn(&args));
+            for (uint8_t plane = 0; plane < ldpPictureLayoutPlanes(&src->layout); ++plane) {
+                if (selectedPhysicalPlane < 0 || plane == selectedPhysicalPlane) {
+                    EXPECT_TRUE(m_vulkanPipeline->backend().convertIn(&args, plane));
+                }
+            }
+            frameContext->insertComputeBarrier("barrier_after_convert_in");
         } else {
             VulkanConvertOutArgs args{};
             args.src = src;
@@ -490,7 +501,7 @@ TEST_P(PipelineVulkanConversionTest, CompareGPUvsCPUScalar)
     // Run GPU conversion
     std::vector<uint8_t> gpuDst =
         runGPUConversion(srcData.data(), srcSize, srcFormat, dstFormat, width, height,
-                         params.toInternal, params.bitDepth, params.chroma);
+                         params.toInternal, params.bitDepth, params.chroma, 0.0f, -1);
 
     // Run CPU scalar conversion
     std::vector<uint8_t> cpuDst(dstSize, 0);
@@ -519,6 +530,57 @@ TEST_P(PipelineVulkanConversionTest, CompareGPUvsCPUScalar)
                                               plane, y, x, width, height, gpuRow[x], cpuRow[x]);
                     }
                 }
+            }
+        }
+    }
+}
+
+class PipelineVulkanPlaneConversionTest : public PipelineVulkanConversionTest
+{};
+
+TEST_P(PipelineVulkanPlaneConversionTest, ConvertsOnlySelectedPhysicalPlane)
+{
+    const auto& params = GetParam();
+    const auto dstFormat = internalFormatForChroma(params.chroma);
+    LdpPictureLayout srcLayout{};
+    LdpPictureLayout dstLayout{};
+    ldpPictureLayoutInitialize(&srcLayout, params.externalFormat, params.resolution.width,
+                               params.resolution.height, kBufferRowAlignment);
+    ldpPictureLayoutInitialize(&dstLayout, dstFormat, params.resolution.width,
+                               params.resolution.height, kBufferRowAlignment);
+
+    std::mt19937 rng(123456);
+    std::vector<uint8_t> srcData(ldpPictureLayoutSize(&srcLayout));
+    fillBufferWithNoise(srcData.data(), static_cast<uint32_t>(srcData.size()),
+                        unsignedFPFromBitDepth(params.bitDepth), rng);
+    std::vector<uint8_t> cpuDst(ldpPictureLayoutSize(&dstLayout));
+    runCPUConversion(srcData.data(), cpuDst.data(), srcLayout, dstLayout, true, params.bitDepth);
+
+    const bool semiplanar = params.externalFormat == LdpColorFormatNV12_8 ||
+                            params.externalFormat == LdpColorFormatNV21_8;
+    // Start each dispatch with a fresh sentinel-filled destination. In particular, dispatching
+    // only NV12/NV21 physical plane 1 must write U and V while leaving Y untouched.
+    for (uint8_t selected = 0; selected < ldpPictureLayoutPlanes(&srcLayout); ++selected) {
+        SCOPED_TRACE(testing::Message() << "selected physical plane " << unsigned(selected));
+        const auto gpuDst = runGPUConversion(srcData.data(), static_cast<uint32_t>(srcData.size()),
+                                             params.externalFormat, dstFormat,
+                                             params.resolution.width, params.resolution.height,
+                                             true, params.bitDepth, params.chroma, 0.0f, selected);
+        for (uint8_t plane = 0; plane < ldpPictureLayoutPlanes(&dstLayout); ++plane) {
+            SCOPED_TRACE(testing::Message() << "destination plane " << unsigned(plane));
+            const bool written = semiplanar ? (selected == 0 ? plane == 0 : plane != 0) : plane == selected;
+            const uint32_t offset = dstLayout.planeOffsets[plane];
+            if (!written) {
+                const auto begin = gpuDst.begin() + offset;
+                EXPECT_TRUE(std::all_of(begin, begin + ldpPictureLayoutPlaneSize(&dstLayout, plane),
+                                        [](uint8_t value) { return value == 0xa5; }));
+                continue;
+            }
+            const uint32_t rowBytes = ldpPictureLayoutRowSize(&dstLayout, plane);
+            for (uint32_t y = 0; y < ldpPictureLayoutPlaneHeight(&dstLayout, plane); ++y) {
+                const uint32_t rowOffset = offset + y * dstLayout.rowStrides[plane];
+                ASSERT_EQ(std::memcmp(gpuDst.data() + rowOffset, cpuDst.data() + rowOffset, rowBytes), 0)
+                    << "row " << y;
             }
         }
     }
@@ -571,7 +633,7 @@ TEST_P(PipelineVulkanConversionSharpenTest, SpecializedPipelineMatchesReference)
 
     const std::vector<uint8_t> gpuDst = runGPUConversion(
         srcData.data(), static_cast<uint32_t>(srcData.size()), internalFormat, params.externalFormat,
-        kWidth, kHeight, false, params.bitDepth, LdeChroma::CT420, kSharpenStrength);
+        kWidth, kHeight, false, params.bitDepth, LdeChroma::CT420, kSharpenStrength, -1);
 
     const int outputScale = 1 << (params.bitDepth - 8);
     const int outputMax = (1 << params.bitDepth) - 1;
@@ -926,3 +988,15 @@ INSTANTIATE_TEST_SUITE_P(SemiplanarConversions, PipelineVulkanConversionTest,
 // Planar 4:2:2, 4:4:4, and monochrome buffer output paths.
 INSTANTIATE_TEST_SUITE_P(PlanarComplianceConversions, PipelineVulkanConversionTest,
                          testing::ValuesIn(generatePlanarComplianceParams()), ConversionTestName);
+
+// Exercise independent input dispatches for planar bit depths and both UV orderings.
+INSTANTIATE_TEST_SUITE_P(InputPlanes, PipelineVulkanPlaneConversionTest, testing::ValuesIn([] {
+                             auto params = generateI420Params();
+                             const auto semiplanar = generateSemiplanarParams();
+                             params.insert(params.end(), semiplanar.begin(), semiplanar.end());
+                             params.erase(std::remove_if(params.begin(), params.end(),
+                                                         [](const auto& p) { return !p.toInternal; }),
+                                          params.end());
+                             return params;
+                         }()),
+                         ConversionTestName);

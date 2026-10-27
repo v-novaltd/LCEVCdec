@@ -35,6 +35,12 @@ Data Structures
 .. doxygenstruct:: LCEVC_PicturePlaneDesc
    :members:
 
+.. doxygenstruct:: LCEVC_RenderSendInformation
+   :members:
+
+.. doxygenstruct:: LCEVC_RenderReceiveInformation
+   :members:
+
 
 Enums
 -----
@@ -127,7 +133,22 @@ For a list of options settable with this function, see :ref:`configurable option
 
 .. doxygenfunction:: LCEVC_SynchronizeDecoder
 
+.. doxygenfunction:: LCEVC_FlushDecoder
+
 .. doxygenfunction:: LCEVC_SetDecoderEventCallback
+
+Render Functions
+................
+
+The render API presents decoded output pictures directly to a platform window (an ``ANativeWindow*`` on Android). Set the ``will_render`` option before ``LCEVC_InitializeDecoder``, then call ``LCEVC_RenderInit`` and ``LCEVC_RenderSetWindow`` before sending pictures with ``LCEVC_RenderSendPicture``. Call ``LCEVC_RenderSetWindow`` again whenever the window changes or is resized. Pipelines that do not support rendering return ``LCEVC_NotSupported``.
+
+.. doxygenfunction:: LCEVC_RenderInit
+
+.. doxygenfunction:: LCEVC_RenderSetWindow
+
+.. doxygenfunction:: LCEVC_RenderSendPicture
+
+.. doxygenfunction:: LCEVC_RenderReceivePicture
 
 Typedefs
 --------
@@ -211,7 +232,9 @@ Option                      Type       Default          Description
 ``vulkan_timestamps``       int        0                If greater than 0, the number of shader timestamps to record
                                                         and report in Debug log.
 ``vulkan_contexts``         int        1                The number of distinct Vulkan contexts that can be in-flight.
-``will_render``             bool       false            Informs the Vulkan pipeline at initialization to setup for
+``will_render``             bool       false            Informs the Vulkan pipeline at initialization to set up for
+                                                        rendering to a window via the render API, enabling the
+                                                        required Vulkan instance and device extensions.
 =========================== ========== ================ ===============================================================
 
 Debug Configuration Options
@@ -284,6 +307,8 @@ Sets the events that will trigger callbacks set by ``LCEVC_SetDecoderEventCallba
        LCEVC_CanReceive,
        LCEVC_BasePictureDone,
        LCEVC_OutputPictureDone,
+       LCEVC_CanSendRender,
+       LCEVC_CanReceiveRender,
    };
    LCEVC_ConfigureDecoderIntArray(hdl, "events", static_cast<uint32_t>(kAllEvents.size()), kAllEvents.data());
 

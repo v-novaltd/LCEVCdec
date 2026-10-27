@@ -20,6 +20,7 @@ layout(location = 2) flat in int fragBit8;
 layout(location = 3) flat in int fragNv12;
 layout(location = 4) flat in int fragScrWidth;
 
+// clang-format off
 layout(binding = 0) uniform UniformBufferObject {
     mat4 modelViewProjection;
     int bit8;
@@ -32,11 +33,13 @@ layout(binding = 0) uniform UniformBufferObject {
     int ditherBufferSize;
     int limitedRange;
 } ubo;
+// clang-format on
 
 layout(binding = 1) uniform sampler2D texSampler;
 layout(binding = 2) uniform sampler2D texSamplerU;
 layout(binding = 3) uniform sampler2D texSamplerV;
 
+// clang-format off
 layout(binding = 4) readonly buffer DitherEntropy {
     uint ditherEntropy[];
 };
@@ -44,20 +47,22 @@ layout(binding = 4) readonly buffer DitherEntropy {
 layout(binding = 5) readonly buffer DitherRowOffset {
     uint ditherRowOffset[];
 };
+// clang-format on
 
 layout(location = 0) out vec4 outColor;
 
-vec4 YUVtoRGBA(vec3 YUV) {
+vec4 YUVtoRGBA(vec3 YUV)
+{
     vec3 yuv = YUV;
     mat3 T;
     if (ubo.limitedRange != 0) {
         yuv.x -= 16.0 / 255.0;
-        T = mat3(1.164, 1.164, 1.164,
-                 0.0,  -0.392, 2.017,
+        T = mat3(1.164, 1.164, 1.164, //
+                 0.0, -0.392, 2.017,  //
                  1.596, -0.813, 0.0);
     } else {
-        T = mat3(1.0, 1.0, 1.0,
-                 0.0, -0.344, 1.770,
+        T = mat3(1.0, 1.0, 1.0,      //
+                 0.0, -0.344, 1.770, //
                  1.403, -0.714, 0.0);
     }
     const vec3 offset = vec3(0.0, -0.5, -0.5);
@@ -85,10 +90,11 @@ int computeDither(int plane, int x, int y)
     return strength - int((entropy * uint(strength * 2 + 1)) >> 16);
 }
 
-void main() {
+void main()
+{
     int scale = 1;
-    if(fragBit8 == 0) {
-        scale = 64;  // 10 bit hack
+    if (fragBit8 == 0) {
+        scale = 64; // 10 bit hack
     }
 
     float Y = scale * texture(texSampler, fragTexCoord).r;
@@ -110,5 +116,5 @@ void main() {
         V = vSample * invSampleScale;
     }
 
-    outColor = YUVtoRGBA(vec3(Y,U,V));
+    outColor = YUVtoRGBA(vec3(Y, U, V));
 }

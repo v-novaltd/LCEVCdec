@@ -19,14 +19,14 @@
 #include "specialization_ids.h"
 
 // Specialized workgropup size
-layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
-       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X, local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
 // Specialized build time configuration
-layout (constant_id = SPECID_8_BIT) const bool bit8 = false;
-layout (constant_id = SPECID_NV12) const bool nv12 = false;
+layout(constant_id = SPECID_8_BIT) const bool bit8 = false;
+layout(constant_id = SPECID_NV12) const bool nv12 = false;
 
+// clang-format off
 layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
     uint samples[];
 } src;
@@ -34,7 +34,9 @@ layout(std430, set = 0, binding = 0) buffer restrict readonly SrcImageBuffer {
 layout(std430, set = 0, binding = 1) buffer restrict writeonly DstImageBuffer {
     uint samples[];
 } dst;
+// clang-format on
 
+// clang-format off
 layout(push_constant) uniform consts {
     int width;
     int height;
@@ -44,87 +46,51 @@ layout(push_constant) uniform consts {
     int containerOffsetOut;
     int containerStrideV; // used to check for nv12 and as input or output stride for V-plane
     int containerOffsetV; // used with nv12 as input or output offset for V-plane
-    int shift;     // 5 for 10bit, 3 for 12bit, and 1 for 14bit
-    int sharpenStrength; // 0 disables sharpening, otherwise U16 strength (in-direction: unused)
-    int nv21Swap; // non-zero -> input chroma is VU rather than UV
+    int shift;            // 5 for 10bit, 3 for 12bit, and 1 for 14bit
+    int sharpenStrength;  // 0 disables sharpening, otherwise U16 strength (in-direction: unused)
+    int nv21Swap;         // non-zero -> input chroma is VU rather than UV
 };
+    // clang-format on
 
 #include "common.glsl"
-
-ivec2 readSrc(uint x, uint y) {
-    return  unpack16bitInternals(src.samples[containerOffsetIn + y * containerStrideIn + x]);
-}
-
-void writeDst(uint x, uint y, ivec2 pels)
-{
-    dst.samples[containerOffsetOut + y * containerStrideOut + x]  = pack16bitInternals(pels);
-}
-
-int loadInternalValue(int px, int py)
-{
-    const uint packed = src.samples[uint(containerOffsetIn + (px >> 1) + py * containerStrideIn)];
-    const ivec2 vals = unpack16bitInternals(packed);
-    return ((px & 1) == 0) ? vals.x : vals.y;
-}
-
-int toOutputValue(int internalVal)
-{
-    const int shiftN = bit8 ? 7 : shift;
-    const int halfv = (1 << shiftN) / 2;
-    const int maxv = 32767 >> shiftN;
-    return clamp(((internalVal + 0x4000 + halfv) >> shiftN), 0, maxv);
-}
-
-int sharpenPixel(int px, int py)
-{
-    int center = toOutputValue(loadInternalValue(px, py));
-    if (sharpenStrength == 0) {
-        return center;
-    }
-    if (px <= 0 || px + 1 >= width || py <= 0 || py + 1 >= height) {
-        return center;
-    }
-    const int left = toOutputValue(loadInternalValue(px - 1, py));
-    const int right = toOutputValue(loadInternalValue(px + 1, py));
-    const int top = toOutputValue(loadInternalValue(px, py - 1));
-    const int bottom = toOutputValue(loadInternalValue(px, py + 1));
-    const int weight = (center << 2) - (left + right + top + bottom);
-    const int coeff = (sharpenStrength * weight + 32768) >> 16;
-    const int maxv = bit8 ? (32767 >> 7) : (32767 >> shift);
-    return clamp(center + coeff, 0, maxv);
-}
 
 void main()
 {
     const uint x = gl_GlobalInvocationID.x;
     const uint y = gl_GlobalInvocationID.y;
 
-    if(y >= height) {
+    if (y >= height) {
         return;
     }
 
-    if(x* (bit8?4:2) >= width) {
+    if (x * (bit8 ? 4 : 2) >= width) {
         return;
     }
 
     if (bit8) {
         if (nv12 && containerStrideV != 0) {
             if (4 * x < width) {
-                const ivec4 pixels = toInternalFrom8bit(unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));
+                const ivec4 pixels = toInternalFrom8bit(
+                    unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));
                 const ivec4 uv = (nv21Swap != 0) ? pixels.yxwz : pixels;
-                dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bitInternals(ivec2(uv.x, uv.z));
-                dst.samples[containerOffsetV + x + y * containerStrideV] = pack16bitInternals(ivec2(uv.y, uv.w));
+                dst.samples[containerOffsetOut + x + y * containerStrideOut] =
+                    pack16bitInternals(ivec2(uv.x, uv.z));
+                dst.samples[containerOffsetV + x + y * containerStrideV] =
+                    pack16bitInternals(ivec2(uv.y, uv.w));
             }
         } else {
-            const ivec4 pixels = toInternalFrom8bit(unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));
-            dst.samples[containerOffsetOut + 2 * x + y * containerStrideOut] = pack16bitInternals(pixels.xy);
-            if(4 * x + 2 < width) {
-                dst.samples[containerOffsetOut + 2 * x + 1 + y * containerStrideOut] = pack16bitInternals(pixels.zw);
+            const ivec4 pixels = toInternalFrom8bit(
+                unpack8bit(src.samples[containerOffsetIn + x + y * containerStrideIn]));
+            dst.samples[containerOffsetOut + 2 * x + y * containerStrideOut] =
+                pack16bitInternals(pixels.xy);
+            if (4 * x + 2 < width) {
+                dst.samples[containerOffsetOut + 2 * x + 1 + y * containerStrideOut] =
+                    pack16bitInternals(pixels.zw);
             }
         }
     } else {
-        const ivec2 pixels = toInternalFrom16bit(unpack16bit(src.samples[containerOffsetIn + x + y * containerStrideIn]), shift);
+        const ivec2 pixels = toInternalFrom16bit(
+            unpack16bit(src.samples[containerOffsetIn + x + y * containerStrideIn]), shift);
         dst.samples[containerOffsetOut + x + y * containerStrideOut] = pack16bitInternals(pixels);
     }
-
 }

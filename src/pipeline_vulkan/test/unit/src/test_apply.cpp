@@ -156,7 +156,7 @@ TEST_F(PipelineVulkanApplyFixture, ApplyGpuCommandBufferToPlane)
     args.picture = src;
     args.planeWidth = width;
     args.planeHeight = height;
-    args.dds = true;
+    args.transform = TransformDDS;
 
     auto& compute = pipeline->backend().compute();
     VulkanFrameContext* frameContext = compute.acquireFrameContext(nullptr);
@@ -174,7 +174,7 @@ TEST_F(PipelineVulkanApplyFixture, ApplyGpuCommandBufferToPlane)
     tileArgs.bufferGpu = cmdBuffer;
     tileArgs.context = frameContext;
     tileArgs.loq = args.loq;
-    tileArgs.dds = args.dds;
+    tileArgs.transform = args.transform;
     EXPECT_TRUE(pipeline->backend().applyTile(&tileArgs));
     compute.endCompute(frameContext);
     pipeline->addCompletionContext(frameContext);
@@ -303,7 +303,7 @@ protected:
         args.picture = picture;
         args.planeWidth = kApplyWidth;
         args.planeHeight = kApplyHeight;
-        args.dds = (params.transformSize == 16);
+        args.transform = params.transformSize == 16 ? TransformDDS : TransformDD;
         args.tuRasterOrder = params.surfaceRasterOrder;
 
         auto& compute = pipeline->backend().compute();
@@ -330,7 +330,7 @@ protected:
         tileArgs.context = frameContext;
         tileArgs.loq = args.loq;
         tileArgs.highlightResiduals = params.highlight;
-        tileArgs.dds = args.dds;
+        tileArgs.transform = args.transform;
         tileArgs.tuRasterOrder = params.surfaceRasterOrder;
 
         if (!pipeline->backend().applyTile(&tileArgs)) {
@@ -552,7 +552,7 @@ protected:
             common.picture = temporal ? nullptr : picture;
             common.planeWidth = kWidth;
             common.planeHeight = kHeight;
-            common.dds = true;
+            common.transform = TransformDDS;
             common.context = ctx;
             if (temporal) {
                 common.temporalPicture = temporalPic;
@@ -567,7 +567,7 @@ protected:
             tileArgs.bufferGpu = tile;
             tileArgs.context = ctx;
             tileArgs.loq = common.loq;
-            tileArgs.dds = common.dds;
+            tileArgs.transform = common.transform;
             if (temporal) {
                 tileArgs.temporalPicture = temporalPic;
             }
@@ -610,7 +610,7 @@ protected:
         common.picture = temporal ? nullptr : picture;
         common.planeWidth = kWidth;
         common.planeHeight = kHeight;
-        common.dds = true;
+        common.transform = TransformDDS;
         common.context = ctx;
         if (temporal) {
             common.temporalPicture = temporalPic;
@@ -626,7 +626,7 @@ protected:
         tile1.bufferGpu = m_cmdBuf1;
         tile1.context = ctx;
         tile1.loq = common.loq;
-        tile1.dds = common.dds;
+        tile1.transform = common.transform;
         if (temporal) {
             tile1.temporalPicture = temporalPic;
         }
@@ -640,7 +640,7 @@ protected:
         tile2.bufferGpu = m_cmdBuf2;
         tile2.context = ctx;
         tile2.loq = common.loq;
-        tile2.dds = common.dds;
+        tile2.transform = common.transform;
         if (temporal) {
             tile2.temporalPicture = temporalPic;
         }

@@ -19,8 +19,7 @@
 
 #include "specialization_ids.h"
 
-layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
-       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X, local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
 layout(rgb10_a2, set = 0, binding = 1) uniform restrict writeonly image2D dstImage;
@@ -39,7 +38,7 @@ void main()
     const int cx = x >> chromaWidthShift;
     const int cy = y >> chromaHeightShift;
     const float yf = internalToUnorm(loadInternalValue(x, y, containerStrideY, containerOffsetY,
-                                                        containerStrideTemporalY, containerOffsetTemporalY),
+                                                       containerStrideTemporalY, containerOffsetTemporalY),
                                      5, 1023);
     const vec2 uv = loadChroma(cx, cy, 5, 1023);
     imageStore(dstImage, ivec2(x, y), vec4(yuvToRgb601(yf, uv.x, uv.y), 1.0));

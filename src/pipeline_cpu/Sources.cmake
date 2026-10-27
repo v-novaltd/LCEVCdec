@@ -15,8 +15,8 @@ list(
     APPEND
     SOURCES
     "src/buffer_cpu.cpp"
+    "src/buffer_cpu_ahb.cpp"
     "src/frame_cpu.cpp"
-    "src/hardware_buffer_cpu.cpp"
     "src/picture_cpu.cpp"
     "src/picture_lock_cpu.cpp"
     "src/pipeline_builder_cpu.cpp"
@@ -29,8 +29,8 @@ list(
     APPEND
     HEADERS
     "src/buffer_cpu.h"
+    "src/buffer_cpu_ahb.h"
     "src/frame_cpu.h"
-    "src/hardware_buffer_cpu.h"
     "src/picture_cpu.h"
     "src/picture_lock_cpu.h"
     "src/pipeline_builder_cpu.h"

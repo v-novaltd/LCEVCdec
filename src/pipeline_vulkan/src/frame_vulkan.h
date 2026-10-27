@@ -18,6 +18,7 @@
 #include <LCEVC/common/task_pool.h>
 #include <LCEVC/pipeline/frame_base.h>
 
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <vector>
@@ -26,6 +27,10 @@ namespace lcevc_dec::pipeline_vulkan {
 
 class PipelineVulkan;
 class PictureVulkan;
+
+// Map each physical input plane to the logical components it contains.
+std::array<LdpColorComponentMask, kLdpPictureMaxNumPlanes>
+physicalPlaneComponentMasks(const LdpPictureLayout& layout);
 
 enum class VulkanComputeOutcome : uint8_t
 {

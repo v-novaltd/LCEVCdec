@@ -72,15 +72,28 @@ public:
                   int32_t timestampsLimit, int32_t contextCount);
     ~BackendVulkan() = default;
 
-    bool applyCommon(VulkanApplyCommonArgs* params) { return m_compute.applyCommon(params); };
-    bool applyTile(VulkanApplyTileArgs* params) { return m_compute.applyTile(params); };
-
-    bool convertIn(VulkanConvertInArgs* params) { return m_compute.convertIn(params); };
-    bool convertOut(VulkanConvertOutArgs* params) { return m_compute.convertOut(params); };
-    bool upscaleFrame(const LdeKernel* kernel, VulkanUpscaleArgs* params)
+    bool prepareConvertIn(const VulkanConvertInArgs* params)
     {
-        return m_compute.upscaleFrame(kernel, params);
-    };
+        return m_compute->prepareConvertIn(params);
+    }
+    bool convertIn(const VulkanConvertInArgs* params, uint8_t plane)
+    {
+        return m_compute->convertIn(params, plane);
+    }
+
+    bool prepareUpscale(const VulkanUpscaleArgs* params)
+    {
+        return m_compute->prepareUpscale(params);
+    }
+    bool upscale(const LdeKernel* kernel, const VulkanUpscaleArgs* params, uint8_t plane)
+    {
+        return m_compute->upscale(kernel, params, plane);
+    }
+
+    bool applyCommon(VulkanApplyCommonArgs* params) { return m_compute->applyCommon(params); }
+    bool applyTile(VulkanApplyTileArgs* params) { return m_compute->applyTile(params); }
+
+    bool convertOut(VulkanConvertOutArgs* params) { return m_compute->convertOut(params); }
 
     bool initVulkan();
     bool initRemainingRender();
@@ -94,7 +107,7 @@ public:
                                          VkSurfaceKHR surface = VK_NULL_HANDLE);
 
     bool renderingEnabled() const { return m_renderingEnabled; }
-    ComputeVulkan& compute() { return m_compute; }
+    ComputeVulkan& compute() { return *m_compute; }
     RenderVulkan& getRenderer() { return m_render; }
     VkQueue& getComputeQueue() { return m_computeQueue; }
     VkQueue& getGraphicsQueue() { return m_graphicsQueue; }
@@ -167,7 +180,7 @@ private:
     VkQueue m_graphicsQueue{};
     VkQueue m_presentQueue{};
     common::Mutex m_queueMutex;
-    ComputeVulkan m_compute;
+    std::optional<ComputeVulkan> m_compute;
     RenderVulkan m_render;
 
     VmaAllocator m_allocator{};

@@ -18,11 +18,10 @@
 
 #include "specialization_ids.h"
 
-layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
-       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X, local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
-layout(r16,  set = 0, binding = 1) uniform restrict writeonly image2D dstY;
+layout(r16, set = 0, binding = 1) uniform restrict writeonly image2D dstY;
 layout(rg16, set = 0, binding = 2) uniform restrict writeonly image2D dstUV;
 
 #include "convert_out_image_common.glsl"
@@ -48,10 +47,10 @@ void main()
     imageStore(dstY, ivec2(x + 1, y + 1), vec4(internalToUnorm(y1.y, 5, 1023), 0.0, 0.0, 1.0));
 
     const float u = internalToUnorm(loadInternalValue(cx, cy, containerStrideU, containerOffsetU,
-                                                       containerStrideTemporalU, containerOffsetTemporalU),
+                                                      containerStrideTemporalU, containerOffsetTemporalU),
                                     5, 1023);
     const float v = internalToUnorm(loadInternalValue(cx, cy, containerStrideV, containerOffsetV,
-                                                       containerStrideTemporalV, containerOffsetTemporalV),
+                                                      containerStrideTemporalV, containerOffsetTemporalV),
                                     5, 1023);
     imageStore(dstUV, ivec2(cx, cy), vec4(u, v, 0.0, 1.0));
 }

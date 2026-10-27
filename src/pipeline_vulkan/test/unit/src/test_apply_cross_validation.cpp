@@ -248,7 +248,7 @@ protected:
         commonArgs.planeHeight = planeHeight;
         commonArgs.plane = planeIdx;
         commonArgs.loq = loq;
-        commonArgs.dds = dds;
+        commonArgs.transform = dds ? TransformDDS : TransformDD;
         commonArgs.tuRasterOrder = rasterOrder;
 
         auto& compute = pipeline->backend().compute();
@@ -278,6 +278,7 @@ protected:
         tileArgs.bufferGpu = m_cmdBufferGpu;
         tileArgs.plane = planeIdx;
         tileArgs.loq = loq;
+        tileArgs.transform = commonArgs.transform;
         tileArgs.context = frameContext;
         tileArgs.tuRasterOrder = rasterOrder;
 

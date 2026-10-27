@@ -1052,10 +1052,10 @@ typedef struct LCEVC_RenderSendInformation
  *
  * @param[in]     decHandle               LCEVC Decoder instance
  * @param[in]     timestamp               time reference of the picture to be rendered
- * @param[in]     image                   pointer to a picture to be rendered to back buffer
+ * @param[in]     image                   handle of the picture to be rendered to back buffer
  * @param[in]     renderSendInformation   pointer to a render send information structure
  * @param[in]     delayUs                 time in microseconds to wait before executing the render
- *                                        (0 to render immediately)
+ *                                        (0 to render immediately). Not yet implemented.
  * @return                                LCEVC_Success on success
  */
 LCEVC_API
@@ -1077,10 +1077,12 @@ typedef struct LCEVC_RenderReceiveInformation
 
 /*! Receive the rendered picture
  *
+ * Not yet implemented: always returns LCEVC_NotSupported.
+ *
  * @param[in]     decHandle                  LCEVC Decoder instance
- * @param[in]     output                     the rendered picture
- * @param[in]     renderReceiveInformation   pointer to a render receive information structure
- * @return                                   LCEVC_Success on success
+ * @param[out]    output                     the rendered picture
+ * @param[out]    renderReceiveInformation   pointer to a render receive information structure
+ * @return                                   LCEVC_NotSupported
  */
 LCEVC_API
 LCEVC_ReturnCode LCEVC_RenderReceivePicture( LCEVC_DecoderHandle decHandle,

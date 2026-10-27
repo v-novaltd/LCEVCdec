@@ -340,6 +340,11 @@ LdcReturnCode PipelineVulkan::renderSendPicture(uint64_t timestamp, LdpPicture* 
     if (outputPicture == nullptr || renderSendInformation == nullptr) {
         return LdcReturnCodeInvalidParam;
     }
+    const uint32_t rotation = renderSendInformation->rotation;
+    if (rotation != 0 && rotation != 90 && rotation != 180 && rotation != 270) {
+        VNLogError("renderSendPicture: invalid rotation %u - must be 0, 90, 180 or 270", rotation);
+        return LdcReturnCodeInvalidParam;
+    }
 
     if (!backend().renderingEnabled() || !backend().getRenderer().windowReady()) {
         return LdcReturnCodeAgain;
@@ -447,14 +452,14 @@ void PipelineVulkan::waitCompletionContextIdle()
     while (true) {
         common::ScopedLock lock(m_completionMutex);
         // No completion - done
-        if (m_completionContexts.empty()) {
+        if (m_completionContexts.empty() && m_completionsFinishing == 0) {
             return;
         }
         // Wait for something to be removed
         m_completionRemoved.wait(lock);
 
         // Check again
-        if (m_completionContexts.empty()) {
+        if (m_completionContexts.empty() && m_completionsFinishing == 0) {
             return;
         }
     }
@@ -510,20 +515,25 @@ void PipelineVulkan::frameCompletionThread()
                 //
                 // Also, keep a record of the completed contexts for completion outside lock
                 //
-                common::ScopedLock lock(m_completionMutex);
-
-                for (size_t i = 0; i < fences.size(); ++i) {
-                    VkResult fr = vkGetFenceStatus(m_backend.getDevice(), fences[i]);
-                    if (fr == VK_SUCCESS) {
-                        // Remove context from pending  set
-                        m_completionContexts.erase(find(m_completionContexts.begin(),
-                                                        m_completionContexts.end(), contexts[i]));
-
-                        // Release
-                        finishCompletionContext(contexts[i]);
-
-                        m_completionRemoved.broadcast();
+                std::vector<VulkanFrameContext*> completed;
+                {
+                    common::ScopedLock lock(m_completionMutex);
+                    for (size_t i = 0; i < fences.size(); ++i) {
+                        if (vkGetFenceStatus(m_backend.getDevice(), fences[i]) == VK_SUCCESS) {
+                            m_completionContexts.erase(find(m_completionContexts.begin(),
+                                                            m_completionContexts.end(), contexts[i]));
+                            completed.push_back(contexts[i]);
+                            ++m_completionsFinishing;
+                        }
                     }
+                }
+                // Completing a frame can run the next decode inline with threads=1. It must
+                // be able to submit a context without re-entering m_completionMutex.
+                for (auto* context : completed) {
+                    finishCompletionContext(context);
+                    common::ScopedLock lock(m_completionMutex);
+                    --m_completionsFinishing;
+                    m_completionRemoved.broadcast();
                 }
             } else if (r == VK_TIMEOUT) {
                 VNLogWarning("Completion wait timeout");
@@ -537,14 +547,44 @@ void PipelineVulkan::frameCompletionThread()
 void PipelineVulkan::finishCompletionContext(VulkanFrameContext* context)
 {
     context->getTimestamps().report();
-
-    // Frame finishing
-    //
-    if (FrameVulkan* frame = context->getFrame()) {
+    FrameVulkan* frame = context->getFrame();
+    // With threads=1, signalling completion can immediately execute the next decode
+    // on this thread. Return the context first so that decode cannot block acquiring it.
+    m_backend.compute().releaseFrameContext(context);
+    if (frame) {
         frame->computeTaskFinish(this);
     }
+}
 
-    m_backend.compute().releaseFrameContext(context);
+LdcTaskDependency PipelineVulkan::registerSubmissionTurn(FrameVulkan* frame)
+{
+    const LdcTaskDependency ready = frame->taskDependencyAdd();
+    bool first = false;
+    {
+        common::ScopedLock lock(m_submissionOrderMutex);
+        first = m_submissionOrder.empty();
+        m_submissionOrder.push_back({frame, ready});
+    }
+    if (first) {
+        frame->unblockDependency(ready);
+    }
+    return ready;
+}
+
+void PipelineVulkan::completeSubmissionTurn(FrameVulkan* frame)
+{
+    SubmissionTurn next{};
+    {
+        common::ScopedLock lock(m_submissionOrderMutex);
+        assert(!m_submissionOrder.empty() && m_submissionOrder.front().frame == frame);
+        m_submissionOrder.pop_front();
+        if (!m_submissionOrder.empty()) {
+            next = m_submissionOrder.front();
+        }
+    }
+    if (next.frame) {
+        next.frame->unblockDependency(next.ready);
+    }
 }
 
 void PipelineVulkan::prepareApplyCommonArgs(VulkanApplyCommonArgs& args, PictureVulkan* picture,
@@ -563,7 +603,7 @@ void PipelineVulkan::prepareApplyCommonArgs(VulkanApplyCommonArgs& args, Picture
     args.planeHeight = picture->getActiveHeight() >> heightShift;
     args.plane = enhancementTile->plane;
     args.loq = enhancementTile->loq;
-    args.dds = context->getFrame()->globalConfig->numLayers == 16;
+    args.transform = context->getFrame()->globalConfig->transform;
     args.tuRasterOrder = !context->getFrame()->globalConfig->temporalEnabled &&
                          context->getFrame()->globalConfig->tileDimensions == TDTNone;
     args.context = context;
@@ -589,7 +629,7 @@ void PipelineVulkan::prepareApplyTileArgs(VulkanApplyTileArgs& args, PictureVulk
     args.tileWidth = enhancementTile->tileWidth;
     args.loq = enhancementTile->loq;
     args.highlightResiduals = m_configuration.highlightResiduals;
-    args.dds = context->getFrame()->globalConfig->numLayers == 16;
+    args.transform = context->getFrame()->globalConfig->transform;
     args.tuRasterOrder = !context->getFrame()->globalConfig->temporalEnabled &&
                          context->getFrame()->globalConfig->tileDimensions == TDTNone;
     args.context = context;

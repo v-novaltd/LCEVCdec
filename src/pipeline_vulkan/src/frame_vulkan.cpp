@@ -20,8 +20,28 @@
 
 #include <LCEVC/common/limit.h>
 #include <LCEVC/common/platform.h>
+#include <LCEVC/pipeline/picture_layout.h>
+
+#include <algorithm>
+#include <cstring>
 
 namespace lcevc_dec::pipeline_vulkan {
+
+std::array<LdpColorComponentMask, kLdpPictureMaxNumPlanes>
+physicalPlaneComponentMasks(const LdpPictureLayout& layout)
+{
+    std::array<LdpColorComponentMask, kLdpPictureMaxNumPlanes> masks{};
+    uint8_t component = 0;
+    for (uint8_t plane = 0; plane < ldpPictureLayoutPlanes(&layout); ++plane) {
+        assert(plane < kLdpPictureMaxNumPlanes);
+        const uint8_t interleave = ldpPictureLayoutPlaneInterleave(&layout, plane);
+        for (uint8_t i = 0; i < interleave; ++i, ++component) {
+            masks[plane] = static_cast<LdpColorComponentMask>(masks[plane] | (1u << component));
+        }
+    }
+    assert(component == ldpPictureLayoutColorComponents(&layout));
+    return masks;
+}
 
 FrameVulkan::FrameVulkan(LdcMemoryAllocator* enhancementAllocator,
                          LdcMemoryAllocator* bufferAllocator, uint64_t timestamp)
@@ -121,15 +141,66 @@ void FrameVulkan::signalComputeTaskDone()
     ldcTaskDependencyMet(&m_taskGroup, m_computeTaskDone, nullptr);
 }
 
+// The output was written to the picture's managed buffer using its layout; copy each plane to
+// the caller's plane pointers. The buffer is mapped and invalidated once, and planes whose
+// strides match are copied with a single memcpy.
+static void copyOutToExternalPlanes(PictureVulkan* picture,
+                                    const LdpPicturePlaneDesc planes[kLdpPictureMaxNumPlanes])
+{
+    BufferVulkan* managedBuffer = fromPipeline(picture->buffer);
+    const LdpPictureLayout& layout = picture->layout;
+    const uint32_t planeCount = ldpPictureLayoutPlanes(&layout);
+
+    LdpBufferMapping mapping{};
+    const bool mapped = managedBuffer->map(&mapping, 0, managedBuffer->size(), LdpAccessRead);
+
+    for (uint32_t plane = 0; plane < planeCount; ++plane) {
+        uint8_t* dst = planes[plane].firstSample;
+        const uint32_t rows = ldpPictureLayoutPlaneHeight(&layout, plane);
+        if (dst == nullptr || rows == 0) {
+            continue;
+        }
+        const uint32_t srcOffset = ldpPictureLayoutPlaneOffset(&layout, plane);
+        const uint32_t srcStride = ldpPictureLayoutRowStride(&layout, plane);
+        const uint32_t dstStride = planes[plane].rowByteStride;
+        const uint32_t rowBytes = std::min(ldpPictureLayoutRowSize(&layout, plane), dstStride);
+
+        if (!mapped) {
+            for (uint32_t y = 0; y < rows; ++y) {
+                managedBuffer->copyOut(dst + static_cast<size_t>(y) * dstStride,
+                                       srcOffset + y * srcStride, rowBytes);
+            }
+            continue;
+        }
+
+        const uint8_t* src = mapping.ptr + srcOffset;
+        if (srcStride == dstStride) {
+            memcpy(dst, src, static_cast<size_t>(srcStride) * (rows - 1) + rowBytes);
+        } else {
+            for (uint32_t y = 0; y < rows; ++y) {
+                memcpy(dst + static_cast<size_t>(y) * dstStride,
+                       src + static_cast<size_t>(y) * srcStride, rowBytes);
+            }
+        }
+    }
+
+    if (mapped) {
+        managedBuffer->unmap(&mapping);
+    }
+}
+
 void FrameVulkan::computeTaskFinish(PipelineVulkan* pipeline)
 {
-    // Copy output to external CPU planes if present.
+    // Copy output to external CPU memory if present.
     PictureVulkan* op = fromPipeline(outputPicture);
     LdpPictureBufferDesc exDesc{};
+    LdpPicturePlaneDesc exPlanes[kLdpPictureMaxNumPlanes]{};
     if (op && !op->isExternalBuffer() && op->getBufferDesc(exDesc) && exDesc.data != nullptr &&
         exDesc.byteSize != 0) {
         BufferVulkan* managedBuffer = fromPipeline(op->buffer);
         managedBuffer->copyOut(exDesc.data, 0, exDesc.byteSize);
+    } else if (op && !op->isExternalBuffer() && op->buffer && op->getPlaneDescArr(exPlanes)) {
+        copyOutToExternalPlanes(op, exPlanes);
     }
 
     freeIntermediatePictures(pipeline);

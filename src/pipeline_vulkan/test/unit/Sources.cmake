@@ -20,7 +20,8 @@ set(SOURCES
     "src/test_dequant_transform.cpp"
     "src/test_dither.cpp"
     "src/test_pipeline.cpp"
-    "src/test_upscale.cpp")
+    "src/test_upscale.cpp"
+    "src/test_vulkan_handle.cpp")
 
 set(HEADERS "src/test_utility.h")
 

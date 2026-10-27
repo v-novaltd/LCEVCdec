@@ -23,7 +23,6 @@
 
 #include <android/hardware_buffer.h>
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_android.h>
 
 #include <memory>
 
@@ -34,21 +33,12 @@ class BackendVulkan;
 // Abstract base for BufferVulkan implementations that wrap an externally-supplied
 // AHardwareBuffer using VK_ANDROID_external_memory_android_hardware_buffer.
 //
-// Two concrete flavours derive from this base; pick one with create():
-//   - BufferVulkanAhbBuffer : imports the AHB allocation as a VkBuffer
-//                              (BLOB and YUV-as-storage-buffer paths).
-//   - BufferVulkanAhbImage  : imports the AHB allocation as a 2D VkImage
-//                              (RGB and 2-plane YUV image paths).
-//
-// The wrapper is treated as device-local from the host's perspective: host
-// access (map/unmap/clear/copyIn/copyOut) is not supported through this object;
-// the caller manages CPU access via AHardwareBuffer_lock/unlock directly on
-// the underlying AHardwareBuffer.
+// Two flavors derive from this base:
+//   - BufferVulkanAhbBuffer - imports the AHB allocation as a VkBuffer
+//   - BufferVulkanAhbImage - imports the AHB allocation as a 2D VkImage
 class BufferVulkanAhb : public BufferVulkan
 {
 public:
-    // Inspect the AHardwareBuffer and instantiate the appropriate concrete
-    // flavour.  Returns nullptr on failure.
     static std::unique_ptr<BufferVulkanAhb> create(BackendVulkan& backend, AHardwareBuffer* hardwareBuffer);
 
     ~BufferVulkanAhb() override;

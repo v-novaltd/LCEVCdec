@@ -38,7 +38,7 @@ THE EXCLUSION OF PATENT LICENSES PROVISION OF THE BSD-3-CLAUSE-CLEAR LICENSE.'''
 THIS_YEAR = str(datetime.datetime.now().year)
 COPYRIGHT_TYPES = ('*.cpp', '*.c', '*.h', '*.py', '*.js', '*.java', '*.gradle', '*.cmake',
                    'CMakeLists.txt', 'build_config.h.in', '*.yml', '*.glsl', '*.comp', '*.frag', '*.vert')
-CLANG_FORMAT_TYPES = ('*.cpp', '*.c', '*.h')
+CLANG_FORMAT_TYPES = ('*.cpp', '*.c', '*.h', '*.glsl', '*.comp', '*.frag', '*.vert')
 CMAKE_TYPES = ('*.cmake', 'CMakeLists.txt')
 PYTHON_TYPES = ('*.py',)
 JAVA_TYPES = ('*.java',)

@@ -33,6 +33,7 @@
 
 #include <array>
 #include <atomic>
+#include <deque>
 #include <vector>
 
 namespace lcevc_dec::pipeline_vulkan {
@@ -104,6 +105,11 @@ public:
 
     void finishCompletionContext(VulkanFrameContext* context);
 
+    // Called in frame task-generation order. Each dependency belongs to its own frame's group.
+    LdcTaskDependency registerSubmissionTurn(FrameVulkan* frame);
+    // Hand off after submission (or cancellation/failure), independently of GPU completion.
+    void completeSubmissionTurn(FrameVulkan* frame);
+
     VNNoCopyNoMove(PipelineVulkan);
 
     PictureVulkan* m_temporalPicture{};
@@ -158,6 +164,15 @@ private:
     common::CondVar m_completionAdded;
     common::CondVar m_completionRemoved;
     std::vector<VulkanFrameContext*> m_completionContexts;
+    uint32_t m_completionsFinishing = 0;
+
+    struct SubmissionTurn
+    {
+        FrameVulkan* frame;
+        LdcTaskDependency ready;
+    };
+    common::Mutex m_submissionOrderMutex;
+    std::deque<SubmissionTurn> m_submissionOrder;
 };
 
 } // namespace lcevc_dec::pipeline_vulkan

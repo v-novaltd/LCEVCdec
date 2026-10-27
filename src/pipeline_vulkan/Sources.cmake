@@ -55,6 +55,7 @@ list(
     "src/tasks_vulkan.h"
     "src/temporal_buffer_vulkan.h"
     "src/timestamp_vulkan.h"
+    "src/vulkan_handle.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/apply.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_in.h"
     "${CMAKE_CURRENT_BINARY_DIR}/src/hpp/convert_out_nv12.h"

@@ -19,10 +19,10 @@
 #include "specialization_ids.h"
 
 // Specialized workgropup size
-layout(local_size_x_id = SPECID_LOCAL_SIZE_X,
-       local_size_y_id = SPECID_LOCAL_SIZE_Y,
+layout(local_size_x_id = SPECID_LOCAL_SIZE_X, local_size_y_id = SPECID_LOCAL_SIZE_Y,
        local_size_z_id = SPECID_LOCAL_SIZE_Z) in;
 
+// clang-format off
 layout(std430, set = 0, binding = 0) buffer restrict readonly CommandBuffer {
     uint samples[];
 } cmd;
@@ -30,7 +30,9 @@ layout(std430, set = 0, binding = 0) buffer restrict readonly CommandBuffer {
 layout(std430, set = 0, binding = 1) buffer restrict PlaneBuffer {
     uint samples[];
 } dst;
+// clang-format on
 
+// clang-format off
 layout(push_constant) uniform consts {
     uint srcWidth;
     uint srcHeight;
@@ -41,12 +43,13 @@ layout(push_constant) uniform consts {
     uint tileX;
     uint tileY;
     uint tileWidth;
-    uint commandOffset; // uint32 offset into merged command buffer for this tile
-    uint commandCount;   // number of commands in this tile
+    uint commandOffset;    // uint32 offset into merged command buffer for this tile
+    uint commandCount;     // number of commands in this tile
     uint blocksInRowMagic; // ceil(2^32 / blocksInRow); 0 means blocksInRow == 1
     uint dds;
     uint rasterOrder;
 };
+// clang-format on
 
 const uint ADD = 0;
 const uint SET = 1;
@@ -64,7 +67,8 @@ void applyTu(uint firstContainerInTu, uint firstResidual, uint operation, uint t
         for (uint i = 0; i < (tuWidth >> 1); ++i) {
             const uint containerIndex = firstContainerInTu + i + j * containerStride;
             const uint residualPairIndex = commandOffset + residualOffset + (firstResidual >> 1) +
-                                           applyCounter * tuWidth * (tuWidth >> 1) + i + j * (tuWidth >> 1);
+                                           applyCounter * tuWidth * (tuWidth >> 1) + i +
+                                           j * (tuWidth >> 1);
 
             if (containerIndex >= containerOffset + containerStride * srcHeight) {
                 return;
@@ -77,11 +81,14 @@ void applyTu(uint firstContainerInTu, uint firstResidual, uint operation, uint t
                     residualPair = unpack16bitInternals(cmd.samples[residualPairIndex]);
                 }
 
-                switch(operation) {
-                    case ADD : pixelPair = saturateS16(unpack16bitInternals(dst.samples[containerIndex]) + residualPair); break;
-                    case SET : pixelPair = residualPair; break;
-                    case SETZERO : pixelPair = ivec2(0); break;
-                    default : break;
+                switch (operation) {
+                    case ADD:
+                        pixelPair =
+                            saturateS16(unpack16bitInternals(dst.samples[containerIndex]) + residualPair);
+                        break;
+                    case SET: pixelPair = residualPair; break;
+                    case SETZERO: pixelPair = ivec2(0); break;
+                    default: break;
                 }
             }
             dst.samples[containerIndex] = pack16bitInternals(pixelPair);
@@ -93,8 +100,8 @@ void applyTu(uint firstContainerInTu, uint firstResidual, uint operation, uint t
 }
 
 void processSubBlock(uint bitmaskMost, uint bitmaskLeast, uint operation,
-                      uint startingContainerInSubBlock, uint blockX, uint blockY,
-                      uint subBlockIdx, uint tu, uint tuWidth, uint tusInBlockWidth)
+                     uint startingContainerInSubBlock, uint blockX, uint blockY, uint subBlockIdx,
+                     uint tu, uint tuWidth, uint tusInBlockWidth)
 {
     const uint containerWidth = (srcWidth + 1) >> 1;
     for (uint i = 0; i < 64; ++i) {
@@ -106,16 +113,17 @@ void processSubBlock(uint bitmaskMost, uint bitmaskLeast, uint operation,
         const uint iy = i / tusInBlockWidth;
         const uint x = blockX * 16 + ix * (tuWidth >> 1);
         const uint y = blockY * 32 + subBlockIdx * 8 + iy * tuWidth;
-        if(x >= containerWidth || y >= srcHeight) {
+        if (x >= containerWidth || y >= srcHeight) {
             continue;
         }
 
-        const uint index = startingContainerInSubBlock + ix * (tuWidth >> 1) + iy * tuWidth * containerStride;
+        const uint index =
+            startingContainerInSubBlock + ix * (tuWidth >> 1) + iy * tuWidth * containerStride;
         if ((currentBitmask & bitSelector) != 0u) {
-            switch(operation) {
-                case ADD : applyTu(index, tu, ADD, tuWidth); break;
-                case SETZERO : applyTu(index, tu, SETZERO, tuWidth); break;
-                default : applyTu(index, tu, SET, tuWidth); // SET or CLEARSET
+            switch (operation) {
+                case ADD: applyTu(index, tu, ADD, tuWidth); break;
+                case SETZERO: applyTu(index, tu, SETZERO, tuWidth); break;
+                default: applyTu(index, tu, SET, tuWidth); // SET or CLEARSET
             }
         } else if (operation == CLEARSET) {
             applyTu(index, 0, SETZERO, tuWidth);
@@ -144,10 +152,14 @@ void processBlock(const uint bitmask[8], uint operation, uint block, uint tu, ui
         blockY = block;
         blockX = 0u;
     }
-    const uint firstContainerInBLock = containerOffset + (tileX >> 1) + blockX * (pixelsInBlockLength >> 1) + tileY * containerStride + blockY * containerStride * pixelsInBlockLength;
+    const uint firstContainerInBLock = containerOffset + (tileX >> 1) +
+                                       blockX * (pixelsInBlockLength >> 1) + tileY * containerStride +
+                                       blockY * containerStride * pixelsInBlockLength;
 
-    for(int i = 0; i<((dds != 0u) ? 1 : 4); ++i) {
-        processSubBlock(bitmask[2*i], bitmask[2*i + 1], operation, firstContainerInBLock + i * 8 * containerStride, blockX, blockY, uint(i), tu, tuWidth, tusInBlockWidth);
+    for (int i = 0; i < ((dds != 0u) ? 1 : 4); ++i) {
+        processSubBlock(bitmask[2 * i], bitmask[2 * i + 1], operation,
+                        firstContainerInBLock + i * 8 * containerStride, blockX, blockY, uint(i),
+                        tu, tuWidth, tusInBlockWidth);
     }
 }
 
@@ -166,11 +178,11 @@ void processRaster(const uint bitmask[8], uint operation, uint block, uint tu, u
     uint y = containerStartIndex / containerWidth;
     uint x = containerStartIndex - y * containerWidth;
     for (uint i = 0; i < 256; ++i) {
-        const uint segment = i >> 5; // same as i / 32
+        const uint segment = i >> 5;          // same as i / 32
         const uint bitIndex = 31 - (i & 31u); // same as 31 - (i % 32)
         const uint bitSelector = 1u << bitIndex;
-        if ((bitmask[segment] & bitSelector) != 0u
-            && x + step <= containerWidth && y * tuWidth + tuWidth <= srcHeight) {
+        if ((bitmask[segment] & bitSelector) != 0u && x + step <= containerWidth &&
+            y * tuWidth + tuWidth <= srcHeight) {
             // Memory address uses containerStride (includes any row padding).
             const uint index = containerOffset + x + y * tuWidth * containerStride;
             applyTu(index, tu, ADD, tuWidth);
@@ -194,12 +206,13 @@ void main()
     const uint tuWidth = (dds != 0u) ? 4 : 2;
     const uint commandIndex = uint(commandOffset) + gl_GlobalInvocationID.x * CMDSIZE;
     const ivec4 command = ivec4(cmd.samples[commandIndex], cmd.samples[commandIndex + 1],
-                          cmd.samples[commandIndex + 2], cmd.samples[commandIndex + 3]);
+                                cmd.samples[commandIndex + 2], cmd.samples[commandIndex + 3]);
 
     const uint operation = command.x & 0x3;        // One of GpuApplyOperation.
     const uint block = (command.x >> 2) & 0x3FFFF; // Number of block within temporal buffer to operate on.
-    const uint tu = ((command.x >> 20) & 0xFFF) |
-              ((command.y & 0x7FFF) << 12); // Offset into CommandBuffer of first residual for operation.
+    const uint tu =
+        ((command.x >> 20) & 0xFFF) |
+        ((command.y & 0x7FFF) << 12); // Offset into CommandBuffer of first residual for operation.
     const uint bitStart = (command.y >> 15) & 0xFF;  // First set bit in bitmask.
     const uint bitCount = (command.y >> 23) & 0x1FF; // Number of set bits in bitmask.
 
@@ -216,7 +229,7 @@ void main()
     if (rasterOrder != 0u) {
         // temporal off - not tiled
         processRaster(bitmask, operation, block, tu, tuWidth);
-    }  else {
+    } else {
         // temporal on or tile-mode block order
         processBlock(bitmask, operation, block, tu, tuWidth);
     }

@@ -14,6 +14,7 @@
 
 #version 450
 
+// clang-format off
 layout(binding = 0) uniform UniformBufferObject {
     mat4 modelViewProjection;
     int bit8;
@@ -25,6 +26,7 @@ layout(binding = 0) uniform UniformBufferObject {
     int ditherShift;
     int ditherBufferSize;
 } ubo;
+// clang-format on
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inColor;
@@ -36,7 +38,8 @@ layout(location = 2) flat out int fragBit8;
 layout(location = 3) flat out int fragNv12;
 layout(location = 4) flat out int fragScrWidth;
 
-void main() {
+void main()
+{
     gl_Position = ubo.modelViewProjection * vec4(inPosition, 1.0);
     fragColor = inColor;
     fragTexCoord = inTexCoord;

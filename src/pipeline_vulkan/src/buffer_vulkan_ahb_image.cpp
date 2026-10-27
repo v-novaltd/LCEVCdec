@@ -35,8 +35,6 @@ BufferVulkanAhbImage::BufferVulkanAhbImage(BackendVulkan& backend, AHardwareBuff
     populateLayout(desc);
 
     if (!importAsImage(desc, ahbProps, format)) {
-        // Tear down anything we partially created so the base destructor doesn't
-        // see stale handles.
         releaseImageState();
     }
 }
@@ -70,9 +68,6 @@ bool BufferVulkanAhbImage::importAsImage(const AHardwareBuffer_Desc& desc,
     VkDevice device = m_backend.getDevice();
 
     if (format == VK_FORMAT_UNDEFINED) {
-        // Formats with no equivalent VkFormat (e.g. some YUV layouts) require
-        // an "external format" image plus a sampler ycbcr conversion. That
-        // path isn't implemented here yet.
         VNLogError("BufferVulkanAhbImage: AHB format 0x%x has no VkFormat equivalent "
                    "(external-format images are not supported)",
                    desc.format);
